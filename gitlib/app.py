@@ -185,6 +185,17 @@ def load_git_remotes(repo_path: Path) -> tuple[list[RemoteTarget], str | None]:
     return remotes, None
 
 
+def load_repo_readme(repo_path: Path) -> tuple[str | None, str | None]:
+    readme_path = repo_path / "README.md"
+    if not readme_path.exists():
+        return None, None
+
+    try:
+        return readme_path.read_text(encoding="utf-8", errors="replace"), None
+    except OSError as exc:
+        return None, str(exc)
+
+
 class GitLibApp:
     def __init__(self, config: AppConfig, store: Store) -> None:
         self.config = config
@@ -271,11 +282,15 @@ class GitLibApp:
 
     def get_repository_details(self, selector: str, refresh: bool = False) -> RepoDetails:
         repo = self.get_repository(selector, refresh=refresh)
-        remotes, remote_error = load_git_remotes(Path(repo.absolute_path))
+        repo_path = Path(repo.absolute_path)
+        remotes, remote_error = load_git_remotes(repo_path)
+        readme_markdown, readme_error = load_repo_readme(repo_path)
         return RepoDetails(
             repo=repo,
             remotes=remotes,
             remote_error=remote_error,
+            readme_markdown=readme_markdown,
+            readme_error=readme_error,
         )
 
     def save_repository_notes(self, selector: str, notes: str, refresh: bool = False) -> RepoRecord:

@@ -4,7 +4,7 @@ from rich.markup import escape
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Checkbox, Input, Static, TextArea
+from textual.widgets import Checkbox, Input, Markdown, Static, TextArea
 
 from gitlib.models import RemoteTarget, RepoDetails
 
@@ -89,8 +89,22 @@ class RepoDetailPane(Vertical):
     }
 
     #notes-editor {
-        height: 1fr;
+        height: 6;
+        min-height: 6;
+        max-height: 6;
         border: round $panel-lighten-1;
+    }
+
+    #readme-label {
+        margin-top: 1;
+    }
+
+    #readme-view {
+        height: 1fr;
+        min-height: 8;
+        border: round $panel-lighten-1;
+        overflow-y: auto;
+        padding: 0 1;
     }
     """
 
@@ -101,6 +115,8 @@ class RepoDetailPane(Vertical):
         yield Static("-", id="remote-targets")
         yield Static("Notes", id="notes-label")
         yield TextArea("", id="notes-editor")
+        yield Static("README.md", id="readme-label")
+        yield Markdown("No repository selected.", id="readme-view")
 
     def on_mount(self) -> None:
         editor = self.notes_editor
@@ -111,12 +127,18 @@ class RepoDetailPane(Vertical):
     def notes_editor(self) -> TextArea:
         return self.query_one("#notes-editor", TextArea)
 
+    @property
+    def readme_view(self) -> Markdown:
+        return self.query_one("#readme-view", Markdown)
+
     def show_repository(self, details: RepoDetails | None) -> None:
         self.query_one("#repo-summary", Static).update(format_repo_summary(details))
         self.query_one("#remote-targets", Static).update(self._format_remote_targets(details))
         notes = "" if details is None else details.repo.notes
         self.notes_editor.load_text(notes)
         self.notes_editor.read_only = True
+        self.readme_view.update(self._format_readme(details))
+        self.readme_view.scroll_home(animate=False)
 
     def set_edit_mode(self, enabled: bool) -> None:
         self.notes_editor.read_only = not enabled
@@ -129,3 +151,12 @@ class RepoDetailPane(Vertical):
         if not details.remotes:
             return "-"
         return Text("\n\n").join([format_remote_block(remote) for remote in details.remotes])
+
+    def _format_readme(self, details: RepoDetails | None) -> str:
+        if details is None:
+            return "No repository selected."
+        if details.readme_error:
+            return f"Unable to load README.md: {details.readme_error}"
+        if details.readme_markdown is None:
+            return "README.md not found."
+        return details.readme_markdown

@@ -65,6 +65,8 @@ The TUI mirrors the current CLI capabilities:
 
 - Repo list
 - Repo detail view
+- Compact notes editor
+- Scrollable rendered `README.md` preview from the repo root
 - Remote landing-page links for configured remotes
 - Refresh scan
 - Note editing
@@ -78,3 +80,6 @@ Keybindings:
 - `o` opens the preferred remote landing page in your browser
 - `Ctrl+S` saves notes
 - `Esc` cancels note editing or leaves the focused input
+
+To scroll a long `README.md`, move focus into the README pane with `Tab` or click it with
+the mouse, then use the arrow keys or normal terminal scrolling keys.

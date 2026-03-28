@@ -396,6 +396,31 @@ class GitLibTestCase(unittest.TestCase):
         self.assertEqual(diff_push_details.remotes[0].push_host, "gitlab.com")
         self.assertIsNone(with_remote_details.remote_error)
 
+    def test_repository_details_loads_root_readme(self) -> None:
+        self.write_config()
+        self.make_repo(
+            "with-readme",
+            {"README.md": "# With README\n\nThis repo has documentation.\n"},
+        )
+        self.make_repo("without-readme")
+        broken_repo = self.make_repo("broken-readme")
+        (broken_repo / "README.md").mkdir()
+
+        app = create_application(self.env())
+        app.refresh()
+
+        with_readme = app.get_repository_details("with-readme", refresh=False)
+        without_readme = app.get_repository_details("without-readme", refresh=False)
+        broken_readme = app.get_repository_details("broken-readme", refresh=False)
+
+        self.assertEqual(with_readme.readme_markdown, "# With README\n\nThis repo has documentation.\n")
+        self.assertIsNone(with_readme.readme_error)
+        self.assertIsNone(without_readme.readme_markdown)
+        self.assertIsNone(without_readme.readme_error)
+        self.assertIsNone(broken_readme.readme_markdown)
+        self.assertIsNotNone(broken_readme.readme_error)
+        self.assertIn("README.md", broken_readme.readme_error)
+
 
 if __name__ == "__main__":
     unittest.main()

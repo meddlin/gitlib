@@ -19,7 +19,7 @@ from gitlib.config import DEFAULT_IGNORE_DIRS
 TEXTUAL_AVAILABLE = importlib.util.find_spec("textual") is not None
 
 if TEXTUAL_AVAILABLE:
-    from textual.widgets import DataTable
+    from textual.widgets import DataTable, Markdown
 
     from gitlib.tui.app import GitLibTuiApp
 
@@ -92,6 +92,7 @@ class GitLibTuiTestCase(unittest.IsolatedAsyncioTestCase):
             json.dumps({"dependencies": {"react": "18.0.0"}}),
             encoding="utf-8",
         )
+        (alpha / "README.md").write_text("# Alpha\n\nAlpha docs.\n", encoding="utf-8")
         self.init_real_git_repo("beta")
 
         app = self.create_tui()
@@ -101,6 +102,8 @@ class GitLibTuiTestCase(unittest.IsolatedAsyncioTestCase):
             table = app.query_one("#repo-table", DataTable)
             self.assertEqual(table.row_count, 2)
             self.assertEqual(app.selected_relative_path, "alpha")
+            readme_view = app.detail_pane.readme_view
+            self.assertIn("# Alpha", readme_view.source)
 
             await pilot.press("down")
             await pilot.pause()
@@ -109,6 +112,7 @@ class GitLibTuiTestCase(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(app.detail_pane.notes_editor.text, "")
             summary = app.query_one("#repo-summary").renderable
             self.assertIn("remotes: none", str(summary))
+            self.assertEqual(app.detail_pane.readme_view.source, "README.md not found.")
 
     async def test_filters_update_visible_repositories(self) -> None:
         self.make_repo(
@@ -183,6 +187,76 @@ class GitLibTuiTestCase(unittest.IsolatedAsyncioTestCase):
         payload = json.loads(stdout)
         self.assertEqual(payload["notes"], "saved from tui")
 
+    async def test_readme_preview_updates_with_selection_and_refresh(self) -> None:
+        alpha = self.init_real_git_repo("alpha")
+        (alpha / "README.md").write_text("# Alpha\n\nFirst version.\n", encoding="utf-8")
+        beta = self.init_real_git_repo("beta")
+        (beta / "README.md").write_text("# Beta\n\nSecond repo.\n", encoding="utf-8")
+
+        app = self.create_tui()
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            self.assertIn("First version.", app.detail_pane.readme_view.source)
+
+            await pilot.press("down")
+            await pilot.pause()
+            self.assertIn("# Beta", app.detail_pane.readme_view.source)
+
+            (alpha / "README.md").write_text("# Alpha\n\nUpdated after refresh.\n", encoding="utf-8")
+            await pilot.press("up")
+            await pilot.pause()
+            await pilot.press("r")
+            await pilot.pause()
+
+            self.assertEqual(app.selected_relative_path, "alpha")
+            self.assertIn("Updated after refresh.", app.detail_pane.readme_view.source)
+
+    async def test_readme_preview_handles_missing_and_broken_readme(self) -> None:
+        self.init_real_git_repo("alpha")
+        broken_repo = self.init_real_git_repo("beta")
+        (broken_repo / "README.md").mkdir()
+
+        app = self.create_tui()
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            self.assertEqual(app.detail_pane.readme_view.source, "README.md not found.")
+
+            await pilot.press("down")
+            await pilot.pause()
+            self.assertIn("Unable to load README.md:", app.detail_pane.readme_view.source)
+
+    async def test_readme_preview_can_focus_scroll_and_escape(self) -> None:
+        lines = "\n".join(f"Paragraph {index}" for index in range(40))
+        alpha = self.init_real_git_repo("alpha")
+        (alpha / "README.md").write_text(f"# Alpha\n\n{lines}\n", encoding="utf-8")
+
+        app = self.create_tui()
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            readme_view = app.detail_pane.readme_view
+
+            for _ in range(4):
+                if app.focused is readme_view:
+                    break
+                await pilot.press("tab")
+                await pilot.pause()
+
+            self.assertIs(app.focused, readme_view)
+            initial_scroll = readme_view.scroll_y
+
+            for _ in range(8):
+                await pilot.press("down")
+            await pilot.pause()
+
+            self.assertGreater(readme_view.scroll_y, initial_scroll)
+
+            await pilot.press("escape")
+            await pilot.pause()
+            self.assertIs(app.focused, app.repo_table)
+
     async def test_quit_binding_exits_cleanly(self) -> None:
         self.make_repo("alpha")
         app = self.create_tui()
@@ -196,6 +270,7 @@ class GitLibTuiTestCase(unittest.IsolatedAsyncioTestCase):
     async def test_remote_status_displays_remote_targets(self) -> None:
         local_only = self.init_real_git_repo("local-only")
         with_remote = self.init_real_git_repo("with-remote")
+        (with_remote / "README.md").write_text("# With Remote\n\nRemote docs.\n", encoding="utf-8")
         subprocess.run(
             ["git", "-C", str(with_remote), "remote", "add", "origin", "https://github.com/example/origin.git"],
             check=True,
@@ -228,6 +303,7 @@ class GitLibTuiTestCase(unittest.IsolatedAsyncioTestCase):
             self.assertIn("landing page: https://github.com/example/origin", str(remote_targets))
             self.assertIn("gitlab -> GitLab (gitlab.com)", str(remote_targets))
             self.assertIn("landing page: https://gitlab.com/example/project", str(remote_targets))
+            self.assertIn("# With Remote", app.detail_pane.readme_view.source)
             self.assertEqual(local_only.name, "local-only")
 
     async def test_refresh_preserves_selection_and_remote_details(self) -> None:

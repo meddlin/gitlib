@@ -47,6 +47,8 @@ class RepoDetails:
     repo: RepoRecord
     remotes: list[RemoteTarget]
     remote_error: str | None = None
+    readme_markdown: str | None = None
+    readme_error: str | None = None
 
     @property
     def has_remotes(self) -> bool:
