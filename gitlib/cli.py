@@ -25,6 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     show_parser.add_argument("--json", action="store_true", dest="json_output")
 
     subparsers.add_parser("scan", help="Refresh repository metadata")
+    subparsers.add_parser("tui", help="Launch the interactive terminal UI")
 
     notes_parser = subparsers.add_parser("notes", help="Manage notes")
     notes_subparsers = notes_parser.add_subparsers(dest="notes_command", required=True)
@@ -74,6 +75,15 @@ def main(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = None
         if command == "scan":
             repositories = app.refresh()
             print(f"Scanned {len(repositories)} repositories.")
+            return 0
+
+        if command == "tui":
+            try:
+                from gitlib.tui import run_tui
+            except ImportError as exc:
+                print(f"Unable to start TUI: {exc}", file=sys.stderr)
+                return 1
+            run_tui(app)
             return 0
 
         if command == "notes" and args.notes_command == "edit":

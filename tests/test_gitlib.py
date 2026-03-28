@@ -4,6 +4,7 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -54,6 +55,12 @@ class GitLibTestCase(unittest.TestCase):
             target = repo_path / file_path
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(contents, encoding="utf-8")
+        return repo_path
+
+    def init_real_git_repo(self, relative_path: str) -> Path:
+        repo_path = self.git_root / relative_path
+        repo_path.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["git", "init", str(repo_path)], check=True, capture_output=True, text=True)
         return repo_path
 
     def make_dir(self, relative_path: str, files: dict[str, str] | None = None) -> Path:
@@ -242,6 +249,152 @@ class GitLibTestCase(unittest.TestCase):
         detail = json.loads(stdout)
         self.assertEqual(set(detail), set(payload[0]))
         self.assertEqual(detail["notes"], "tracked note")
+
+    def test_repository_details_reports_remote_targets(self) -> None:
+        self.write_config()
+        repo_without_remote = self.init_real_git_repo("no-remote")
+        repo_with_remote = self.init_real_git_repo("with-remotes")
+        repo_with_ssh = self.init_real_git_repo("ssh-remote")
+        repo_with_diff_push = self.init_real_git_repo("different-push")
+        repo_with_ssh_url = self.init_real_git_repo("ssh-url-remote")
+        repo_with_generic = self.init_real_git_repo("generic-remote")
+        repo_with_local_remote = self.init_real_git_repo("local-path-remote")
+        subprocess.run(
+            ["git", "-C", str(repo_with_remote), "remote", "add", "origin", "https://github.com/example/origin.git"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_with_remote), "remote", "add", "gitlab", "https://gitlab.com/example/project.git"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_with_ssh), "remote", "add", "origin", "git@github.com:owner/repo.git"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo_with_diff_push), "remote", "add", "origin", "https://github.com/example/project.git"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_with_diff_push),
+                "remote",
+                "set-url",
+                "--push",
+                "origin",
+                "https://gitlab.com/example/project.git",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_with_ssh_url),
+                "remote",
+                "add",
+                "origin",
+                "ssh://git@gitlab.example.com/group/subgroup/project.git",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_with_generic),
+                "remote",
+                "add",
+                "origin",
+                "https://code.example.com/team/project.git",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo_with_local_remote),
+                "remote",
+                "add",
+                "origin",
+                str(self.base_path / "mirrors" / "local-path-remote.git"),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        app = create_application(self.env())
+        app.refresh()
+
+        no_remote_details = app.get_repository_details("no-remote", refresh=False)
+        with_remote_details = app.get_repository_details("with-remotes", refresh=False)
+        ssh_details = app.get_repository_details("ssh-remote", refresh=False)
+        diff_push_details = app.get_repository_details("different-push", refresh=False)
+        ssh_url_details = app.get_repository_details("ssh-url-remote", refresh=False)
+        generic_details = app.get_repository_details("generic-remote", refresh=False)
+        local_path_details = app.get_repository_details("local-path-remote", refresh=False)
+
+        self.assertEqual(repo_without_remote.name, "no-remote")
+        self.assertFalse(no_remote_details.has_remotes)
+        self.assertEqual(no_remote_details.remotes, [])
+        self.assertIsNone(no_remote_details.remote_error)
+
+        self.assertTrue(with_remote_details.has_remotes)
+        self.assertEqual([remote.name for remote in with_remote_details.remotes], ["gitlab", "origin"])
+        self.assertEqual(with_remote_details.remotes[0].provider, "GitLab")
+        self.assertEqual(with_remote_details.remotes[0].host, "gitlab.com")
+        self.assertEqual(
+            with_remote_details.remotes[0].landing_page_url,
+            "https://gitlab.com/example/project",
+        )
+        self.assertEqual(with_remote_details.remotes[1].provider, "GitHub")
+        self.assertEqual(with_remote_details.remotes[1].host, "github.com")
+        self.assertEqual(
+            with_remote_details.remotes[1].landing_page_url,
+            "https://github.com/example/origin",
+        )
+        self.assertFalse(with_remote_details.remotes[1].push_differs)
+        self.assertEqual(ssh_details.remotes[0].provider, "GitHub")
+        self.assertEqual(ssh_details.remotes[0].host, "github.com")
+        self.assertEqual(ssh_details.remotes[0].landing_page_url, "https://github.com/owner/repo")
+        self.assertEqual(
+            ssh_url_details.remotes[0].landing_page_url,
+            "https://gitlab.example.com/group/subgroup/project",
+        )
+        self.assertEqual(
+            generic_details.remotes[0].landing_page_url,
+            "https://code.example.com/team/project",
+        )
+        self.assertIsNone(local_path_details.remotes[0].landing_page_url)
+        self.assertEqual(
+            diff_push_details.remotes[0].landing_page_url,
+            "https://github.com/example/project",
+        )
+        self.assertTrue(diff_push_details.remotes[0].push_differs)
+        self.assertTrue(diff_push_details.remotes[0].push_differs)
+        self.assertEqual(diff_push_details.remotes[0].provider, "GitHub")
+        self.assertEqual(diff_push_details.remotes[0].host, "github.com")
+        self.assertEqual(diff_push_details.remotes[0].push_provider, "GitLab")
+        self.assertEqual(diff_push_details.remotes[0].push_host, "gitlab.com")
+        self.assertIsNone(with_remote_details.remote_error)
 
 
 if __name__ == "__main__":
