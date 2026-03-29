@@ -10,10 +10,11 @@ import tempfile
 import textwrap
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
+from unittest.mock import patch
 
 from gitlib.app import build_nested_repo_map, create_application
 from gitlib.cli import main
-from gitlib.config import DEFAULT_IGNORE_DIRS
+from gitlib.config import ConfigError, DEFAULT_IGNORE_DIRS, load_config
 from gitlib.discovery import discover_repos
 from gitlib.scanner import scan_repo
 from gitlib.store import AmbiguousRepoSelectorError
@@ -30,23 +31,37 @@ class GitLibTestCase(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def write_config(self, roots: list[Path] | None = None) -> None:
+    def write_config(self, roots: list[Path] | None = None, vscode_command: list[str] | None = None) -> None:
         roots = roots or [self.git_root]
+        vscode_command = vscode_command or []
         self.app_home.mkdir(parents=True, exist_ok=True)
         roots_block = "\n".join(f'  "{root}",' for root in roots)
+        vscode_block = "\n".join(f'  "{part}",' for part in vscode_command)
         ignore_block = "\n".join(f'  "{item}",' for item in DEFAULT_IGNORE_DIRS)
-        config = textwrap.dedent(
-            f"""\
-            roots = [
-            {roots_block}
+        config = [
+            "roots = [",
+            roots_block,
+            "]",
+            "",
+        ]
+        if vscode_command:
+            config.extend(
+                [
+                    "vscode_command = [",
+                    vscode_block,
+                    "]",
+                    "",
+                ]
+            )
+        config.extend(
+            [
+                "ignore_dirs = [",
+                ignore_block,
+                "]",
+                "",
             ]
-
-            ignore_dirs = [
-            {ignore_block}
-            ]
-            """
         )
-        (self.app_home / "config.toml").write_text(config, encoding="utf-8")
+        (self.app_home / "config.toml").write_text("\n".join(config), encoding="utf-8")
 
     def make_repo(self, relative_path: str, files: dict[str, str] | None = None) -> Path:
         repo_path = self.git_root / relative_path
@@ -249,6 +264,181 @@ class GitLibTestCase(unittest.TestCase):
         detail = json.loads(stdout)
         self.assertEqual(set(detail), set(payload[0]))
         self.assertEqual(detail["notes"], "tracked note")
+
+    def test_config_defaults_and_custom_vscode_command(self) -> None:
+        self.write_config()
+        default_config = load_config(self.env())
+        self.assertEqual(default_config.vscode_command, ("code", "--new-window"))
+
+        self.write_config(vscode_command=["code-insiders", "--new-window"])
+        custom_config = load_config(self.env())
+        self.assertEqual(custom_config.vscode_command, ("code-insiders", "--new-window"))
+
+    def test_invalid_vscode_command_config_raises(self) -> None:
+        self.app_home.mkdir(parents=True, exist_ok=True)
+        (self.app_home / "config.toml").write_text(
+            textwrap.dedent(
+                f"""\
+                roots = [
+                  "{self.git_root}",
+                ]
+
+                vscode_command = "code --new-window"
+
+                ignore_dirs = [
+                  ".git",
+                ]
+                """
+            ),
+            encoding="utf-8",
+        )
+
+        with self.assertRaises(ConfigError):
+            load_config(self.env())
+
+    def test_open_repository_in_vscode_and_cli(self) -> None:
+        self.write_config(vscode_command=["code-insiders", "--new-window"])
+        self.make_repo("alpha")
+        repo_path = (self.git_root / "alpha").resolve(strict=False)
+
+        app = create_application(self.env())
+        app.refresh()
+
+        with patch("gitlib.app.subprocess.run") as run_mock:
+            run_mock.return_value = subprocess.CompletedProcess(
+                args=["code-insiders", "--new-window"],
+                returncode=0,
+                stdout="",
+                stderr="",
+            )
+            repository = app.open_repository_in_vscode("alpha", refresh=False)
+            self.assertEqual(repository.relative_path, "alpha")
+            run_mock.assert_called_once_with(
+                ["code-insiders", "--new-window", str(repo_path)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+        with patch("gitlib.app.subprocess.run") as run_mock:
+            run_mock.return_value = subprocess.CompletedProcess(
+                args=["code-insiders", "--new-window"],
+                returncode=0,
+                stdout="",
+                stderr="",
+            )
+            code, stdout, stderr = self.run_cli(["open", "code", "alpha"])
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(stdout.strip(), "Opened alpha in VS Code.")
+            self.assertEqual(stderr, "")
+            run_mock.assert_called_once_with(
+                ["code-insiders", "--new-window", str(repo_path)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+    def test_open_repository_in_vscode_failures_surface_cleanly(self) -> None:
+        self.write_config()
+        self.make_repo("alpha")
+
+        app = create_application(self.env())
+        app.refresh()
+
+        with patch("gitlib.app.subprocess.run", side_effect=OSError("code not found")):
+            with self.assertRaisesRegex(RuntimeError, "Unable to launch VS Code: code not found"):
+                app.open_repository_in_vscode("alpha", refresh=False)
+
+        with patch("gitlib.app.subprocess.run") as run_mock:
+            run_mock.return_value = subprocess.CompletedProcess(
+                args=["code", "--new-window"],
+                returncode=1,
+                stdout="",
+                stderr="permission denied",
+            )
+            code, stdout, stderr = self.run_cli(["open", "code", "alpha"])
+            self.assertEqual(code, 1)
+            self.assertEqual(stdout, "")
+            self.assertIn("Unable to launch VS Code: permission denied", stderr)
+
+    def test_open_repository_remote_and_cli(self) -> None:
+        self.write_config()
+        repo = self.init_real_git_repo("with-remotes")
+        subprocess.run(
+            ["git", "-C", str(repo), "remote", "add", "gitlab", "https://gitlab.com/example/project.git"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "remote", "add", "origin", "https://github.com/example/project.git"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        app = create_application(self.env())
+        app.refresh()
+
+        with patch("gitlib.app.webbrowser.open", return_value=True) as open_mock:
+            repository, remote = app.open_repository_remote("with-remotes", refresh=False)
+            self.assertEqual(repository.relative_path, "with-remotes")
+            self.assertEqual(remote.name, "origin")
+            open_mock.assert_called_once_with("https://github.com/example/project")
+
+        with patch("gitlib.app.webbrowser.open", return_value=True) as open_mock:
+            code, stdout, stderr = self.run_cli(["open", "remote", "with-remotes"])
+            self.assertEqual(code, 0, stderr)
+            self.assertEqual(stdout.strip(), "Opened origin for with-remotes.")
+            self.assertEqual(stderr, "")
+            open_mock.assert_called_once_with("https://github.com/example/project")
+
+    def test_open_repository_remote_fallback_and_failures(self) -> None:
+        self.write_config()
+        fallback_repo = self.init_real_git_repo("fallback-remote")
+        no_link_repo = self.init_real_git_repo("no-link-remote")
+        subprocess.run(
+            ["git", "-C", str(fallback_repo), "remote", "add", "gitlab", "https://gitlab.com/example/project.git"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(no_link_repo),
+                "remote",
+                "add",
+                "origin",
+                str(self.base_path / "mirrors" / "no-link-remote.git"),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        app = create_application(self.env())
+        app.refresh()
+
+        with patch("gitlib.app.webbrowser.open", return_value=True) as open_mock:
+            repository, remote = app.open_repository_remote("fallback-remote", refresh=False)
+            self.assertEqual(repository.relative_path, "fallback-remote")
+            self.assertEqual(remote.name, "gitlab")
+            open_mock.assert_called_once_with("https://gitlab.com/example/project")
+
+        with patch("gitlib.app.webbrowser.open", return_value=False):
+            with self.assertRaisesRegex(RuntimeError, "Unable to open gitlab for fallback-remote."):
+                app.open_repository_remote("fallback-remote", refresh=False)
+
+        with self.assertRaisesRegex(RuntimeError, "No remote landing page available for no-link-remote."):
+            app.open_repository_remote("no-link-remote", refresh=False)
+
+        with patch("gitlib.app.webbrowser.open", return_value=False):
+            code, stdout, stderr = self.run_cli(["open", "remote", "fallback-remote"])
+            self.assertEqual(code, 1)
+            self.assertEqual(stdout, "")
+            self.assertIn("Unable to open gitlab for fallback-remote.", stderr)
 
     def test_repository_details_reports_remote_targets(self) -> None:
         self.write_config()

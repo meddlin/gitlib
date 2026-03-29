@@ -306,6 +306,61 @@ class GitLibTuiTestCase(unittest.IsolatedAsyncioTestCase):
             self.assertIn("# With Remote", app.detail_pane.readme_view.source)
             self.assertEqual(local_only.name, "local-only")
 
+    async def test_open_vscode_launches_selected_repo(self) -> None:
+        self.make_repo("alpha")
+        app = self.create_tui()
+
+        with patch("gitlib.app.subprocess.run") as run_mock:
+            run_mock.return_value = subprocess.CompletedProcess(
+                args=["code", "--new-window"],
+                returncode=0,
+                stdout="",
+                stderr="",
+            )
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press("v")
+                await pilot.pause()
+
+                run_mock.assert_called_once_with(
+                    ["code", "--new-window", str(self.git_root / "alpha")],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                status = app.query_one("#status").renderable
+                self.assertIn("Opened alpha in VS Code.", str(status))
+
+    async def test_open_vscode_failure_does_not_crash_tui(self) -> None:
+        self.make_repo("alpha")
+        app = self.create_tui()
+
+        with patch("gitlib.app.subprocess.run") as run_mock:
+            run_mock.return_value = subprocess.CompletedProcess(
+                args=["code", "--new-window"],
+                returncode=1,
+                stdout="",
+                stderr="code command not found",
+            )
+            async with app.run_test() as pilot:
+                await pilot.pause()
+                await pilot.press("v")
+                await pilot.pause()
+
+                status = app.query_one("#status").renderable
+                self.assertIn("Unable to launch VS Code: code command not found", str(status))
+
+    async def test_open_vscode_with_no_selected_repo_shows_status(self) -> None:
+        app = self.create_tui()
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("v")
+            await pilot.pause()
+
+            status = app.query_one("#status").renderable
+            self.assertIn("No repository selected.", str(status))
+
     async def test_refresh_preserves_selection_and_remote_details(self) -> None:
         self.init_real_git_repo("alpha")
         beta = self.init_real_git_repo("beta")
@@ -432,7 +487,7 @@ class GitLibTuiTestCase(unittest.IsolatedAsyncioTestCase):
 
         app = self.create_tui()
 
-        with patch("gitlib.tui.app.webbrowser.open", return_value=True) as open_mock:
+        with patch("gitlib.app.webbrowser.open", return_value=True) as open_mock:
             async with app.run_test() as pilot:
                 await pilot.pause()
                 await pilot.press("down")
@@ -457,7 +512,7 @@ class GitLibTuiTestCase(unittest.IsolatedAsyncioTestCase):
 
         app = self.create_tui()
 
-        with patch("gitlib.tui.app.webbrowser.open", return_value=True) as open_mock:
+        with patch("gitlib.app.webbrowser.open", return_value=True) as open_mock:
             async with app.run_test() as pilot:
                 await pilot.pause()
                 await pilot.press("down")
@@ -506,7 +561,7 @@ class GitLibTuiTestCase(unittest.IsolatedAsyncioTestCase):
             status = app.query_one("#status").renderable
             self.assertIn("No remote landing page available for beta.", str(status))
 
-            with patch("gitlib.tui.app.webbrowser.open", return_value=False) as open_mock:
+            with patch("gitlib.app.webbrowser.open", return_value=False) as open_mock:
                 await pilot.press("down")
                 await pilot.pause()
                 await pilot.press("o")

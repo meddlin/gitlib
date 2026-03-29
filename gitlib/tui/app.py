@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import webbrowser
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -9,7 +8,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Checkbox, DataTable, Footer, Header, Input, Static
 
 from gitlib.app import GitLibApp
-from gitlib.models import RemoteTarget, RepoDetails, RepoRecord
+from gitlib.models import RepoDetails, RepoRecord
 from gitlib.store import RepoSelectorError
 from gitlib.tui.widgets import RepoDetailPane, RepoFilterBar
 
@@ -77,6 +76,7 @@ class GitLibTuiApp(App[None]):
         Binding("r", "refresh_data", "Refresh"),
         Binding("/", "focus_search", "Search"),
         Binding("e", "edit_notes", "Edit"),
+        Binding("v", "open_vscode", "VS Code"),
         Binding("o", "open_remote", "Open Remote"),
         Binding("ctrl+s", "save_notes", "Save"),
         Binding("escape", "escape", "Cancel"),
@@ -235,15 +235,6 @@ class GitLibTuiApp(App[None]):
                 return repo
         return None
 
-    def _preferred_remote(self, details: RepoDetails) -> RemoteTarget | None:
-        for remote in details.remotes:
-            if remote.name == "origin" and remote.landing_page_url:
-                return remote
-        for remote in details.remotes:
-            if remote.landing_page_url:
-                return remote
-        return None
-
     def _show_repository(self, repo: RepoRecord | None) -> None:
         if repo is None:
             self.selected_relative_path = None
@@ -320,33 +311,33 @@ class GitLibTuiApp(App[None]):
         self.repo_table.focus()
         self.set_status(f"Saved notes for {repo.relative_path}.")
 
+    def action_open_vscode(self) -> None:
+        repo = self._selected_repository()
+        if repo is None:
+            self.set_status("No repository selected.")
+            return
+
+        try:
+            repository = self.gitlib.open_repository_in_vscode(repo.relative_path, refresh=False)
+        except RuntimeError as exc:
+            self.set_status(str(exc))
+            return
+
+        self.set_status(f"Opened {repository.relative_path} in VS Code.")
+
     def action_open_remote(self) -> None:
         repo = self._selected_repository()
         if repo is None:
             self.set_status("No repository selected.")
             return
 
-        details = self._details_for_repository(repo)
-        if details.remote_error:
-            self.set_status(f"Remote links unavailable for {repo.relative_path}: {details.remote_error}")
-            return
-
-        remote = self._preferred_remote(details)
-        if remote is None or remote.landing_page_url is None:
-            self.set_status(f"No remote landing page available for {repo.relative_path}.")
-            return
-
         try:
-            opened = webbrowser.open(remote.landing_page_url)
-        except (OSError, webbrowser.Error) as exc:
-            self.set_status(f"Unable to open {remote.name} for {repo.relative_path}: {exc}")
+            repository, remote = self.gitlib.open_repository_remote(repo.relative_path, refresh=False)
+        except RuntimeError as exc:
+            self.set_status(str(exc))
             return
 
-        if not opened:
-            self.set_status(f"Unable to open {remote.name} for {repo.relative_path}.")
-            return
-
-        self.set_status(f"Opened {remote.name} for {repo.relative_path}.")
+        self.set_status(f"Opened {remote.name} for {repository.relative_path}.")
 
     def action_escape(self) -> None:
         if self.edit_mode:
