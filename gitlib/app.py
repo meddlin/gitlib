@@ -6,6 +6,7 @@ import re
 import subprocess
 from typing import Mapping
 from urllib.parse import urlsplit
+import webbrowser
 
 from gitlib.config import AppConfig, load_config
 from gitlib.discovery import discover_repos
@@ -196,6 +197,16 @@ def load_repo_readme(repo_path: Path) -> tuple[str | None, str | None]:
         return None, str(exc)
 
 
+def select_preferred_remote(remotes: list[RemoteTarget]) -> RemoteTarget | None:
+    for remote in remotes:
+        if remote.name == "origin" and remote.landing_page_url:
+            return remote
+    for remote in remotes:
+        if remote.landing_page_url:
+            return remote
+    return None
+
+
 class GitLibApp:
     def __init__(self, config: AppConfig, store: Store) -> None:
         self.config = config
@@ -292,6 +303,47 @@ class GitLibApp:
             readme_markdown=readme_markdown,
             readme_error=readme_error,
         )
+
+    def open_repository_in_vscode(self, selector: str, refresh: bool = False) -> RepoRecord:
+        repo = self.get_repository(selector, refresh=refresh)
+        command = [*self.config.vscode_command, repo.absolute_path]
+
+        try:
+            result = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except OSError as exc:
+            raise RuntimeError(f"Unable to launch VS Code: {exc}") from exc
+
+        if result.returncode != 0:
+            message = result.stderr.strip() or result.stdout.strip() or f"command exited with status {result.returncode}"
+            raise RuntimeError(f"Unable to launch VS Code: {message}")
+
+        return repo
+
+    def open_repository_remote(self, selector: str, refresh: bool = False) -> tuple[RepoRecord, RemoteTarget]:
+        details = self.get_repository_details(selector, refresh=refresh)
+        repo = details.repo
+
+        if details.remote_error:
+            raise RuntimeError(f"Remote links unavailable for {repo.relative_path}: {details.remote_error}")
+
+        remote = select_preferred_remote(details.remotes)
+        if remote is None or remote.landing_page_url is None:
+            raise RuntimeError(f"No remote landing page available for {repo.relative_path}.")
+
+        try:
+            opened = webbrowser.open(remote.landing_page_url)
+        except (OSError, webbrowser.Error) as exc:
+            raise RuntimeError(f"Unable to open {remote.name} for {repo.relative_path}: {exc}") from exc
+
+        if not opened:
+            raise RuntimeError(f"Unable to open {remote.name} for {repo.relative_path}.")
+
+        return repo, remote
 
     def save_repository_notes(self, selector: str, notes: str, refresh: bool = False) -> RepoRecord:
         if refresh:

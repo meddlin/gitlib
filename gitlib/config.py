@@ -9,6 +9,7 @@ from typing import Mapping
 
 
 DEFAULT_ROOTS = ("~/git",)
+DEFAULT_VSCODE_COMMAND = ("code", "--new-window")
 DEFAULT_IGNORE_DIRS = (
     ".git",
     "node_modules",
@@ -35,6 +36,7 @@ class AppConfig:
     config_path: Path
     db_path: Path
     roots: tuple[Path, ...]
+    vscode_command: tuple[str, ...]
     ignore_dirs: frozenset[str]
 
 
@@ -48,11 +50,16 @@ def get_app_home(env: Mapping[str, str] | None = None) -> Path:
 
 def _default_config_text() -> str:
     roots = "\n".join(f'  "{root}",' for root in DEFAULT_ROOTS)
+    vscode_command = "\n".join(f'  "{part}",' for part in DEFAULT_VSCODE_COMMAND)
     ignore_dirs = "\n".join(f'  "{name}",' for name in DEFAULT_IGNORE_DIRS)
     return textwrap.dedent(
         f"""\
         roots = [
         {roots}
+        ]
+
+        vscode_command = [
+        {vscode_command}
         ]
 
         ignore_dirs = [
@@ -88,10 +95,17 @@ def load_config(env: Mapping[str, str] | None = None) -> AppConfig:
         raise ConfigError(f"Unable to load config at {config_path}: {exc}") from exc
 
     roots_raw = data.get("roots", list(DEFAULT_ROOTS))
+    vscode_command_raw = data.get("vscode_command", list(DEFAULT_VSCODE_COMMAND))
     ignore_dirs_raw = data.get("ignore_dirs", list(DEFAULT_IGNORE_DIRS))
 
     if not isinstance(roots_raw, list) or not all(isinstance(item, str) for item in roots_raw):
         raise ConfigError(f"Config key 'roots' must be a list of strings in {config_path}")
+    if (
+        not isinstance(vscode_command_raw, list)
+        or not vscode_command_raw
+        or not all(isinstance(item, str) for item in vscode_command_raw)
+    ):
+        raise ConfigError(f"Config key 'vscode_command' must be a non-empty list of strings in {config_path}")
     if not isinstance(ignore_dirs_raw, list) or not all(
         isinstance(item, str) for item in ignore_dirs_raw
     ):
@@ -104,5 +118,6 @@ def load_config(env: Mapping[str, str] | None = None) -> AppConfig:
         config_path=config_path,
         db_path=db_path,
         roots=tuple(_normalize_root(item, config_path) for item in roots_raw),
+        vscode_command=tuple(vscode_command_raw),
         ignore_dirs=frozenset(ignore_dirs_raw),
     )

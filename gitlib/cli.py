@@ -26,6 +26,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("scan", help="Refresh repository metadata")
     subparsers.add_parser("tui", help="Launch the interactive terminal UI")
+    open_parser = subparsers.add_parser("open", help="Open repositories in external tools")
+    open_subparsers = open_parser.add_subparsers(dest="open_command", required=True)
+    open_code_parser = open_subparsers.add_parser("code", help="Open a repository in VS Code")
+    open_code_parser.add_argument("repo")
+    open_remote_parser = open_subparsers.add_parser("remote", help="Open a repository remote in your browser")
+    open_remote_parser.add_argument("repo")
 
     notes_parser = subparsers.add_parser("notes", help="Manage notes")
     notes_subparsers = notes_parser.add_subparsers(dest="notes_command", required=True)
@@ -84,6 +90,16 @@ def main(argv: Sequence[str] | None = None, env: Mapping[str, str] | None = None
                 print(f"Unable to start TUI: {exc}", file=sys.stderr)
                 return 1
             run_tui(app)
+            return 0
+
+        if command == "open" and args.open_command == "code":
+            repository = app.open_repository_in_vscode(args.repo, refresh=True)
+            print(f"Opened {repository.relative_path} in VS Code.")
+            return 0
+
+        if command == "open" and args.open_command == "remote":
+            repository, remote = app.open_repository_remote(args.repo, refresh=True)
+            print(f"Opened {remote.name} for {repository.relative_path}.")
             return 0
 
         if command == "notes" and args.notes_command == "edit":

@@ -38,6 +38,8 @@ These commands are implemented today:
 gitlib list [--tech TAG] [--notes-only] [--json]
 gitlib show <repo> [--json]
 gitlib scan
+gitlib open code <repo>
+gitlib open remote <repo>
 gitlib tui
 gitlib notes edit <repo>
 ```
@@ -50,6 +52,8 @@ Command summary:
 - `gitlib list --json` returns machine-readable output.
 - `gitlib show <repo>` shows details for one repo.
 - `gitlib scan` refreshes repo discovery and technology metadata.
+- `gitlib open code <repo>` opens the repo root in a new VS Code window.
+- `gitlib open remote <repo>` opens the preferred configured remote in your browser.
 - `gitlib tui` launches the interactive terminal UI.
 - `gitlib notes edit <repo>` opens your configured editor to update repo notes.
 
@@ -77,9 +81,56 @@ Keybindings:
 - `r` refreshes repo data and runs a scan
 - `/` focuses search
 - `e` enters notes edit mode
+- `v` opens the selected repo in VS Code
 - `o` opens the preferred remote landing page in your browser
 - `Ctrl+S` saves notes
 - `Esc` cancels note editing or leaves the focused input
 
 To scroll a long `README.md`, move focus into the README pane with `Tab` or click it with
 the mouse, then use the arrow keys or normal terminal scrolling keys.
+
+## VS Code Launcher
+
+Gitlib defaults to launching VS Code with:
+
+```toml
+vscode_command = ["code", "--new-window"]
+```
+
+You can change that in `~/.git-library/config.toml` if you use another build, for example:
+
+```toml
+vscode_command = ["code-insiders", "--new-window"]
+```
+
+The default requires the `code` shell command to be installed and available on `PATH`.
+
+### How to Configure
+
+Your `~/.git-library/config.toml` needs:
+
+```
+roots = [
+    "~/git",
+]
+
+vscode_command = [
+    "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+    "--new-window",
+]
+
+ignore_dirs = [
+    ".git",
+    "node_modules",
+    ".next",
+    "dist",
+    "build",
+    "venv",
+    "env",
+    "obj",
+    "bin",
+    "lib",
+    "include",
+    ".pytest_cache",
+      ]
+```
