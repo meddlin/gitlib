@@ -104,3 +104,33 @@ vscode_command = ["code-insiders", "--new-window"]
 ```
 
 The default requires the `code` shell command to be installed and available on `PATH`.
+
+### How to Configure
+
+Your `~/.git-library/config.toml` needs:
+
+```
+roots = [
+    "~/git",
+]
+
+vscode_command = [
+    "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code",
+    "--new-window",
+]
+
+ignore_dirs = [
+    ".git",
+    "node_modules",
+    ".next",
+    "dist",
+    "build",
+    "venv",
+    "env",
+    "obj",
+    "bin",
+    "lib",
+    "include",
+    ".pytest_cache",
+      ]
+```
