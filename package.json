@@ -1,0 +1,30 @@
+{
+  "name": "gitlib-monorepo",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Local-first tooling for managing Git repositories.",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p apps/web/tsconfig.json",
+    "test": "vitest run",
+    "gitlib": "tsx apps/cli/src/bin.ts",
+    "web": "npm run dev -w @gitlib/web"
+  },
+  "devDependencies": {
+    "@types/marked-terminal": "^6.1.1",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "tsup": "^9.0.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.5"
+  }
+}

@@ -8,27 +8,77 @@ for each project without depending on GitHub.
 
 On first run, Gitlib bootstraps its local app data in `~/.git-library/`.
 
-## Run the App
+## Project Layout
 
-Run it directly from the repository:
+Gitlib is an npm-workspaces monorepo written entirely in TypeScript:
 
-```bash
-python3 -m gitlib list
-python3 -m gitlib tui
+```text
+apps/
+  cli/    gitlib       – the `gitlib` command and the Ink-based terminal UI
+  web/    @gitlib/web  – TanStack Start web app (Tailwind + shadcn/ui)
+packages/
+  core/   @gitlib/core – discovery, tech scanning, SQLite store, config, remotes (UI-agnostic)
 ```
 
-Or install it in editable mode and use the `gitlib` command:
+Apps are deployable entry points; packages are libraries they share. `@gitlib/core` has no
+terminal or browser dependencies, so the CLI and the web app both build on it. Its data types
+are plain camelCase objects.
+
+## Run the App
+
+Requires Node.js 24 or newer (the store uses the built-in `node:sqlite` module).
 
 ```bash
-pip install -e .
+npm install
+```
+
+Run it directly from source:
+
+```bash
+npm run gitlib -- list
+npm run gitlib -- tui
+```
+
+Or build it and use the `gitlib` command:
+
+```bash
+npm run build
+npm link -w gitlib   # puts `gitlib` on your PATH
 gitlib list
 gitlib tui
 ```
 
+Other scripts:
+
+```bash
+npm test             # vitest, all packages
+npm run typecheck    # tsc --noEmit across the workspace
+```
+
 Operational notes:
 
-- First run creates `~/.git-library/` for config and SQLite data.
+- First run creates `~/.git-library/` for config and SQLite data (override with `GITLIB_HOME`).
 - The default scan root is `~/git`.
+- The SQLite schema is unchanged from the original Python version, so an existing
+  `~/.git-library/gitlib.db` keeps working.
+
+## Web App
+
+`apps/web/` is a [TanStack Start](https://tanstack.com/start) app that reads the same
+`~/.git-library` data as the CLI (via `@gitlib/core`, on the server only):
+
+```bash
+npm run web          # dev server at http://localhost:3000
+npm run build -w @gitlib/web && npm run preview -w @gitlib/web   # production build
+```
+
+- Lists every git repo found under your configured scan roots (scanned on first load; use
+  **Rescan** after adding repos).
+- Add or edit a short **description** per repo. It is stored in the shared SQLite database
+  (`repo_descriptions` table) and is searchable.
+- Cards highlight each repo's detected **languages and frameworks** (colour-coded by
+  language / framework / runtime / tooling). Click any badge, or one of the chips under the
+  search box, to filter; filters live in the URL (`?q=…&tech=…`).
 
 ## Current CLI Commands
 
@@ -86,8 +136,27 @@ Keybindings:
 - `Ctrl+S` saves notes
 - `Esc` cancels note editing or leaves the focused input
 
-To scroll a long `README.md`, move focus into the README pane with `Tab` or click it with
-the mouse, then use the arrow keys or normal terminal scrolling keys.
+- `Tab` / `Shift+Tab` cycle focus: repo list, README pane, search, technology filter, notes-only checkbox
+- Arrow keys, `PgUp`/`PgDn`, `Home` and `End` move through the repo list or scroll the README
+  (whichever has focus)
+- `Space` or `Enter` toggles the "Notes only" checkbox when it has focus
+
+To scroll a long `README.md`, press `Tab` once to move focus into the README pane, then use
+the arrow keys or `PgUp`/`PgDn`. Press `Esc` to return to the repo list.
+
+### Mouse
+
+The TUI enables terminal mouse reporting, so you can:
+
+- click a repo row to select it, and click the search / technology fields, the "Notes only"
+  checkbox, or the README pane to focus them
+- click the Notes box to start editing, then click inside it to place the cursor
+- click the shortcut bar at the bottom (Refresh, Search, Edit, VS Code, Open Remote, Save,
+  Cancel, Quit) instead of using the keys
+- scroll the wheel over the repo list (moves the selection) or the README / notes
+
+While mouse reporting is on, most terminals need **Shift** (Option on macOS Terminal/iTerm2)
+held to select text with the mouse. Keyboard control is unchanged.
 
 ## VS Code Launcher
 
@@ -132,5 +201,5 @@ ignore_dirs = [
     "lib",
     "include",
     ".pytest_cache",
-      ]
+]
 ```
