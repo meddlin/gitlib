@@ -1,0 +1,28 @@
+{
+  "name": "gitlib",
+  "version": "0.1.0",
+  "description": "Local-first CLI for managing Git repositories.",
+  "type": "module",
+  "bin": {
+    "gitlib": "./dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx src/bin.ts"
+  },
+  "dependencies": {
+    "@gitlib/core": "*",
+    "commander": "^15.0.0",
+    "ink": "^8.0.0",
+    "marked": "^15.0.0",
+    "marked-terminal": "^7.3.0",
+    "react": "^19.3.1",
+    "smol-toml": "^1.9.1"
+  }
+}
