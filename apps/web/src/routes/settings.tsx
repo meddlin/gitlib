@@ -1,6 +1,5 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
-import { ArrowLeft, Check } from "lucide-react";
-import { Button } from "#/components/ui/button";
+import { createFileRoute } from "@tanstack/react-router";
+import { Check } from "lucide-react";
 import { cn } from "#/lib/utils";
 import { THEMES, useTheme, type ThemeId } from "#/lib/themes";
 
@@ -13,13 +12,8 @@ function Settings() {
   const [theme, setTheme] = useTheme();
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-3xl flex-col gap-8 px-4 py-8 sm:px-6">
-      <header className="flex flex-col gap-3">
-        <Button asChild variant="ghost" size="sm" className="-ml-2.5 self-start">
-          <Link to="/">
-            <ArrowLeft aria-hidden /> Repositories
-          </Link>
-        </Button>
+    <div className="mx-auto flex w-full flex-1 max-w-3xl flex-col gap-8 px-4 py-8 sm:px-6">
+      <header>
         <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
       </header>
 
