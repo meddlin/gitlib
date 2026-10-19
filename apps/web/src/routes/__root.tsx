@@ -1,9 +1,7 @@
-import { HeadContent, Scripts, createRootRoute } from "@tanstack/react-router";
+import { HeadContent, Outlet, Scripts, createRootRoute } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { THEME_SCRIPT, useThemeSync } from "#/lib/themes";
 import appCss from "../styles.css?url";
-
-// Follow the OS colour scheme before first paint to avoid a light/dark flash.
-const THEME_SCRIPT = `document.documentElement.classList.toggle("dark", matchMedia("(prefers-color-scheme: dark)").matches)`;
 
 export const Route = createRootRoute({
   head: () => ({
@@ -15,7 +13,13 @@ export const Route = createRootRoute({
     links: [{ rel: "stylesheet", href: appCss }],
   }),
   shellComponent: RootDocument,
+  component: RootComponent,
 });
+
+function RootComponent() {
+  useThemeSync();
+  return <Outlet />;
+}
 
 function RootDocument({ children }: { children: ReactNode }) {
   return (

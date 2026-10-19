@@ -1,5 +1,5 @@
-import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { RefreshCw, Search, X } from "lucide-react";
+import { Link, createFileRoute, useRouter } from "@tanstack/react-router";
+import { RefreshCw, Search, Settings, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RepoPreview } from "#/components/repo-preview";
 import { RepoTable, sortRepos, type Sort, type SortKey } from "#/components/repo-table";
@@ -121,15 +121,24 @@ function RepoLibrary() {
             ) : null}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={rescan}
-          disabled={scanning}
-          className="inline-flex h-8 items-center gap-1.5 border px-3 text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-        >
-          <RefreshCw className={cn("size-3.5", scanning && "animate-spin")} aria-hidden />
-          {scanning ? "Scanning…" : "Rescan"}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={rescan}
+            disabled={scanning}
+            className="inline-flex h-8 items-center gap-1.5 border px-3 text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+          >
+            <RefreshCw className={cn("size-3.5", scanning && "animate-spin")} aria-hidden />
+            {scanning ? "Scanning…" : "Rescan"}
+          </button>
+          <Link
+            to="/settings"
+            aria-label="Settings"
+            className="inline-flex h-8 items-center border px-2.5 outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Settings className="size-3.5" aria-hidden />
+          </Link>
+        </div>
       </header>
 
       <div className="flex flex-col gap-3">

@@ -79,6 +79,10 @@ npm run build -w @gitlib/web && npm run preview -w @gitlib/web   # production bu
 - Cards highlight each repo's detected **languages and frameworks** (colour-coded by
   language / framework / runtime / tooling). Click any badge, or one of the chips under the
   search box, to filter; filters live in the URL (`?q=…&tech=…`).
+- The **Settings** page (gear icon, `/settings`) picks a colour scheme: System (follows the
+  OS), Light, Dark, or one of the generated Ocean, Forest, Sunset and Orchid schemes. The
+  choice is saved in the browser's `localStorage`. Palettes are defined in
+  `apps/web/src/styles.css`; add a scheme there and in `apps/web/src/lib/themes.ts`.
 
 ## Current CLI Commands
 
