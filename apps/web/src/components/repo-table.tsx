@@ -1,8 +1,10 @@
-import { ArrowDown, ArrowUp, ArrowUpDown, Pencil } from "lucide-react";
+import { useRouter } from "@tanstack/react-router";
+import { useState } from "react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Pencil, Star } from "lucide-react";
 import { DescriptionDialog } from "#/components/description-dialog";
 import { TechBadge } from "#/components/tech-badge";
 import { cn } from "#/lib/utils";
-import type { RepoView } from "#/server/repos";
+import { setFavorite, type RepoView } from "#/server/repos";
 
 export type SortKey = "name" | "description" | "stack" | "scanned";
 export type SortDir = "asc" | "desc";
@@ -21,6 +23,7 @@ function orderedTech(repo: RepoView) {
 
 const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
 
+/** Sorts by the chosen column, but always lists favorites ahead of everything else. */
 export function sortRepos(repos: RepoView[], { key, dir }: Sort): RepoView[] {
   const value = (repo: RepoView): string => {
     switch (key) {
@@ -36,6 +39,7 @@ export function sortRepos(repos: RepoView[], { key, dir }: Sort): RepoView[] {
   };
   const sign = dir === "asc" ? 1 : -1;
   return [...repos].sort((a, b) => {
+    if (a.isFavorite !== b.isFavorite) return a.isFavorite ? -1 : 1;
     const [va, vb] = [value(a), value(b)];
     // Empty values always sink to the bottom, whichever way we sort.
     if (!va !== !vb) return va ? -1 : 1;
@@ -86,6 +90,38 @@ function SortHeader({
   );
 }
 
+function FavoriteButton({ repo }: { repo: RepoView }) {
+  const router = useRouter();
+  const [pending, setPending] = useState(false);
+
+  async function toggle() {
+    setPending(true);
+    try {
+      await setFavorite({ data: { relativePath: repo.relativePath, favorite: !repo.isFavorite } });
+      await router.invalidate();
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      disabled={pending}
+      aria-pressed={repo.isFavorite}
+      aria-label={`${repo.isFavorite ? "Remove" : "Add"} ${repo.name} ${repo.isFavorite ? "from" : "to"} favorites`}
+      title={repo.isFavorite ? "Remove from favorites" : "Add to favorites"}
+      className={cn(
+        "inline-flex size-7 items-center justify-center outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+        repo.isFavorite ? "text-amber-500" : "text-muted-foreground/50 hover:text-foreground",
+      )}
+    >
+      <Star className={cn("size-3.5", repo.isFavorite && "fill-current")} aria-hidden />
+    </button>
+  );
+}
+
 export function RepoTable({
   repos,
   sort,
@@ -108,6 +144,9 @@ export function RepoTable({
       <table className="w-full min-w-176 table-fixed border-collapse text-sm">
         <thead className="border-b">
           <tr>
+            <th scope="col" className="w-10 px-3">
+              <span className="sr-only">Favorite</span>
+            </th>
             <SortHeader label="Repository" column="name" sort={sort} onSort={onSort} className="w-[26%]" />
             <SortHeader label="Description" column="description" sort={sort} onSort={onSort} className="w-[34%]" />
             <SortHeader label="Stack" column="stack" sort={sort} onSort={onSort} className="w-[28%]" />
@@ -133,6 +172,9 @@ export function RepoTable({
                 selectedPath === repo.relativePath && "bg-accent",
               )}
             >
+              <td className="px-3 py-2">
+                <FavoriteButton repo={repo} />
+              </td>
               <td className="px-3 py-3">
                 {/* The real button gives keyboard users a way in; mouse clicks anywhere on the row land on the row. */}
                 <button

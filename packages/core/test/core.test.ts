@@ -241,6 +241,27 @@ describe("application", () => {
     expect(createApplication(fx.env()).getRepository("alpha").description).toBe("");
   });
 
+  it("persists favorites across rescans and restarts", () => {
+    fx.writeConfig();
+    fx.makeRepo("alpha");
+    fx.makeRepo("beta");
+    const app = createApplication(fx.env());
+    app.refresh();
+
+    expect(app.getRepository("alpha").isFavorite).toBe(false);
+    expect(app.saveRepositoryFavorite("beta", true).isFavorite).toBe(true);
+    expect(app.saveRepositoryFavorite("beta", true).isFavorite).toBe(true);
+
+    app.refresh();
+    const reopened = createApplication(fx.env());
+    expect(reopened.loadRepositories().map((r) => [r.relativePath, r.isFavorite])).toEqual([
+      ["alpha", false],
+      ["beta", true],
+    ]);
+
+    expect(reopened.saveRepositoryFavorite("beta", false).isFavorite).toBe(false);
+  });
+
   it("persists notes", () => {
     fx.writeConfig();
     fx.makeRepo("alpha");

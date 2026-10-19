@@ -212,6 +212,13 @@ export class GitLibApp {
     return this.store.resolveRepository(selector);
   }
 
+  saveRepositoryFavorite(selector: string, favorite: boolean, refresh = false): RepoRecord {
+    if (refresh) this.refresh();
+    const repo = this.store.resolveRepository(selector);
+    this.store.updateFavorite(repo.id, favorite);
+    return this.store.resolveRepository(selector);
+  }
+
   editRepositoryNotes(selector: string, notes: string): RepoRecord {
     return this.saveRepositoryNotes(selector, notes, true);
   }

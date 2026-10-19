@@ -15,6 +15,7 @@ export interface RepoView {
   description: string;
   hasNotes: boolean;
   isWorktree: boolean;
+  isFavorite: boolean;
   lastScannedAt: string | null;
   technologies: TechnologyView[];
 }
@@ -37,6 +38,7 @@ function listing(force: boolean): RepoListing {
       description: repo.description,
       hasNotes: repo.hasNotes,
       isWorktree: repo.isWorktree,
+      isFavorite: repo.isFavorite,
       lastScannedAt: repo.lastScannedAt,
       technologies: repo.technologies.map((name) => ({ name, category: technologyCategory(name) })),
     }),
@@ -61,6 +63,18 @@ export const saveDescription = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     const repo = getApp().saveRepositoryDescription(data.relativePath, data.description);
     return { relativePath: repo.relativePath, description: repo.description };
+  });
+
+export const setFavorite = createServerFn({ method: "POST" })
+  .validator((input: { relativePath: string; favorite: boolean }) => {
+    if (typeof input?.relativePath !== "string" || typeof input?.favorite !== "boolean") {
+      throw new Error("Invalid favorite payload.");
+    }
+    return input;
+  })
+  .handler(async ({ data }) => {
+    const repo = getApp().saveRepositoryFavorite(data.relativePath, data.favorite);
+    return { relativePath: repo.relativePath, isFavorite: repo.isFavorite };
   });
 
 export interface ReadmeView {

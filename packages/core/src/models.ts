@@ -18,6 +18,8 @@ export interface RepoRecord {
   isMissing: boolean;
   /** A linked `git worktree` checkout; hidden from listings unless worktrees are requested. */
   isWorktree: boolean;
+  /** Pinned by the user; clients list favorites ahead of other repos. */
+  isFavorite: boolean;
   technologies: string[];
   notes: string;
   hasNotes: boolean;
