@@ -11,6 +11,7 @@
     "node": ">=24"
   },
   "dependencies": {
+    "meilisearch": "^0.62.0",
     "smol-toml": "^1.9.1"
   }
 }

@@ -22,9 +22,21 @@ export const DEFAULT_IGNORE_DIRS = [
   ".pytest_cache",
 ] as const;
 
+export const DEFAULT_SEARCH_HOST = "http://127.0.0.1:7700";
+export const DEFAULT_SEARCH_INDEX = "gitlib_repos";
+
 export class ConfigError extends GitLibError {}
 
 export type Env = Readonly<Record<string, string | undefined>>;
+
+/** Where to find the Meilisearch server that backs full-text search. */
+export interface SearchConfig {
+  /** When false, Meilisearch is never contacted and search uses plain substring matching. */
+  enabled: boolean;
+  host: string;
+  apiKey: string | null;
+  indexName: string;
+}
 
 export interface AppConfig {
   appHome: string;
@@ -33,6 +45,7 @@ export interface AppConfig {
   roots: string[];
   vscodeCommand: string[];
   ignoreDirs: ReadonlySet<string>;
+  search: SearchConfig;
 }
 
 export function getAppHome(env: Env = process.env): string {
@@ -77,6 +90,33 @@ function isStringList(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === "string");
 }
 
+function loadSearchConfig(raw: unknown, env: Env, configPath: string): SearchConfig {
+  if (raw !== undefined && (typeof raw !== "object" || raw === null || Array.isArray(raw))) {
+    throw new ConfigError(`Config key 'search' must be a table in ${configPath}`);
+  }
+  const table = (raw ?? {}) as Record<string, unknown>;
+
+  const string = (key: string): string | undefined => {
+    const value = table[key];
+    if (value === undefined) return undefined;
+    if (typeof value !== "string") {
+      throw new ConfigError(`Config key 'search.${key}' must be a string in ${configPath}`);
+    }
+    return value;
+  };
+
+  const enabled = table["enabled"] ?? true;
+  if (typeof enabled !== "boolean") {
+    throw new ConfigError(`Config key 'search.enabled' must be true or false in ${configPath}`);
+  }
+
+  const host = (env["GITLIB_MEILI_HOST"] || string("host") || DEFAULT_SEARCH_HOST).trim();
+  const apiKey = (env["GITLIB_MEILI_API_KEY"] || string("api_key") || "").trim();
+  const indexName = (string("index") || DEFAULT_SEARCH_INDEX).trim();
+
+  return { enabled, host, apiKey: apiKey || null, indexName };
+}
+
 export function loadConfig(env: Env = process.env): AppConfig {
   const appHome = getAppHome(env);
   const configPath = path.join(appHome, "config.toml");
@@ -117,5 +157,6 @@ export function loadConfig(env: Env = process.env): AppConfig {
     roots: rootsRaw.map((item) => normalizeRoot(item, configPath)),
     vscodeCommand: vscodeCommandRaw,
     ignoreDirs: new Set(ignoreDirsRaw),
+    search: loadSearchConfig(data["search"], env, configPath),
   };
 }

@@ -3,6 +3,8 @@ import { createApplication, type GitLibApp } from "@gitlib/core";
 interface GitLibState {
   app?: GitLibApp;
   scanned: boolean;
+  /** The search index build currently in flight, if any. */
+  indexing?: Promise<void>;
 }
 
 // Kept on globalThis so dev-server module reloads reuse one app (and one scan).
@@ -22,4 +24,33 @@ export function loadRepositories(force = false) {
     return repositories;
   }
   return app.loadRepositories();
+}
+
+/**
+ * Like `loadRepositories`, but also refreshes the search index whenever disk was scanned. Indexing
+ * never blocks or breaks the page: the first load indexes in the background, and an explicit
+ * rescan waits so the results that follow are current.
+ */
+export async function loadAndIndexRepositories(force = false) {
+  const alreadyScanned = state.scanned;
+  const repositories = loadRepositories(force);
+  if (force || !alreadyScanned) {
+    const indexing = getApp()
+      .reindexSearch()
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        if (getApp().search.enabled) console.warn("Search index not updated:", error instanceof Error ? error.message : error);
+      })
+      .finally(() => {
+        if (state.indexing === indexing) state.indexing = undefined;
+      });
+    state.indexing = indexing;
+    if (force) await indexing;
+  }
+  return repositories;
+}
+
+/** Resolves once any index build in flight has finished, so a search never races the first build. */
+export async function settleIndexing(): Promise<void> {
+  await state.indexing;
 }

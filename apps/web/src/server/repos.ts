@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { technologyCategory, type TechnologyCategory } from "@gitlib/core";
-import { getApp, loadRepositories } from "./gitlib.server";
+import { getApp, loadAndIndexRepositories } from "./gitlib.server";
 
 export interface TechnologyView {
   name: string;
@@ -25,9 +25,9 @@ export interface RepoListing {
 
 export const MAX_DESCRIPTION_LENGTH = 500;
 
-function listing(force: boolean): RepoListing {
+async function listing(force: boolean): Promise<RepoListing> {
   const app = getApp();
-  const repos = loadRepositories(force).map(
+  const repos = (await loadAndIndexRepositories(force)).map(
     (repo): RepoView => ({
       id: repo.id,
       name: repo.name,
@@ -57,6 +57,13 @@ export const saveDescription = createServerFn({ method: "POST" })
     return input;
   })
   .handler(async ({ data }) => {
-    const repo = getApp().saveRepositoryDescription(data.relativePath, data.description);
+    const app = getApp();
+    const repo = app.saveRepositoryDescription(data.relativePath, data.description);
+    if (app.search.enabled) {
+      // Best effort: the description is saved either way, and a rescan or `gitlib reindex` catches up.
+      await app.syncRepositorySearch(repo.relativePath).catch((error: unknown) => {
+        console.warn("Search index not updated:", error instanceof Error ? error.message : error);
+      });
+    }
     return { relativePath: repo.relativePath, description: repo.description };
   });

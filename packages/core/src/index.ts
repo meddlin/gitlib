@@ -5,5 +5,6 @@ export * from "./errors.js";
 export * from "./models.js";
 export * from "./remotes.js";
 export * from "./scanner.js";
+export * from "./search/index.js";
 export * from "./store.js";
 export * from "./system.js";

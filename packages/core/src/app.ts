@@ -6,6 +6,7 @@ import { GitLibError } from "./errors.js";
 import type { DiscoveredRepo, RemoteTarget, RepoDetails, RepoRecord } from "./models.js";
 import { parseGitRemotes, selectPreferredRemote } from "./remotes.js";
 import { scanRepo } from "./scanner.js";
+import { RepoSearch, SearchUnavailableError, type SearchBackend, type SearchHit, type SearchResult } from "./search/index.js";
 import { Store } from "./store.js";
 import { defaultSystemDeps, type SystemDeps } from "./system.js";
 
@@ -72,12 +73,24 @@ export interface FilterOptions {
   notesOnly?: boolean;
 }
 
+export interface SearchOptions extends Omit<FilterOptions, "search"> {
+  /** Most hits to return from the search backend. */
+  limit?: number;
+}
+
+export const DEFAULT_SEARCH_LIMIT = 200;
+
 export class GitLibApp {
+  readonly search: RepoSearch;
+
   constructor(
     readonly config: AppConfig,
     readonly store: Store,
     readonly system: SystemDeps = defaultSystemDeps,
-  ) {}
+    searchBackend?: SearchBackend | null,
+  ) {
+    this.search = new RepoSearch(config.search, searchBackend);
+  }
 
   refresh(): RepoRecord[] {
     const discovered = discoverRepos(this.config.roots, this.config.ignoreDirs);
@@ -114,6 +127,12 @@ export class GitLibApp {
       );
     }
 
+    return this.applyFilters(filtered, options);
+  }
+
+  private applyFilters(repositories: RepoRecord[], options: FilterOptions): RepoRecord[] {
+    let filtered = repositories;
+
     if (options.technology) {
       const needle = options.technology.toLowerCase();
       filtered = filtered.filter((repo) => repo.technologies.some((tag) => tag.toLowerCase() === needle));
@@ -122,6 +141,48 @@ export class GitLibApp {
     if (options.notesOnly) filtered = filtered.filter((repo) => repo.hasNotes);
 
     return filtered;
+  }
+
+  /**
+   * Full-text search (including README content) through the search backend. If the backend is
+   * disabled or unreachable this falls back to the substring matcher, so it never throws for that.
+   */
+  async searchRepositories(query: string, options: SearchOptions = {}): Promise<SearchResult> {
+    const text = query.trim();
+    const { limit = DEFAULT_SEARCH_LIMIT, ...filters } = options;
+    const repositories = this.loadRepositories();
+
+    if (!text) {
+      const hits = this.applyFilters(repositories, filters).map((repo): SearchHit => ({ repo, highlights: {} }));
+      return { mode: "basic", hits, notice: null };
+    }
+
+    try {
+      const byId = new Map(repositories.map((repo) => [repo.id, repo]));
+      const matches = await this.search.query(text, limit);
+      const hits: SearchHit[] = [];
+      for (const match of matches) {
+        const repo = byId.get(match.id);
+        if (repo && this.applyFilters([repo], filters).length > 0) hits.push({ repo, highlights: match.highlights });
+      }
+      return { mode: "meilisearch", hits, notice: null };
+    } catch (error) {
+      if (!(error instanceof SearchUnavailableError)) throw error;
+      const hits = this.filterRepositories(repositories, { ...filters, search: text }).map(
+        (repo): SearchHit => ({ repo, highlights: {} }),
+      );
+      return { mode: "basic", hits, notice: this.search.enabled ? error.message : null };
+    }
+  }
+
+  /** Rebuilds the search index from the stored repositories and their READMEs. */
+  async reindexSearch(): Promise<number> {
+    return this.search.reindex(this.loadRepositories());
+  }
+
+  /** Re-indexes one repository, e.g. after its notes or description changed. */
+  async syncRepositorySearch(selector: string): Promise<void> {
+    await this.search.syncRepository(this.store.resolveRepository(selector));
   }
 
   listRepositories(options: FilterOptions & { refresh?: boolean } = {}): RepoRecord[] {
@@ -213,8 +274,12 @@ export class GitLibApp {
   }
 }
 
-export function createApplication(env: Env = process.env, system: SystemDeps = defaultSystemDeps): GitLibApp {
+export function createApplication(
+  env: Env = process.env,
+  system: SystemDeps = defaultSystemDeps,
+  searchBackend?: SearchBackend | null,
+): GitLibApp {
   const config = loadConfig(env);
   const store = new Store(config.dbPath);
-  return new GitLibApp(config, store, system);
+  return new GitLibApp(config, store, system, searchBackend);
 }

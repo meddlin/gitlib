@@ -1,17 +1,27 @@
 import { FolderGit2, Pencil } from "lucide-react";
+import { Highlighted } from "#/components/highlighted";
 import { DescriptionDialog } from "#/components/description-dialog";
 import { TechBadge } from "#/components/tech-badge";
 import { Button } from "#/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card";
 import type { RepoView } from "#/server/repos";
+import type { SearchHitView } from "#/server/search";
+
+const SNIPPETS = [
+  ["notes", "Notes"],
+  ["readme", "README"],
+] as const;
 
 export function RepoCard({
   repo,
   activeTech,
+  highlights,
   onToggleTech,
 }: {
   repo: RepoView;
   activeTech: string | undefined;
+  /** Search matches for this repo, when it is being shown as a search result. */
+  highlights?: SearchHitView["highlights"];
   onToggleTech: (name: string) => void;
 }) {
   const key = repo.technologies.filter((t) => t.category === "language" || t.category === "framework");
@@ -22,18 +32,32 @@ export function RepoCard({
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <FolderGit2 className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-          <span className="truncate">{repo.name}</span>
+          <span className="truncate">
+            <Highlighted segments={highlights?.name} fallback={repo.name} />
+          </span>
         </CardTitle>
         <CardDescription className="truncate font-mono text-xs" title={repo.absolutePath}>
-          {repo.relativePath}
+          <Highlighted segments={highlights?.relativePath} fallback={repo.relativePath} />
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-1 flex-col gap-4">
         {repo.description ? (
-          <p className="text-sm leading-relaxed">{repo.description}</p>
+          <p className="text-sm leading-relaxed">
+            <Highlighted segments={highlights?.description} fallback={repo.description} />
+          </p>
         ) : (
           <p className="text-sm italic text-muted-foreground">No description yet.</p>
         )}
+
+        {SNIPPETS.map(([field, label]) => {
+          const segments = highlights?.[field];
+          return segments ? (
+            <p key={field} className="rounded-md bg-muted/50 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
+              <span className="mr-1.5 font-medium text-foreground">{label}</span>
+              <Highlighted segments={segments} fallback="" />
+            </p>
+          ) : null;
+        })}
 
         <div className="mt-auto flex flex-col gap-3">
           {repo.technologies.length === 0 ? (
