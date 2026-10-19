@@ -51,10 +51,14 @@ export class MeilisearchBackend implements SearchBackend {
     });
   }
 
+  /**
+   * Updates documents in an index that `replaceAll` already built. It deliberately does not create
+   * the index: one made from a single repo would make every search silently return partial results.
+   */
   async upsert(documents: readonly SearchDocument[]): Promise<void> {
     if (documents.length === 0) return;
     await this.guard(async () => {
-      const index = await this.ensureIndex();
+      const index = await this.client.getIndex<SearchDocument>(this.indexName); // throws index_not_found
       await this.finish(index.addDocuments([...documents], { primaryKey: "id" }));
     });
   }

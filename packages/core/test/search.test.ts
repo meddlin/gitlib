@@ -325,6 +325,12 @@ describe.skipIf(!hasMeilisearch)("Meilisearch integration", () => {
     expect((await app.searchRepositories("quokka")).hits).toEqual([]);
   });
 
+  it("does not create a partial index when syncing a single repository", async () => {
+    const app = liveApp();
+    await expect(app.syncRepositorySearch("garden")).rejects.toThrow(/gitlib reindex/);
+    expect((await app.searchRepositories("garden")).notice).toContain("gitlib reindex");
+  });
+
   it("reports a missing index instead of crashing", async () => {
     const app = liveApp();
     const result = await app.searchRepositories("anything");
