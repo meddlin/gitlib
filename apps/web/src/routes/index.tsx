@@ -1,5 +1,5 @@
-import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { RefreshCw, Search, X } from "lucide-react";
+import { Link, createFileRoute, useRouter } from "@tanstack/react-router";
+import { RefreshCw, Search, Settings, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { RepoCard } from "#/components/repo-card";
 import { TechBadge } from "#/components/tech-badge";
@@ -89,10 +89,17 @@ function RepoLibrary() {
             </p>
           ) : null}
         </div>
-        <Button variant="outline" onClick={rescan} disabled={scanning}>
-          <RefreshCw className={scanning ? "animate-spin" : undefined} aria-hidden />
-          {scanning ? "Scanning…" : "Rescan"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={rescan} disabled={scanning}>
+            <RefreshCw className={scanning ? "animate-spin" : undefined} aria-hidden />
+            {scanning ? "Scanning…" : "Rescan"}
+          </Button>
+          <Button asChild variant="outline" size="icon" aria-label="Settings">
+            <Link to="/settings">
+              <Settings aria-hidden />
+            </Link>
+          </Button>
+        </div>
       </header>
 
       <div className="flex flex-col gap-3">

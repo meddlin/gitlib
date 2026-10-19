@@ -3,25 +3,30 @@
 
 @custom-variant dark (&:is(.dark *));
 
-:root {
-  --background: oklch(0.985 0.002 247);
-  --foreground: oklch(0.21 0.02 265);
+:root,
+[data-scheme] {
+  /* Palette inputs: generated colour schemes override these (see the schemes below). */
+  --hue: 265;
+  --cs: 1;
+
+  --background: oklch(0.985 calc(0.002 * var(--cs)) var(--hue));
+  --foreground: oklch(0.21 calc(0.02 * var(--cs)) var(--hue));
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.21 0.02 265);
+  --card-foreground: oklch(0.21 calc(0.02 * var(--cs)) var(--hue));
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.21 0.02 265);
-  --primary: oklch(0.27 0.03 265);
+  --popover-foreground: oklch(0.21 calc(0.02 * var(--cs)) var(--hue));
+  --primary: oklch(0.27 calc(0.03 * var(--cs)) var(--hue));
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.96 0.005 265);
-  --secondary-foreground: oklch(0.27 0.03 265);
-  --muted: oklch(0.96 0.005 265);
-  --muted-foreground: oklch(0.5 0.02 265);
-  --accent: oklch(0.95 0.01 265);
-  --accent-foreground: oklch(0.27 0.03 265);
+  --secondary: oklch(0.96 calc(0.005 * var(--cs)) var(--hue));
+  --secondary-foreground: oklch(0.27 calc(0.03 * var(--cs)) var(--hue));
+  --muted: oklch(0.96 calc(0.005 * var(--cs)) var(--hue));
+  --muted-foreground: oklch(0.5 calc(0.02 * var(--cs)) var(--hue));
+  --accent: oklch(0.95 calc(0.01 * var(--cs)) var(--hue));
+  --accent-foreground: oklch(0.27 calc(0.03 * var(--cs)) var(--hue));
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.91 0.006 265);
-  --input: oklch(0.91 0.006 265);
-  --ring: oklch(0.65 0.1 265);
+  --border: oklch(0.91 calc(0.006 * var(--cs)) var(--hue));
+  --input: oklch(0.91 calc(0.006 * var(--cs)) var(--hue));
+  --ring: oklch(0.65 0.1 var(--hue));
   --radius: 0.625rem;
 
   /* Technology highlight colours (language / framework / runtime / tooling). */
@@ -32,29 +37,73 @@
 }
 
 .dark {
-  --background: oklch(0.16 0.015 265);
-  --foreground: oklch(0.96 0.005 265);
-  --card: oklch(0.2 0.018 265);
-  --card-foreground: oklch(0.96 0.005 265);
-  --popover: oklch(0.2 0.018 265);
-  --popover-foreground: oklch(0.96 0.005 265);
-  --primary: oklch(0.92 0.01 265);
-  --primary-foreground: oklch(0.2 0.02 265);
-  --secondary: oklch(0.27 0.018 265);
-  --secondary-foreground: oklch(0.96 0.005 265);
-  --muted: oklch(0.27 0.018 265);
-  --muted-foreground: oklch(0.72 0.02 265);
-  --accent: oklch(0.3 0.02 265);
-  --accent-foreground: oklch(0.96 0.005 265);
+  --background: oklch(0.16 calc(0.015 * var(--cs)) var(--hue));
+  --foreground: oklch(0.96 calc(0.005 * var(--cs)) var(--hue));
+  --card: oklch(0.2 calc(0.018 * var(--cs)) var(--hue));
+  --card-foreground: oklch(0.96 calc(0.005 * var(--cs)) var(--hue));
+  --popover: oklch(0.2 calc(0.018 * var(--cs)) var(--hue));
+  --popover-foreground: oklch(0.96 calc(0.005 * var(--cs)) var(--hue));
+  --primary: oklch(0.92 calc(0.01 * var(--cs)) var(--hue));
+  --primary-foreground: oklch(0.2 calc(0.02 * var(--cs)) var(--hue));
+  --secondary: oklch(0.27 calc(0.018 * var(--cs)) var(--hue));
+  --secondary-foreground: oklch(0.96 calc(0.005 * var(--cs)) var(--hue));
+  --muted: oklch(0.27 calc(0.018 * var(--cs)) var(--hue));
+  --muted-foreground: oklch(0.72 calc(0.02 * var(--cs)) var(--hue));
+  --accent: oklch(0.3 calc(0.02 * var(--cs)) var(--hue));
+  --accent-foreground: oklch(0.96 calc(0.005 * var(--cs)) var(--hue));
   --destructive: oklch(0.65 0.2 25);
-  --border: oklch(0.3 0.02 265);
-  --input: oklch(0.34 0.02 265);
-  --ring: oklch(0.55 0.1 265);
+  --border: oklch(0.3 calc(0.02 * var(--cs)) var(--hue));
+  --input: oklch(0.34 calc(0.02 * var(--cs)) var(--hue));
+  --ring: oklch(0.55 0.1 var(--hue));
 
   --tech-language: oklch(0.75 0.15 265);
   --tech-framework: oklch(0.78 0.14 160);
   --tech-runtime: oklch(0.82 0.13 85);
   --tech-tooling: oklch(0.72 0.02 265);
+}
+
+/*
+ * Generated colour schemes. Each keeps the light/dark neutral palette above but
+ * re-tints it from --hue and --cs (chroma scale), then sets a coloured primary.
+ * Keep ids in sync with src/lib/themes.ts. Rules are on [data-scheme] (not just
+ * the root) so settings-page previews can render a scheme in isolation.
+ */
+[data-scheme="ocean"] {
+  --hue: 235;
+  --cs: 3.5;
+  --primary: oklch(0.78 0.12 var(--hue));
+  --primary-foreground: oklch(0.2 0.05 var(--hue));
+  --ring: oklch(0.65 0.13 var(--hue));
+}
+
+[data-scheme="forest"] {
+  --hue: 155;
+  --cs: 3.5;
+  --primary: oklch(0.78 0.14 var(--hue));
+  --primary-foreground: oklch(0.2 0.05 var(--hue));
+  --ring: oklch(0.65 0.13 var(--hue));
+}
+
+[data-scheme="sunset"] {
+  --hue: 45;
+  --cs: 4;
+  --background: oklch(0.97 0.025 var(--hue));
+  --card: oklch(0.995 0.01 var(--hue));
+  --popover: oklch(0.995 0.01 var(--hue));
+  --primary: oklch(0.58 0.17 var(--hue));
+  --primary-foreground: oklch(0.99 0.01 var(--hue));
+  --ring: oklch(0.7 0.14 var(--hue));
+}
+
+[data-scheme="orchid"] {
+  --hue: 320;
+  --cs: 4;
+  --background: oklch(0.97 0.02 var(--hue));
+  --card: oklch(0.995 0.008 var(--hue));
+  --popover: oklch(0.995 0.008 var(--hue));
+  --primary: oklch(0.5 0.19 var(--hue));
+  --primary-foreground: oklch(0.99 0.01 var(--hue));
+  --ring: oklch(0.65 0.15 var(--hue));
 }
 
 @theme inline {
