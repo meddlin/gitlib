@@ -268,6 +268,7 @@ describe("helpers", () => {
         notes: "word ".repeat(30),
         hasNotes: true,
         isWorktree: false,
+        isFavorite: false,
         description: "",
       },
     ]);

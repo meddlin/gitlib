@@ -36,6 +36,7 @@ interface RepoRow {
   is_worktree: number;
   notes: string;
   description: string;
+  is_favorite: number;
 }
 
 const SCHEMA = `
@@ -60,6 +61,11 @@ const SCHEMA = `
   CREATE TABLE IF NOT EXISTS repo_descriptions (
     repo_id INTEGER PRIMARY KEY,
     description TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS repo_favorites (
+    repo_id INTEGER PRIMARY KEY,
     FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE
   );
 
@@ -192,10 +198,12 @@ export class Store {
           repos.is_missing,
           repos.is_worktree,
           COALESCE(repo_notes.notes, '') AS notes,
-          COALESCE(repo_descriptions.description, '') AS description
+          COALESCE(repo_descriptions.description, '') AS description,
+          repo_favorites.repo_id IS NOT NULL AS is_favorite
         FROM repos
         LEFT JOIN repo_notes ON repo_notes.repo_id = repos.id
         LEFT JOIN repo_descriptions ON repo_descriptions.repo_id = repos.id
+        LEFT JOIN repo_favorites ON repo_favorites.repo_id = repos.id
       `;
       if (!includeMissing) query += " WHERE repos.is_missing = 0";
       query += " ORDER BY repos.relative_path";
@@ -224,6 +232,7 @@ export class Store {
       lastScannedAt: row.last_scanned_at || null,
       isMissing: Boolean(row.is_missing),
       isWorktree: Boolean(row.is_worktree),
+      isFavorite: Boolean(row.is_favorite),
       technologies: sortTechnologies(technologies.get(row.id) ?? []),
       notes: row.notes,
       hasNotes: row.notes.trim().length > 0,
@@ -257,6 +266,13 @@ export class Store {
         `INSERT INTO repo_descriptions(repo_id, description) VALUES (?, ?)
          ON CONFLICT(repo_id) DO UPDATE SET description = excluded.description`,
       ).run(repoId, description);
+    });
+  }
+
+  updateFavorite(repoId: number, favorite: boolean): void {
+    this.transaction((db) => {
+      if (favorite) db.prepare("INSERT OR IGNORE INTO repo_favorites(repo_id) VALUES (?)").run(repoId);
+      else db.prepare("DELETE FROM repo_favorites WHERE repo_id = ?").run(repoId);
     });
   }
 
