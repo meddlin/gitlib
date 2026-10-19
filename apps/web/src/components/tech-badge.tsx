@@ -1,12 +1,18 @@
 import type { TechnologyCategory } from "@gitlib/core";
-import { Badge } from "#/components/ui/badge";
 import { cn } from "#/lib/utils";
 
-const CATEGORY_STYLES: Record<TechnologyCategory, string> = {
-  language: "border-tech-language/40 bg-tech-language/12 text-tech-language",
-  framework: "border-tech-framework/40 bg-tech-framework/12 text-tech-framework",
-  runtime: "border-tech-runtime/40 bg-tech-runtime/12 text-tech-runtime",
-  tooling: "border-border bg-transparent text-muted-foreground",
+const CATEGORY_DOT: Record<TechnologyCategory, string> = {
+  language: "bg-tech-language",
+  framework: "bg-tech-framework",
+  runtime: "bg-tech-runtime",
+  tooling: "bg-tech-tooling",
+};
+
+const CATEGORY_TEXT: Record<TechnologyCategory, string> = {
+  language: "text-tech-language",
+  framework: "text-tech-framework",
+  runtime: "text-tech-runtime",
+  tooling: "text-muted-foreground",
 };
 
 export const CATEGORY_LABELS: Record<TechnologyCategory, string> = {
@@ -16,6 +22,7 @@ export const CATEGORY_LABELS: Record<TechnologyCategory, string> = {
   tooling: "Tooling",
 };
 
+/** Flat technology label: a coloured dot for its category followed by the name. */
 export function TechBadge({
   name,
   category,
@@ -28,18 +35,19 @@ export function TechBadge({
   className?: string;
 }) {
   return (
-    <Badge
-      variant="outline"
+    <span
       title={CATEGORY_LABELS[category]}
       className={cn(
-        CATEGORY_STYLES[category],
+        "inline-flex items-center gap-1.5 text-xs whitespace-nowrap",
+        CATEGORY_TEXT[category],
         // Languages and frameworks are the "key" stack, so they get more weight.
         (category === "language" || category === "framework") && "font-semibold",
-        active && "ring-2 ring-current/40",
+        active && "underline decoration-current underline-offset-4",
         className,
       )}
     >
+      <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", CATEGORY_DOT[category])} />
       {name}
-    </Badge>
+    </span>
   );
 }
