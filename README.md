@@ -84,6 +84,84 @@ npm run build -w @gitlib/web && npm run preview -w @gitlib/web   # production bu
   choice is saved in the browser's `localStorage`. Palettes are defined in
   `apps/web/src/styles.css`; add a scheme there and in `apps/web/src/lib/themes.ts`.
 
+## Run with Docker
+
+The web app ships with a `Dockerfile` and `docker-compose.yml`, so you can host it on a VM
+(for example on a Proxmox server). The container runs the production build of `apps/web`
+with a small Node server (`apps/web/server.mjs`) on port 3000.
+
+### 1. Prepare the VM
+
+Any Linux VM with Docker Engine and the Compose plugin works (e.g. Debian/Ubuntu on Proxmox):
+
+```bash
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker "$USER"   # log out and back in afterwards
+```
+
+### 2. Get the code and your repositories onto the VM
+
+```bash
+git clone <this-repo-url> gitlib && cd gitlib
+```
+
+Gitlib only discovers repositories it can see on disk, so put the repos you want to browse in a
+single directory on the VM (clone them, `rsync` them from your workstation, or mount an NFS/SMB
+share from your NAS). Their remotes and detected technologies are read from the checkouts.
+
+### 3. Start it
+
+```bash
+GITLIB_REPOS=/srv/git docker compose up -d --build
+```
+
+Open `http://<vm-ip>:3000`. Instead of passing variables inline you can put them in a `.env`
+file next to `docker-compose.yml`:
+
+| Variable        | Default   | Meaning                                                    |
+| --------------- | --------- | ---------------------------------------------------------- |
+| `GITLIB_REPOS`  | `./repos` | Host directory with your git repos (mounted read-only)     |
+| `GITLIB_PORT`   | `3000`    | Host port the web app is published on                      |
+| `TZ`            | `UTC`     | Container time zone                                        |
+
+How it is wired up:
+
+- Your repos are mounted read-only at `/home/node/git` inside the container, which is the
+  default scan root (`~/git`) for the container user, so no config changes are needed. Use
+  **Rescan** in the UI after adding repos.
+- Config (`config.toml`) and the SQLite database (repo descriptions) live in the named volume
+  `gitlib-data`, mounted at `/data` (`GITLIB_HOME`). They survive restarts and rebuilds.
+  `docker compose down` keeps the volume; `docker compose down -v` deletes it.
+
+### Day-to-day
+
+```bash
+docker compose logs -f web          # follow logs
+docker compose ps                   # status (includes a health check)
+docker compose restart web
+git pull && docker compose up -d --build   # update to the latest version
+```
+
+Back up the data volume with:
+
+```bash
+docker run --rm -v gitlib_gitlib-data:/data -v "$PWD":/backup busybox \
+  tar czf /backup/gitlib-data.tgz -C /data .
+```
+
+(The volume is prefixed with the Compose project name, which defaults to the directory name;
+check `docker volume ls` if yours differs.)
+
+### Security note
+
+The web app has **no authentication**. Do not expose port 3000 to the internet. Keep it on your
+LAN/VPN, or put a reverse proxy with authentication in front of it (Caddy, Nginx Proxy Manager,
+Traefik, Authelia, …) and bind the port to localhost by changing the `ports` entry in
+`docker-compose.yml` to `"127.0.0.1:3000:3000"`.
+
+The CLI, TUI and VS Code / browser launchers are desktop features and are not part of the
+container.
+
 ## Current CLI Commands
 
 These commands are implemented today:

@@ -1,0 +1,18 @@
+services:
+  web:
+    build: .
+    image: gitlib-web:latest
+    container_name: gitlib-web
+    restart: unless-stopped
+    ports:
+      - "${GITLIB_PORT:-3000}:3000"
+    environment:
+      TZ: ${TZ:-UTC}
+    volumes:
+      # Directory containing the git repositories you want to browse (mounted read-only).
+      - ${GITLIB_REPOS:-./repos}:/home/node/git:ro
+      # Config (config.toml) and the SQLite database (descriptions); persists across rebuilds.
+      - gitlib-data:/data
+
+volumes:
+  gitlib-data:

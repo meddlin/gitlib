@@ -1,0 +1,13 @@
+**/node_modules
+**/dist
+**/.output
+**/.nitro
+**/.tanstack
+.git
+.github
+.claude
+.env
+*.log
+coverage
+Dockerfile
+docker-compose.yml
