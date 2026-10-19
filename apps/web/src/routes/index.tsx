@@ -1,5 +1,5 @@
-import { Link, createFileRoute, useRouter } from "@tanstack/react-router";
-import { RefreshCw, Search, Settings, X } from "lucide-react";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { RefreshCw, Search, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RepoPreview } from "#/components/repo-preview";
 import { RepoTable, sortRepos, type Sort, type SortKey } from "#/components/repo-table";
@@ -116,13 +116,13 @@ function RepoLibrary() {
   return (
     <div
       className={cn(
-        "mx-auto flex min-h-screen flex-col gap-5 px-4 py-8 transition-[max-width] duration-200 sm:px-6",
+        "mx-auto flex w-full flex-1 flex-col gap-5 px-4 py-8 transition-[max-width] duration-200 sm:px-6",
         selected ? "max-w-[96rem]" : "max-w-6xl",
       )}
     >
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-lg font-semibold tracking-tight">Gitlib</h1>
+          <h1 className="text-lg font-semibold tracking-tight">Repositories</h1>
           <p className="text-sm text-muted-foreground">
             {repos.length} {repos.length === 1 ? "repository" : "repositories"} · {described} described
             {!showWorktrees && worktreeCount > 0 ? ` · ${worktreeCount} worktrees hidden` : ""}
@@ -144,13 +144,6 @@ function RepoLibrary() {
             <RefreshCw className={cn("size-3.5", scanning && "animate-spin")} aria-hidden />
             {scanning ? "Scanning…" : "Rescan"}
           </button>
-          <Link
-            to="/settings"
-            aria-label="Settings"
-            className="inline-flex h-8 items-center border px-2.5 outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <Settings className="size-3.5" aria-hidden />
-          </Link>
         </div>
       </header>
 

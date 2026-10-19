@@ -1,5 +1,6 @@
 import { HeadContent, Outlet, Scripts, createRootRoute } from "@tanstack/react-router";
 import type { ReactNode } from "react";
+import { NavBar } from "#/components/nav-bar";
 import { THEME_SCRIPT, useThemeSync } from "#/lib/themes";
 import appCss from "../styles.css?url";
 
@@ -18,7 +19,12 @@ export const Route = createRootRoute({
 
 function RootComponent() {
   useThemeSync();
-  return <Outlet />;
+  return (
+    <div className="flex min-h-screen flex-col">
+      <NavBar />
+      <Outlet />
+    </div>
+  );
 }
 
 function RootDocument({ children }: { children: ReactNode }) {

@@ -112,7 +112,7 @@ export function RepoPreview({ repo, onClose }: { repo: RepoView | undefined; onC
       inert={!open}
       className={cn(
         "fixed inset-y-0 right-0 z-30 w-full max-w-md overflow-hidden border-l bg-background transition-transform duration-200 ease-out",
-        "lg:sticky lg:top-4 lg:z-auto lg:h-[calc(100vh-2rem)] lg:max-w-none lg:shrink-0 lg:self-start lg:transition-[width,transform]",
+        "lg:sticky lg:top-16 lg:z-auto lg:h-[calc(100vh-5rem)] lg:max-w-none lg:shrink-0 lg:self-start lg:transition-[width,transform]",
         open ? "translate-x-0 lg:w-120" : "translate-x-full lg:w-0 lg:translate-x-0 lg:border-l-0",
       )}
     >
