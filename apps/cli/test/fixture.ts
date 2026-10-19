@@ -6,6 +6,7 @@ import {
   DEFAULT_IGNORE_DIRS,
   runCommand,
   type CommandResult,
+  type SearchBackend,
   type SystemDeps,
 } from "@gitlib/core";
 import { main } from "../src/cli.js";
@@ -26,7 +27,7 @@ export class Fixture {
     fs.rmSync(this.base, { recursive: true, force: true });
   }
 
-  writeConfig(options: { vscodeCommand?: string[] } = {}): void {
+  writeConfig(options: { vscodeCommand?: string[]; search?: string[] } = {}): void {
     fs.mkdirSync(this.appHome, { recursive: true });
     const list = (items: readonly string[]) => items.map((item) => `  "${item}",`).join("\n");
     const lines = ["roots = [", list([this.gitRoot]), "]", ""];
@@ -34,6 +35,8 @@ export class Fixture {
       lines.push("vscode_command = [", list(options.vscodeCommand), "]", "");
     }
     lines.push("ignore_dirs = [", list(DEFAULT_IGNORE_DIRS), "]", "");
+    // Keep tests away from any Meilisearch running on the developer's machine unless they opt in.
+    lines.push("[search]", ...(options.search ?? ["enabled = false"]), "");
     fs.writeFileSync(path.join(this.appHome, "config.toml"), lines.join("\n"), "utf-8");
   }
 
@@ -85,7 +88,7 @@ export class Fixture {
 
   async runCli(
     args: string[],
-    options: { env?: Record<string, string>; system?: SystemDeps } = {},
+    options: { env?: Record<string, string>; system?: SystemDeps; searchBackend?: SearchBackend | null } = {},
   ): Promise<{ code: number; stdout: string; stderr: string }> {
     let stdout = "";
     let stderr = "";
@@ -94,6 +97,7 @@ export class Fixture {
       stdout: { write: (chunk) => void (stdout += chunk) },
       stderr: { write: (chunk) => void (stderr += chunk) },
       ...(options.system ? { system: options.system } : {}),
+      ...(options.searchBackend !== undefined ? { searchBackend: options.searchBackend } : {}),
     });
     return { code, stdout, stderr };
   }

@@ -67,6 +67,45 @@ Operational notes:
 - The SQLite schema is unchanged from the original Python version, so an existing
   `~/.git-library/gitlib.db` keeps working.
 
+## Search
+
+Gitlib can search repository names, paths, descriptions, notes and **README contents** with typo
+tolerance, relevance ranking and highlighted snippets, powered by [Meilisearch](https://www.meilisearch.com/).
+Meilisearch is optional: without it, search falls back to plain substring matching (and the web app
+says so). Why Meilisearch was chosen over the alternatives is recorded in
+[`docs/search-options.md`](docs/search-options.md).
+
+Start a local server (any of these):
+
+```bash
+brew install meilisearch && meilisearch --no-analytics          # http://127.0.0.1:7700
+docker run -p 7700:7700 -v "$PWD/meili_data:/meili_data" getmeili/meilisearch:latest
+```
+
+Then build the index and search:
+
+```bash
+gitlib reindex                       # index every scanned repo, including READMEs
+gitlib search invoices               # ranked results with highlighted snippets
+gitlib search "tomato planner" --tech TypeScript --json
+```
+
+The index is a derived copy of your data: `gitlib scan` and the web app's **Rescan** rebuild it, and
+saving notes or a description updates that repo. If you ever suspect it is stale, run `gitlib reindex`.
+
+Configure it in `~/.git-library/config.toml` (all keys optional):
+
+```toml
+[search]
+enabled = true                        # false = never contact Meilisearch
+host = "http://127.0.0.1:7700"
+api_key = ""                          # master/search key if your server needs one
+index = "gitlib_repos"
+```
+
+`GITLIB_MEILI_HOST` and `GITLIB_MEILI_API_KEY` override `host` and `api_key`. The web app's search bar
+is pinned to the top of the Repositories page (press `/` to focus it).
+
 ## Web App
 
 `apps/web/` is a [TanStack Start](https://tanstack.com/start) app that reads the same
