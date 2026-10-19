@@ -1,15 +1,18 @@
-import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { RefreshCw, Search, X } from "lucide-react";
-import { useMemo, useState } from "react";
-import { RepoCard } from "#/components/repo-card";
+import { Link, createFileRoute, useRouter } from "@tanstack/react-router";
+import { RefreshCw, Search, Settings, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { RepoPreview } from "#/components/repo-preview";
+import { RepoTable, sortRepos, type Sort, type SortKey } from "#/components/repo-table";
 import { TechBadge } from "#/components/tech-badge";
-import { Button } from "#/components/ui/button";
 import { Input } from "#/components/ui/input";
+import { cn } from "#/lib/utils";
 import { getRepos, rescanRepos, type RepoView } from "#/server/repos";
 
 interface IndexSearch {
   q?: string;
   tech?: string;
+  /** relativePath of the repo shown in the preview pane. */
+  repo?: string;
   /** Linked git worktrees are hidden unless this is set. */
   worktrees?: true;
 }
@@ -18,6 +21,7 @@ export const Route = createFileRoute("/")({
   validateSearch: (search: Record<string, unknown>): IndexSearch => ({
     q: typeof search.q === "string" && search.q ? search.q : undefined,
     tech: typeof search.tech === "string" && search.tech ? search.tech : undefined,
+    repo: typeof search.repo === "string" && search.repo ? search.repo : undefined,
     worktrees: isTruthyParam(search.worktrees) ? true : undefined,
   }),
   loader: () => getRepos(),
@@ -41,17 +45,22 @@ function matches(repo: RepoView, q: string | undefined, tech: string | undefined
 
 function RepoLibrary() {
   const { repos: allRepos, roots } = Route.useLoaderData();
-  const { q, tech, worktrees: showWorktrees } = Route.useSearch();
+  const { q, tech, repo: selectedPath, worktrees: showWorktrees } = Route.useSearch();
   const navigate = Route.useNavigate();
   const router = useRouter();
   const [scanning, setScanning] = useState(false);
+  const [sort, setSort] = useState<Sort>({ key: "name", dir: "asc" });
 
   const worktreeCount = useMemo(() => allRepos.filter((repo) => repo.isWorktree).length, [allRepos]);
   const repos = useMemo(
     () => (showWorktrees ? allRepos : allRepos.filter((repo) => !repo.isWorktree)),
     [allRepos, showWorktrees],
   );
-  const visible = useMemo(() => repos.filter((repo) => matches(repo, q, tech)), [repos, q, tech]);
+
+  const visible = useMemo(
+    () => sortRepos(repos.filter((repo) => matches(repo, q, tech)), sort),
+    [repos, q, tech, sort],
+  );
 
   // Every detected technology with how many repos use it; languages and frameworks first.
   const techCounts = useMemo(() => {
@@ -69,8 +78,10 @@ function RepoLibrary() {
     );
   }, [repos]);
 
-  const setSearch = (next: IndexSearch) =>
-    navigate({ search: (prev) => ({ ...prev, ...next }), replace: true });
+  const setSearch = useCallback(
+    (next: IndexSearch) => navigate({ search: (prev) => ({ ...prev, ...next }), replace: true }),
+    [navigate],
+  );
   const toggleTech = (name: string) =>
     setSearch({ tech: tech?.toLowerCase() === name.toLowerCase() ? undefined : name });
 
@@ -86,77 +97,115 @@ function RepoLibrary() {
 
   const described = repos.filter((repo) => repo.description).length;
 
+  const selected = useMemo(() => repos.find((repo) => repo.relativePath === selectedPath), [repos, selectedPath]);
+  const closePreview = useCallback(() => setSearch({ repo: undefined }), [setSearch]);
+
+  useEffect(() => {
+    if (!selected) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      // Escape inside an open dialog belongs to the dialog.
+      if (event.key === "Escape" && !event.defaultPrevented) closePreview();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selected, closePreview]);
+
+  const toggleSort = (key: SortKey) =>
+    setSort((prev) => (prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
+
   return (
-    <div className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-4 py-8 sm:px-6">
-      <header className="flex flex-wrap items-start justify-between gap-4">
+    <div
+      className={cn(
+        "mx-auto flex min-h-screen flex-col gap-5 px-4 py-8 transition-[max-width] duration-200 sm:px-6",
+        selected ? "max-w-[96rem]" : "max-w-6xl",
+      )}
+    >
+      <header className="flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight">Gitlib</h1>
+          <h1 className="text-lg font-semibold tracking-tight">Gitlib</h1>
           <p className="text-sm text-muted-foreground">
             {repos.length} {repos.length === 1 ? "repository" : "repositories"} · {described} described
             {!showWorktrees && worktreeCount > 0 ? ` · ${worktreeCount} worktrees hidden` : ""}
+            {roots.length > 0 ? (
+              <>
+                {" · "}
+                <span className="font-mono text-xs break-all">{roots.join(", ")}</span>
+              </>
+            ) : null}
           </p>
-          {roots.length > 0 ? (
-            <p className="mt-1 text-xs break-all text-muted-foreground">
-              Scanning <span className="font-mono">{roots.join(", ")}</span>
-            </p>
-          ) : null}
         </div>
-        <Button variant="outline" onClick={rescan} disabled={scanning}>
-          <RefreshCw className={scanning ? "animate-spin" : undefined} aria-hidden />
-          {scanning ? "Scanning…" : "Rescan"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={rescan}
+            disabled={scanning}
+            className="inline-flex h-8 items-center gap-1.5 border px-3 text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+          >
+            <RefreshCw className={cn("size-3.5", scanning && "animate-spin")} aria-hidden />
+            {scanning ? "Scanning…" : "Rescan"}
+          </button>
+          <Link
+            to="/settings"
+            aria-label="Settings"
+            className="inline-flex h-8 items-center border px-2.5 outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Settings className="size-3.5" aria-hidden />
+          </Link>
+        </div>
       </header>
 
       <div className="flex flex-col gap-3">
         <div className="relative">
           <Search
-            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+            className="pointer-events-none absolute top-1/2 left-0 size-4 -translate-y-1/2 text-muted-foreground"
             aria-hidden
           />
           <Input
             type="search"
             placeholder="Search by name, path, description or technology"
             aria-label="Search repositories"
-            className="pl-9"
+            className="rounded-none border-0 border-b bg-transparent pl-6 shadow-none focus-visible:ring-0 dark:bg-transparent"
             value={q ?? ""}
             onChange={(event) => setSearch({ q: event.target.value || undefined })}
           />
         </div>
 
         {worktreeCount > 0 ? (
-          <label className="flex w-fit cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+          <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
             <input
               type="checkbox"
-              className="size-4 accent-primary"
+              className="size-3.5 accent-primary"
               checked={Boolean(showWorktrees)}
               onChange={(event) => setSearch({ worktrees: event.target.checked ? true : undefined })}
             />
-            Show worktrees
-            <span className="text-xs">({worktreeCount})</span>
+            Show worktrees ({worktreeCount})
           </label>
         ) : null}
 
         {techCounts.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-1.5" aria-label="Filter by technology">
-            {techCounts.map(([name, { category, count }]) => (
-              <button
-                key={name}
-                type="button"
-                onClick={() => toggleTech(name)}
-                aria-pressed={tech?.toLowerCase() === name.toLowerCase()}
-                className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <TechBadge
-                  name={`${name} · ${count}`}
-                  category={category}
-                  active={tech?.toLowerCase() === name.toLowerCase()}
-                />
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1" aria-label="Filter by technology">
+            {techCounts.map(([name, { category, count }]) => {
+              const active = tech?.toLowerCase() === name.toLowerCase();
+              return (
+                <button
+                  key={name}
+                  type="button"
+                  onClick={() => toggleTech(name)}
+                  aria-pressed={active}
+                  className="outline-none hover:opacity-70 focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <TechBadge name={`${name} ${count}`} category={category} active={active} />
+                </button>
+              );
+            })}
             {tech || q ? (
-              <Button variant="ghost" size="xs" onClick={() => setSearch({ q: undefined, tech: undefined })}>
-                <X aria-hidden /> Clear filters
-              </Button>
+              <button
+                type="button"
+                onClick={() => setSearch({ q: undefined, tech: undefined })}
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <X className="size-3" aria-hidden /> Clear filters
+              </button>
             ) : null}
           </div>
         ) : null}
@@ -170,22 +219,25 @@ function RepoLibrary() {
       ) : visible.length === 0 ? (
         <EmptyState>No repositories match your filters.</EmptyState>
       ) : (
-        <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {visible.map((repo) => (
-            <li key={repo.id} className="flex">
-              <RepoCard repo={repo} activeTech={tech} onToggleTech={toggleTech} />
-            </li>
-          ))}
-        </ul>
+        <div className="flex items-start">
+          <div className="min-w-0 flex-1">
+            <RepoTable
+              repos={visible}
+              sort={sort}
+              onSort={toggleSort}
+              activeTech={tech}
+              onToggleTech={toggleTech}
+              selectedPath={selected?.relativePath}
+              onSelect={(repo) => setSearch({ repo: repo.relativePath })}
+            />
+          </div>
+          <RepoPreview repo={selected} onClose={closePreview} />
+        </div>
       )}
     </div>
   );
 }
 
 function EmptyState({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
-      {children}
-    </div>
-  );
+  return <div className="border-y py-10 text-center text-sm text-muted-foreground">{children}</div>;
 }
