@@ -142,7 +142,12 @@ export function RepoTable({
                   aria-label={`Preview ${repo.name}`}
                   className="block w-full text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  <span className="block truncate font-medium">{repo.name}</span>
+                  <span className="block truncate font-medium">
+                    {repo.name}
+                    {repo.isWorktree ? (
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">worktree</span>
+                    ) : null}
+                  </span>
                   <span className="block truncate font-mono text-xs text-muted-foreground" title={repo.absolutePath}>
                     {repo.relativePath}
                   </span>

@@ -20,7 +20,7 @@ export interface CliIo {
 }
 
 type Invocation =
-  | { name: "list"; technology?: string; notesOnly?: boolean; json?: boolean }
+  | { name: "list"; technology?: string; notesOnly?: boolean; worktrees?: boolean; json?: boolean }
   | { name: "show"; repo: string; json?: boolean }
   | { name: "scan" }
   | { name: "tui" }
@@ -42,9 +42,16 @@ function buildProgram(
     .description("List repositories")
     .option("--tech <technology>", "only repositories tagged with this technology")
     .option("--notes-only", "only repositories that have notes")
+    .option("--worktrees", "include linked git worktrees (hidden by default)")
     .option("--json", "machine-readable output")
-    .action((options: { tech?: string; notesOnly?: boolean; json?: boolean }) =>
-      onInvoke({ name: "list", technology: options.tech, notesOnly: options.notesOnly, json: options.json }),
+    .action((options: { tech?: string; notesOnly?: boolean; worktrees?: boolean; json?: boolean }) =>
+      onInvoke({
+        name: "list",
+        technology: options.tech,
+        notesOnly: options.notesOnly,
+        worktrees: options.worktrees,
+        json: options.json,
+      }),
     );
 
   program
@@ -100,6 +107,7 @@ async function execute(
       const repositories = app.listRepositories({
         technology: invocation.technology ?? null,
         notesOnly: invocation.notesOnly ?? false,
+        includeWorktrees: invocation.worktrees ?? false,
       });
       print(invocation.json ? renderJson(repositories.map(repoToDict)) : renderTable(repositories));
       return 0;

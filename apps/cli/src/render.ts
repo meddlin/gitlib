@@ -15,6 +15,7 @@ export function repoToDict(repo: RepoRecord): Record<string, unknown> {
     absolute_path: repo.absolutePath,
     technologies: repo.technologies,
     has_notes: repo.hasNotes,
+    is_worktree: repo.isWorktree,
     last_scanned_at: repo.lastScannedAt,
     notes: repo.notes,
   };
@@ -52,6 +53,7 @@ export function renderDetail(repo: RepoRecord): string {
   return [
     `repo: ${repo.name}`,
     `relative_path: ${repo.relativePath}`,
+    ...(repo.isWorktree ? ["worktree: yes"] : []),
     `absolute_path: ${repo.absolutePath}`,
     `technologies: ${repo.technologies.length > 0 ? repo.technologies.join(", ") : "-"}`,
     `last_scanned_at: ${repo.lastScannedAt || "-"}`,

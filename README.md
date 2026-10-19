@@ -57,6 +57,11 @@ npm run typecheck    # tsc --noEmit across the workspace
 
 Operational notes:
 
+- Linked `git worktree` checkouts (for example `.claude/worktrees/*`) are discovered but
+  hidden from listings by default, because they are extra checkouts of a repo you already
+  have rather than separate repos. Use `gitlib list --worktrees`, the TUI `w` key, or the
+  web app's **Show worktrees** checkbox to see them. Submodules are still listed as repos.
+
 - First run creates `~/.git-library/` for config and SQLite data (override with `GITLIB_HOME`).
 - The default scan root is `~/git`.
 - The SQLite schema is unchanged from the original Python version, so an existing
@@ -167,7 +172,7 @@ container.
 These commands are implemented today:
 
 ```bash
-gitlib list [--tech TAG] [--notes-only] [--json]
+gitlib list [--tech TAG] [--notes-only] [--worktrees] [--json]
 gitlib show <repo> [--json]
 gitlib scan
 gitlib open code <repo>
@@ -181,6 +186,7 @@ Command summary:
 - `gitlib list` lists all discovered repos.
 - `gitlib list --tech TAG` filters repos by a detected technology tag.
 - `gitlib list --notes-only` shows only repos with notes.
+- `gitlib list --worktrees` also lists linked `git worktree` checkouts (hidden by default).
 - `gitlib list --json` returns machine-readable output.
 - `gitlib show <repo>` shows details for one repo.
 - `gitlib scan` refreshes repo discovery and technology metadata.
@@ -215,13 +221,14 @@ Keybindings:
 - `e` enters notes edit mode
 - `v` opens the selected repo in VS Code
 - `o` opens the preferred remote landing page in your browser
+- `w` shows or hides linked git worktrees (hidden by default)
 - `Ctrl+S` saves notes
 - `Esc` cancels note editing or leaves the focused input
 
-- `Tab` / `Shift+Tab` cycle focus: repo list, README pane, search, technology filter, notes-only checkbox
+- `Tab` / `Shift+Tab` cycle focus: repo list, README pane, search, technology filter, notes-only checkbox, worktrees checkbox
 - Arrow keys, `PgUp`/`PgDn`, `Home` and `End` move through the repo list or scroll the README
   (whichever has focus)
-- `Space` or `Enter` toggles the "Notes only" checkbox when it has focus
+- `Space` or `Enter` toggles the "Notes only" or "Worktrees" checkbox when it has focus
 
 To scroll a long `README.md`, press `Tab` once to move focus into the README pane, then use
 the arrow keys or `PgUp`/`PgDn`. Press `Esc` to return to the repo list.
@@ -231,7 +238,7 @@ the arrow keys or `PgUp`/`PgDn`. Press `Esc` to return to the repo list.
 The TUI enables terminal mouse reporting, so you can:
 
 - click a repo row to select it, and click the search / technology fields, the "Notes only"
-  checkbox, or the README pane to focus them
+  and "Worktrees" checkboxes, or the README pane to focus them
 - click the Notes box to start editing, then click inside it to place the cursor
 - click the shortcut bar at the bottom (Refresh, Search, Edit, VS Code, Open Remote, Save,
   Cancel, Quit) instead of using the keys

@@ -70,6 +70,8 @@ export interface FilterOptions {
   search?: string | null;
   technology?: string | null;
   notesOnly?: boolean;
+  /** Linked git worktrees are hidden unless this is set. */
+  includeWorktrees?: boolean;
 }
 
 export class GitLibApp {
@@ -99,7 +101,9 @@ export class GitLibApp {
   }
 
   filterRepositories(repositories: readonly RepoRecord[], options: FilterOptions = {}): RepoRecord[] {
-    let filtered = [...repositories];
+    let filtered = options.includeWorktrees
+      ? [...repositories]
+      : repositories.filter((repo) => !repo.isWorktree);
 
     if (options.search) {
       const needle = options.search.toLowerCase();

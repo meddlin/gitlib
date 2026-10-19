@@ -16,6 +16,7 @@ export const TECHNOLOGY_LABEL = "Technology: ";
 export const FILTER_VALUE_WIDTH = 20;
 const FIELD_GAP = 2;
 const NOTES_ONLY_LABEL = "[ ] Notes only";
+const WORKTREES_LABEL = "[ ] Worktrees";
 
 export interface Rect {
   x: number;
@@ -27,6 +28,7 @@ export interface Rect {
 export type FooterAction =
   | "refresh"
   | "search"
+  | "worktrees"
   | "edit"
   | "vscode"
   | "remote"
@@ -37,6 +39,7 @@ export type FooterAction =
 export const FOOTER_BUTTONS: { action: FooterAction; key: string; name: string }[] = [
   { action: "refresh", key: "r", name: "Refresh" },
   { action: "search", key: "/", name: "Search" },
+  { action: "worktrees", key: "w", name: "Worktrees" },
   { action: "edit", key: "e", name: "Edit" },
   { action: "vscode", key: "v", name: "VS Code" },
   { action: "remote", key: "o", name: "Open Remote" },
@@ -59,6 +62,7 @@ export interface Layout {
   search: Rect;
   technology: Rect;
   notesOnly: Rect;
+  worktrees: Rect;
   /** The whole left (repository list) pane, borders included. */
   tablePane: Rect;
   /** The data rows of the repository table. */
@@ -98,6 +102,13 @@ export function computeLayout(columns: number, rows: number): Layout {
     height: 1,
   };
 
+  const worktrees: Rect = {
+    x: notesOnly.x + NOTES_ONLY_LABEL.length + FIELD_GAP,
+    y: filterY,
+    width: WORKTREES_LABEL.length,
+    height: 1,
+  };
+
   // Detail pane: border (1) + padding (1) on each side, then stacked sections.
   const detailX = leftWidth + 2;
   const detailTop = contentY + 1;
@@ -127,6 +138,7 @@ export function computeLayout(columns: number, rows: number): Layout {
     search,
     technology,
     notesOnly,
+    worktrees,
     tablePane: { x: 0, y: contentY, width: leftWidth, height: contentHeight },
     // border (1) + title line + column header line
     tableRows: { x: 2, y: contentY + 3, width: Math.max(1, leftWidth - 4), height: tableHeight },

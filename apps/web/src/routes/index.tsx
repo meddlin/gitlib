@@ -13,6 +13,8 @@ interface IndexSearch {
   tech?: string;
   /** relativePath of the repo shown in the preview pane. */
   repo?: string;
+  /** Linked git worktrees are hidden unless this is set. */
+  worktrees?: true;
 }
 
 export const Route = createFileRoute("/")({
@@ -20,10 +22,14 @@ export const Route = createFileRoute("/")({
     q: typeof search.q === "string" && search.q ? search.q : undefined,
     tech: typeof search.tech === "string" && search.tech ? search.tech : undefined,
     repo: typeof search.repo === "string" && search.repo ? search.repo : undefined,
+    worktrees: isTruthyParam(search.worktrees) ? true : undefined,
   }),
   loader: () => getRepos(),
   component: RepoLibrary,
 });
+
+const isTruthyParam = (value: unknown): boolean =>
+  value === true || value === 1 || value === "true" || value === "1";
 
 function matches(repo: RepoView, q: string | undefined, tech: string | undefined): boolean {
   if (tech && !repo.technologies.some((t) => t.name.toLowerCase() === tech.toLowerCase())) return false;
@@ -38,12 +44,18 @@ function matches(repo: RepoView, q: string | undefined, tech: string | undefined
 }
 
 function RepoLibrary() {
-  const { repos, roots } = Route.useLoaderData();
-  const { q, tech, repo: selectedPath } = Route.useSearch();
+  const { repos: allRepos, roots } = Route.useLoaderData();
+  const { q, tech, repo: selectedPath, worktrees: showWorktrees } = Route.useSearch();
   const navigate = Route.useNavigate();
   const router = useRouter();
   const [scanning, setScanning] = useState(false);
   const [sort, setSort] = useState<Sort>({ key: "name", dir: "asc" });
+
+  const worktreeCount = useMemo(() => allRepos.filter((repo) => repo.isWorktree).length, [allRepos]);
+  const repos = useMemo(
+    () => (showWorktrees ? allRepos : allRepos.filter((repo) => !repo.isWorktree)),
+    [allRepos, showWorktrees],
+  );
 
   const visible = useMemo(
     () => sortRepos(repos.filter((repo) => matches(repo, q, tech)), sort),
@@ -113,6 +125,7 @@ function RepoLibrary() {
           <h1 className="text-lg font-semibold tracking-tight">Gitlib</h1>
           <p className="text-sm text-muted-foreground">
             {repos.length} {repos.length === 1 ? "repository" : "repositories"} · {described} described
+            {!showWorktrees && worktreeCount > 0 ? ` · ${worktreeCount} worktrees hidden` : ""}
             {roots.length > 0 ? (
               <>
                 {" · "}
@@ -156,6 +169,18 @@ function RepoLibrary() {
             onChange={(event) => setSearch({ q: event.target.value || undefined })}
           />
         </div>
+
+        {worktreeCount > 0 ? (
+          <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              className="size-3.5 accent-primary"
+              checked={Boolean(showWorktrees)}
+              onChange={(event) => setSearch({ worktrees: event.target.checked ? true : undefined })}
+            />
+            Show worktrees ({worktreeCount})
+          </label>
+        ) : null}
 
         {techCounts.length > 0 ? (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1" aria-label="Filter by technology">
