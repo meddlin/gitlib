@@ -1,47 +1,66 @@
 import { createFileRoute, useRouter, useRouterState } from "@tanstack/react-router";
 import { RefreshCw, X } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
-import { RepoCard } from "#/components/repo-card";
-import { TechBadge } from "#/components/tech-badge";
-import { Button } from "#/components/ui/button";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { RepoPreview } from "#/components/repo-preview";
+import { RepoTable, sortRepos, type RepoHighlights, type Sort, type SortKey } from "#/components/repo-table";
 import { SearchBar } from "#/components/search-bar";
+import { TechBadge } from "#/components/tech-badge";
+import { cn } from "#/lib/utils";
 import { getRepos, rescanRepos, type RepoView } from "#/server/repos";
 import { searchRepos } from "#/server/search";
 
 interface IndexSearch {
   q?: string;
   tech?: string;
+  /** relativePath of the repo shown in the preview pane. */
+  repo?: string;
+  /** Linked git worktrees are hidden unless this is set. */
+  worktrees?: true;
 }
 
 export const Route = createFileRoute("/")({
   validateSearch: (search: Record<string, unknown>): IndexSearch => ({
     q: typeof search.q === "string" && search.q ? search.q : undefined,
     tech: typeof search.tech === "string" && search.tech ? search.tech : undefined,
+    repo: typeof search.repo === "string" && search.repo ? search.repo : undefined,
+    worktrees: isTruthyParam(search.worktrees) ? true : undefined,
   }),
-  // Only the query re-runs the search; the technology filter is applied client-side.
-  loaderDeps: ({ search }) => ({ q: search.q }),
+  // The query (and whether worktrees count) re-runs the search; the technology filter is applied client-side.
+  loaderDeps: ({ search }) => ({ q: search.q, worktrees: search.worktrees }),
   loader: async ({ deps }) => {
     const [listing, found] = await Promise.all([
       getRepos(),
-      deps.q ? searchRepos({ data: { q: deps.q } }) : Promise.resolve(null),
+      deps.q ? searchRepos({ data: { q: deps.q, worktrees: deps.worktrees === true } }) : Promise.resolve(null),
     ]);
     return { ...listing, found };
   },
   component: RepoLibrary,
 });
 
+const isTruthyParam = (value: unknown): boolean =>
+  value === true || value === 1 || value === "true" || value === "1";
+
 function hasTech(repo: RepoView, tech: string | undefined): boolean {
   return !tech || repo.technologies.some((t) => t.name.toLowerCase() === tech.toLowerCase());
 }
 
+const DEFAULT_SORT: Sort = { key: "name", dir: "asc" };
+
 function RepoLibrary() {
-  const { repos, roots, found } = Route.useLoaderData();
-  const { q, tech } = Route.useSearch();
+  const { repos: allRepos, roots, found } = Route.useLoaderData();
+  const { q, tech, repo: selectedPath, worktrees: showWorktrees } = Route.useSearch();
   const navigate = Route.useNavigate();
   const router = useRouter();
   const [scanning, setScanning] = useState(false);
+  const [sort, setSort] = useState<Sort | null>(null);
 
   const searching = useRouterState({ select: (state) => state.isLoading });
+
+  const worktreeCount = useMemo(() => allRepos.filter((repo) => repo.isWorktree).length, [allRepos]);
+  const repos = useMemo(
+    () => (showWorktrees ? allRepos : allRepos.filter((repo) => !repo.isWorktree)),
+    [allRepos, showWorktrees],
+  );
 
   // With a query the search ranks the results; without one every repository is listed.
   const results = useMemo(() => {
@@ -52,7 +71,20 @@ function RepoLibrary() {
       return repo ? [{ repo, highlights: hit.highlights }] : [];
     });
   }, [repos, found, q]);
-  const visible = useMemo(() => results.filter(({ repo }) => hasTech(repo, tech)), [results, tech]);
+  const highlights: RepoHighlights = useMemo(
+    () => new Map(results.flatMap(({ repo, highlights }) => (highlights ? [[repo.id, highlights] as const] : []))),
+    [results],
+  );
+
+  // A new query goes back to relevance order until the user picks a column to sort by.
+  useEffect(() => setSort(null), [q]);
+  const ranked = Boolean(q && found);
+  const activeSort = sort ?? (ranked ? null : DEFAULT_SORT);
+
+  const visible = useMemo(() => {
+    const filtered = results.map(({ repo }) => repo).filter((repo) => hasTech(repo, tech));
+    return activeSort ? sortRepos(filtered, activeSort) : filtered;
+  }, [results, tech, activeSort]);
 
   // Every detected technology with how many repos use it; languages and frameworks first.
   const techCounts = useMemo(() => {
@@ -70,12 +102,11 @@ function RepoLibrary() {
     );
   }, [repos]);
 
-  const setSearch = (next: IndexSearch) =>
-    navigate({ search: (prev) => ({ ...prev, ...next }), replace: true });
-  const setQuery = useCallback(
-    (next: string) => navigate({ search: (prev) => ({ ...prev, q: next.trim() || undefined }), replace: true }),
+  const setSearch = useCallback(
+    (next: IndexSearch) => navigate({ search: (prev) => ({ ...prev, ...next }), replace: true }),
     [navigate],
   );
+  const setQuery = useCallback((next: string) => setSearch({ q: next.trim() || undefined }), [setSearch]);
   const toggleTech = (name: string) =>
     setSearch({ tech: tech?.toLowerCase() === name.toLowerCase() ? undefined : name });
 
@@ -91,26 +122,56 @@ function RepoLibrary() {
 
   const described = repos.filter((repo) => repo.description).length;
 
+  const selected = useMemo(() => repos.find((repo) => repo.relativePath === selectedPath), [repos, selectedPath]);
+  const closePreview = useCallback(() => setSearch({ repo: undefined }), [setSearch]);
+
+  useEffect(() => {
+    if (!selected) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      // Escape inside an open dialog belongs to the dialog.
+      if (event.key === "Escape" && !event.defaultPrevented) closePreview();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selected, closePreview]);
+
+  const toggleSort = (key: SortKey) =>
+    setSort(activeSort?.key === key ? { key, dir: activeSort.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
+
   return (
     <>
       <SearchBar value={q ?? ""} onChange={setQuery} busy={searching && Boolean(q)} />
-      <div className="mx-auto flex min-h-screen max-w-6xl flex-col gap-6 px-4 py-8 sm:px-6">
-        <header className="flex flex-wrap items-start justify-between gap-4">
+      <div
+        className={cn(
+          "mx-auto flex w-full flex-1 flex-col gap-5 px-4 py-8 transition-[max-width] duration-200 sm:px-6",
+          selected ? "max-w-[96rem]" : "max-w-6xl",
+        )}
+      >
+        <header className="flex flex-wrap items-end justify-between gap-4">
           <div className="min-w-0">
-            <h1 className="text-2xl font-semibold tracking-tight">Gitlib</h1>
+            <h1 className="text-lg font-semibold tracking-tight">Repositories</h1>
             <p className="text-sm text-muted-foreground">
               {repos.length} {repos.length === 1 ? "repository" : "repositories"} · {described} described
+              {!showWorktrees && worktreeCount > 0 ? ` · ${worktreeCount} worktrees hidden` : ""}
+              {roots.length > 0 ? (
+                <>
+                  {" · "}
+                  <span className="font-mono text-xs break-all">{roots.join(", ")}</span>
+                </>
+              ) : null}
             </p>
-            {roots.length > 0 ? (
-              <p className="mt-1 text-xs break-all text-muted-foreground">
-                Scanning <span className="font-mono">{roots.join(", ")}</span>
-              </p>
-            ) : null}
           </div>
-          <Button variant="outline" onClick={rescan} disabled={scanning}>
-            <RefreshCw className={scanning ? "animate-spin" : undefined} aria-hidden />
-            {scanning ? "Scanning…" : "Rescan"}
-          </Button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={rescan}
+              disabled={scanning}
+              className="inline-flex h-8 items-center gap-1.5 border px-3 text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+            >
+              <RefreshCw className={cn("size-3.5", scanning && "animate-spin")} aria-hidden />
+              {scanning ? "Scanning…" : "Rescan"}
+            </button>
+          </div>
         </header>
 
         <div className="flex flex-col gap-3">
@@ -122,36 +183,49 @@ function RepoLibrary() {
                   <span className="font-medium text-foreground">“{q}”</span>
                 </>
               ) : found.notice ? (
-                <span className="text-amber-700 dark:text-amber-400">
-                  Showing basic matches only — {found.notice}
-                </span>
+                <span className="text-amber-700 dark:text-amber-400">Showing basic matches only — {found.notice}</span>
               ) : (
                 <>Showing basic matches (full-text search is turned off).</>
               )}
             </p>
           ) : null}
 
+          {worktreeCount > 0 ? (
+            <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                className="size-3.5 accent-primary"
+                checked={Boolean(showWorktrees)}
+                onChange={(event) => setSearch({ worktrees: event.target.checked ? true : undefined })}
+              />
+              Show worktrees ({worktreeCount})
+            </label>
+          ) : null}
+
           {techCounts.length > 0 ? (
-            <div className="flex flex-wrap items-center gap-1.5" aria-label="Filter by technology">
-              {techCounts.map(([name, { category, count }]) => (
-                <button
-                  key={name}
-                  type="button"
-                  onClick={() => toggleTech(name)}
-                  aria-pressed={tech?.toLowerCase() === name.toLowerCase()}
-                  className="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <TechBadge
-                    name={`${name} · ${count}`}
-                    category={category}
-                    active={tech?.toLowerCase() === name.toLowerCase()}
-                  />
-                </button>
-              ))}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1" aria-label="Filter by technology">
+              {techCounts.map(([name, { category, count }]) => {
+                const active = tech?.toLowerCase() === name.toLowerCase();
+                return (
+                  <button
+                    key={name}
+                    type="button"
+                    onClick={() => toggleTech(name)}
+                    aria-pressed={active}
+                    className="outline-none hover:opacity-70 focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <TechBadge name={`${name} ${count}`} category={category} active={active} />
+                  </button>
+                );
+              })}
               {tech || q ? (
-                <Button variant="ghost" size="xs" onClick={() => setSearch({ q: undefined, tech: undefined })}>
-                  <X aria-hidden /> Clear filters
-                </Button>
+                <button
+                  type="button"
+                  onClick={() => setSearch({ q: undefined, tech: undefined })}
+                  className="inline-flex items-center gap-1 text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <X className="size-3" aria-hidden /> Clear filters
+                </button>
               ) : null}
             </div>
           ) : null}
@@ -165,13 +239,21 @@ function RepoLibrary() {
         ) : visible.length === 0 ? (
           <EmptyState>No repositories match your filters.</EmptyState>
         ) : (
-          <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {visible.map(({ repo, highlights }) => (
-              <li key={repo.id} className="flex">
-                <RepoCard repo={repo} activeTech={tech} highlights={highlights} onToggleTech={toggleTech} />
-              </li>
-            ))}
-          </ul>
+          <div className="flex items-start">
+            <div className="min-w-0 flex-1">
+              <RepoTable
+                repos={visible}
+                highlights={ranked ? highlights : undefined}
+                sort={activeSort}
+                onSort={toggleSort}
+                activeTech={tech}
+                onToggleTech={toggleTech}
+                selectedPath={selected?.relativePath}
+                onSelect={(repo) => setSearch({ repo: repo.relativePath })}
+              />
+            </div>
+            <RepoPreview repo={selected} onClose={closePreview} />
+          </div>
         )}
       </div>
     </>
@@ -179,9 +261,5 @@ function RepoLibrary() {
 }
 
 function EmptyState({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="rounded-lg border border-dashed p-10 text-center text-sm text-muted-foreground">
-      {children}
-    </div>
-  );
+  return <div className="border-y py-10 text-center text-sm text-muted-foreground">{children}</div>;
 }

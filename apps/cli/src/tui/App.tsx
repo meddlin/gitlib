@@ -196,7 +196,7 @@ export function GitLibTui({
         </Text>
         <Text dimColor>
           {" "}
-          {model.filteredRepositories.length} of {model.repositories.length} repositories
+          {model.filteredRepositories.length} of {model.scopeCount} repositories
         </Text>
       </Box>
 
@@ -211,6 +211,11 @@ export function GitLibTui({
         <Text color={labelColor("notes-only")} inverse={focused === "notes-only"}>
           [{model.notesOnly ? "x" : " "}] Notes only
         </Text>
+        <Box marginLeft={2}>
+          <Text color={labelColor("worktrees")} inverse={focused === "worktrees"}>
+            [{model.showWorktrees ? "x" : " "}] Worktrees
+          </Text>
+        </Box>
       </Box>
 
       <Box height={contentHeight}>

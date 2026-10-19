@@ -57,6 +57,11 @@ npm run typecheck    # tsc --noEmit across the workspace
 
 Operational notes:
 
+- Linked `git worktree` checkouts (for example `.claude/worktrees/*`) are discovered but
+  hidden from listings by default, because they are extra checkouts of a repo you already
+  have rather than separate repos. Use `gitlib list --worktrees`, the TUI `w` key, or the
+  web app's **Show worktrees** checkbox to see them. Submodules are still listed as repos.
+
 - First run creates `~/.git-library/` for config and SQLite data (override with `GITLIB_HOME`).
 - The default scan root is `~/git`.
 - The SQLite schema is unchanged from the original Python version, so an existing
@@ -118,13 +123,95 @@ npm run build -w @gitlib/web && npm run preview -w @gitlib/web   # production bu
 - Cards highlight each repo's detected **languages and frameworks** (colour-coded by
   language / framework / runtime / tooling). Click any badge, or one of the chips under the
   search box, to filter; filters live in the URL (`?q=…&tech=…`).
+- The **Settings** page (gear icon, `/settings`) picks a colour scheme: System (follows the
+  OS), Light, Dark, or one of the generated Ocean, Forest, Sunset and Orchid schemes. The
+  choice is saved in the browser's `localStorage`. Palettes are defined in
+  `apps/web/src/styles.css`; add a scheme there and in `apps/web/src/lib/themes.ts`.
+
+## Run with Docker
+
+The web app ships with a `Dockerfile` and `docker-compose.yml`, so you can host it on a VM
+(for example on a Proxmox server). The container runs the production build of `apps/web`
+with a small Node server (`apps/web/server.mjs`) on port 3000.
+
+### 1. Prepare the VM
+
+Any Linux VM with Docker Engine and the Compose plugin works (e.g. Debian/Ubuntu on Proxmox):
+
+```bash
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker "$USER"   # log out and back in afterwards
+```
+
+### 2. Get the code and your repositories onto the VM
+
+```bash
+git clone <this-repo-url> gitlib && cd gitlib
+```
+
+Gitlib only discovers repositories it can see on disk, so put the repos you want to browse in a
+single directory on the VM (clone them, `rsync` them from your workstation, or mount an NFS/SMB
+share from your NAS). Their remotes and detected technologies are read from the checkouts.
+
+### 3. Start it
+
+```bash
+GITLIB_REPOS=/srv/git docker compose up -d --build
+```
+
+Open `http://<vm-ip>:3000`. Instead of passing variables inline you can put them in a `.env`
+file next to `docker-compose.yml`:
+
+| Variable        | Default   | Meaning                                                    |
+| --------------- | --------- | ---------------------------------------------------------- |
+| `GITLIB_REPOS`  | `./repos` | Host directory with your git repos (mounted read-only)     |
+| `GITLIB_PORT`   | `3000`    | Host port the web app is published on                      |
+| `TZ`            | `UTC`     | Container time zone                                        |
+
+How it is wired up:
+
+- Your repos are mounted read-only at `/home/node/git` inside the container, which is the
+  default scan root (`~/git`) for the container user, so no config changes are needed. Use
+  **Rescan** in the UI after adding repos.
+- Config (`config.toml`) and the SQLite database (repo descriptions) live in the named volume
+  `gitlib-data`, mounted at `/data` (`GITLIB_HOME`). They survive restarts and rebuilds.
+  `docker compose down` keeps the volume; `docker compose down -v` deletes it.
+
+### Day-to-day
+
+```bash
+docker compose logs -f web          # follow logs
+docker compose ps                   # status (includes a health check)
+docker compose restart web
+git pull && docker compose up -d --build   # update to the latest version
+```
+
+Back up the data volume with:
+
+```bash
+docker run --rm -v gitlib_gitlib-data:/data -v "$PWD":/backup busybox \
+  tar czf /backup/gitlib-data.tgz -C /data .
+```
+
+(The volume is prefixed with the Compose project name, which defaults to the directory name;
+check `docker volume ls` if yours differs.)
+
+### Security note
+
+The web app has **no authentication**. Do not expose port 3000 to the internet. Keep it on your
+LAN/VPN, or put a reverse proxy with authentication in front of it (Caddy, Nginx Proxy Manager,
+Traefik, Authelia, …) and bind the port to localhost by changing the `ports` entry in
+`docker-compose.yml` to `"127.0.0.1:3000:3000"`.
+
+The CLI, TUI and VS Code / browser launchers are desktop features and are not part of the
+container.
 
 ## Current CLI Commands
 
 These commands are implemented today:
 
 ```bash
-gitlib list [--tech TAG] [--notes-only] [--json]
+gitlib list [--tech TAG] [--notes-only] [--worktrees] [--json]
 gitlib show <repo> [--json]
 gitlib scan
 gitlib open code <repo>
@@ -138,6 +225,7 @@ Command summary:
 - `gitlib list` lists all discovered repos.
 - `gitlib list --tech TAG` filters repos by a detected technology tag.
 - `gitlib list --notes-only` shows only repos with notes.
+- `gitlib list --worktrees` also lists linked `git worktree` checkouts (hidden by default).
 - `gitlib list --json` returns machine-readable output.
 - `gitlib show <repo>` shows details for one repo.
 - `gitlib scan` refreshes repo discovery and technology metadata.
@@ -172,13 +260,14 @@ Keybindings:
 - `e` enters notes edit mode
 - `v` opens the selected repo in VS Code
 - `o` opens the preferred remote landing page in your browser
+- `w` shows or hides linked git worktrees (hidden by default)
 - `Ctrl+S` saves notes
 - `Esc` cancels note editing or leaves the focused input
 
-- `Tab` / `Shift+Tab` cycle focus: repo list, README pane, search, technology filter, notes-only checkbox
+- `Tab` / `Shift+Tab` cycle focus: repo list, README pane, search, technology filter, notes-only checkbox, worktrees checkbox
 - Arrow keys, `PgUp`/`PgDn`, `Home` and `End` move through the repo list or scroll the README
   (whichever has focus)
-- `Space` or `Enter` toggles the "Notes only" checkbox when it has focus
+- `Space` or `Enter` toggles the "Notes only" or "Worktrees" checkbox when it has focus
 
 To scroll a long `README.md`, press `Tab` once to move focus into the README pane, then use
 the arrow keys or `PgUp`/`PgDn`. Press `Esc` to return to the repo list.
@@ -188,7 +277,7 @@ the arrow keys or `PgUp`/`PgDn`. Press `Esc` to return to the repo list.
 The TUI enables terminal mouse reporting, so you can:
 
 - click a repo row to select it, and click the search / technology fields, the "Notes only"
-  checkbox, or the README pane to focus them
+  and "Worktrees" checkboxes, or the README pane to focus them
 - click the Notes box to start editing, then click inside it to place the cursor
 - click the shortcut bar at the bottom (Refresh, Search, Edit, VS Code, Open Remote, Save,
   Cancel, Quit) instead of using the keys

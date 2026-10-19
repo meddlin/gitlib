@@ -185,6 +185,26 @@ describe("GitLibApp search", () => {
     expect((await app.searchRepositories("x", { notesOnly: true })).hits.map((h) => h.repo.relativePath)).toEqual(["beta"]);
   });
 
+  it("hides linked worktrees from search results unless asked to include them", async () => {
+    const backend = new FakeBackend();
+    fx.writeConfig();
+    fx.initRealGitRepo("main-repo");
+    fx.addWorktree("main-repo", "main-repo/.claude/worktrees/feature");
+    const app = createApplication(fx.env(), undefined, backend);
+    const repos = app.refresh();
+    backend.hits = repos.map((repo) => ({ id: repo.id, highlights: {} }));
+    const paths = async (options?: { includeWorktrees?: boolean }) =>
+      (await app.searchRepositories("main", options)).hits.map((hit) => hit.repo.relativePath);
+
+    expect(await paths()).toEqual(["main-repo"]);
+    expect(await paths({ includeWorktrees: true })).toEqual(["main-repo", "main-repo/.claude/worktrees/feature"]);
+
+    // The substring fallback applies the same rule.
+    backend.failWith = new SearchUnavailableError("down");
+    expect(await paths()).toEqual(["main-repo"]);
+    expect(await paths({ includeWorktrees: true })).toEqual(["main-repo", "main-repo/.claude/worktrees/feature"]);
+  });
+
   it("falls back to substring matching when the backend is unavailable", async () => {
     const backend = new FakeBackend();
     backend.failWith = new SearchUnavailableError("Meilisearch at fake is unavailable: refused");

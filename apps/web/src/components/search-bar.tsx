@@ -56,14 +56,14 @@ export function SearchBar({
   }, []);
 
   return (
-    <div className="sticky top-0 z-20 border-b bg-background/85 backdrop-blur supports-[backdrop-filter]:bg-background/70">
-      <div className="mx-auto max-w-6xl px-4 py-3 sm:px-6">
-        <form role="search" className="relative" onSubmit={(event) => {
+    <div className="sticky top-12 z-10 h-14 shrink-0 border-b bg-background/90 backdrop-blur">
+      <div className="mx-auto flex h-full max-w-6xl items-center px-4 sm:px-6">
+        <form role="search" className="relative w-full" onSubmit={(event) => {
             event.preventDefault();
             emit(draft);
           }}>
           <Search
-            className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+            className="pointer-events-none absolute top-1/2 left-0 size-4 -translate-y-1/2 text-muted-foreground"
             aria-hidden
           />
           <Input
@@ -73,17 +73,19 @@ export function SearchBar({
             autoComplete="off"
             placeholder="Search repositories, READMEs and notes  ( / )"
             aria-label="Search repositories"
-            className="h-10 pr-10 pl-9 [&::-webkit-search-cancel-button]:hidden"
+            className="h-10 rounded-none border-0 bg-transparent pr-8 pl-7 shadow-none focus-visible:ring-0 dark:bg-transparent [&::-webkit-search-cancel-button]:hidden"
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === "Escape") {
+              // Escape clears a query; with nothing to clear it falls through to close the preview pane.
+              if (event.key === "Escape" && draft) {
+                event.preventDefault();
                 setDraft("");
                 emit("");
               }
             }}
           />
-          <div className="absolute top-1/2 right-3 -translate-y-1/2 text-muted-foreground">
+          <div className="absolute top-1/2 right-0 -translate-y-1/2 text-muted-foreground">
             {busy ? (
               <Loader2 className="size-4 animate-spin" aria-label="Searching" />
             ) : draft ? (

@@ -52,7 +52,7 @@ export function DescriptionDialog({ repo, children }: { repo: RepoView; children
           <DialogHeader>
             <DialogTitle>{repo.name}</DialogTitle>
             <DialogDescription>
-              A short summary of what this repository is for. Shown on its card and searchable.
+              A short summary of what this repository is for. Shown in the table and searchable.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">

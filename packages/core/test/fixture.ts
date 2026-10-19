@@ -67,6 +67,23 @@ export class Fixture {
     return this.writeFiles(repoPath, files);
   }
 
+  /** Adds a real linked worktree of `repoRelativePath` at `worktreeRelativePath` (under the git root). */
+  addWorktree(repoRelativePath: string, worktreeRelativePath: string): string {
+    const repoPath = path.join(this.gitRoot, repoRelativePath);
+    const target = path.join(this.gitRoot, worktreeRelativePath);
+    const identity = ["-c", "user.name=Test", "-c", "user.email=test@example.com"];
+    execFileSync("git", ["-C", repoPath, ...identity, "commit", "--allow-empty", "-m", "init"], {
+      stdio: "pipe",
+    });
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    execFileSync(
+      "git",
+      ["-C", repoPath, "worktree", "add", "-b", `wt-${path.basename(target)}`, target],
+      { stdio: "pipe" },
+    );
+    return target;
+  }
+
   git(repoPath: string, ...args: string[]): void {
     execFileSync("git", ["-C", repoPath, ...args], { stdio: "pipe" });
   }

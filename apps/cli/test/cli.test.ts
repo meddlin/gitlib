@@ -53,6 +53,30 @@ describe("notes edit", () => {
 });
 
 describe("list and show", () => {
+  it("hides linked worktrees unless --worktrees is passed", async () => {
+    fx.writeConfig();
+    fx.initRealGitRepo("main-repo");
+    fx.addWorktree("main-repo", "main-repo/.claude/worktrees/feature");
+
+    const hidden = await fx.runCli(["list", "--json"]);
+    expect(hidden.code, hidden.stderr).toBe(0);
+    expect(JSON.parse(hidden.stdout).map((r: { relative_path: string }) => r.relative_path)).toEqual([
+      "main-repo",
+    ]);
+
+    const shown = await fx.runCli(["list", "--worktrees", "--json"]);
+    expect(shown.code, shown.stderr).toBe(0);
+    expect(
+      JSON.parse(shown.stdout).map((r: { relative_path: string; is_worktree: boolean }) => [
+        r.relative_path,
+        r.is_worktree,
+      ]),
+    ).toEqual([
+      ["main-repo", false],
+      ["main-repo/.claude/worktrees/feature", true],
+    ]);
+  });
+
   it("have stable JSON shapes", async () => {
     fx.writeConfig();
     fx.makeRepo("json-repo", { "package.json": JSON.stringify({ dependencies: { react: "18.0.0" } }) });
@@ -66,7 +90,16 @@ describe("list and show", () => {
     const payload = JSON.parse(list.stdout);
     expect(payload).toHaveLength(1);
     expect(Object.keys(payload[0]).sort()).toEqual(
-      ["absolute_path", "has_notes", "last_scanned_at", "name", "notes", "relative_path", "technologies"].sort(),
+      [
+        "absolute_path",
+        "has_notes",
+        "is_worktree",
+        "last_scanned_at",
+        "name",
+        "notes",
+        "relative_path",
+        "technologies",
+      ].sort(),
     );
     expect(payload[0]).toMatchObject({
       name: "json-repo",
@@ -234,6 +267,8 @@ describe("helpers", () => {
         technologies: [],
         notes: "word ".repeat(30),
         hasNotes: true,
+        isWorktree: false,
+        isFavorite: false,
         description: "",
       },
     ]);

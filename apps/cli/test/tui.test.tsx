@@ -113,6 +113,26 @@ describe("TUI", () => {
     expect(tui.frame()).toContain("[x] Notes only");
   });
 
+  it("hides worktrees by default and toggles them with w", async () => {
+    fx.initRealGitRepo("main-repo");
+    fx.addWorktree("main-repo", "main-repo/.claude/worktrees/feature");
+    const tui = mount(createApplication(fx.env()));
+    const visible = () => tui.model.filteredRepositories.map((r) => r.relativePath);
+
+    expect(visible()).toEqual(["main-repo"]);
+    expect(tui.frame()).toContain("1 of 1 repositories");
+    expect(tui.frame()).toContain("[ ] Worktrees");
+
+    await tui.press("w");
+    expect(visible()).toEqual(["main-repo", "main-repo/.claude/worktrees/feature"]);
+    expect(tui.frame()).toContain("2 of 2 repositories");
+    expect(tui.frame()).toContain("[x] Worktrees");
+
+    await tui.click(tui.layout.worktrees, 1);
+    expect(visible()).toEqual(["main-repo"]);
+    expect(tui.model.focus).toBe("worktrees");
+  });
+
   it("does not treat typed letters in a filter as shortcuts", async () => {
     fx.makeRepo("alpha");
     const tui = mount(createApplication(fx.env()));

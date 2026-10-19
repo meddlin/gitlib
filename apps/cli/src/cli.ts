@@ -24,9 +24,17 @@ export interface CliIo {
 }
 
 type Invocation =
-  | { name: "list"; technology?: string; notesOnly?: boolean; json?: boolean }
+  | { name: "list"; technology?: string; notesOnly?: boolean; worktrees?: boolean; json?: boolean }
   | { name: "show"; repo: string; json?: boolean }
-  | { name: "search"; query: string; technology?: string; notesOnly?: boolean; limit?: number; json?: boolean }
+  | {
+      name: "search";
+      query: string;
+      technology?: string;
+      notesOnly?: boolean;
+      worktrees?: boolean;
+      limit?: number;
+      json?: boolean;
+    }
   | { name: "reindex" }
   | { name: "scan" }
   | { name: "tui" }
@@ -54,9 +62,16 @@ function buildProgram(
     .description("List repositories")
     .option("--tech <technology>", "only repositories tagged with this technology")
     .option("--notes-only", "only repositories that have notes")
+    .option("--worktrees", "include linked git worktrees (hidden by default)")
     .option("--json", "machine-readable output")
-    .action((options: { tech?: string; notesOnly?: boolean; json?: boolean }) =>
-      onInvoke({ name: "list", technology: options.tech, notesOnly: options.notesOnly, json: options.json }),
+    .action((options: { tech?: string; notesOnly?: boolean; worktrees?: boolean; json?: boolean }) =>
+      onInvoke({
+        name: "list",
+        technology: options.tech,
+        notesOnly: options.notesOnly,
+        worktrees: options.worktrees,
+        json: options.json,
+      }),
     );
 
   program
@@ -74,18 +89,20 @@ function buildProgram(
     .argument("<query...>", "words to search for")
     .option("--tech <technology>", "only repositories tagged with this technology")
     .option("--notes-only", "only repositories that have notes")
+    .option("--worktrees", "include linked git worktrees (hidden by default)")
     .option("--limit <count>", "most results to return", parsePositiveInt)
     .option("--json", "machine-readable output")
     .action(
       (
         words: string[],
-        options: { tech?: string; notesOnly?: boolean; limit?: number; json?: boolean },
+        options: { tech?: string; notesOnly?: boolean; worktrees?: boolean; limit?: number; json?: boolean },
       ) =>
         onInvoke({
           name: "search",
           query: words.join(" "),
           technology: options.tech,
           notesOnly: options.notesOnly,
+          worktrees: options.worktrees,
           limit: options.limit,
           json: options.json,
         }),
@@ -141,6 +158,7 @@ async function execute(
       const repositories = app.listRepositories({
         technology: invocation.technology ?? null,
         notesOnly: invocation.notesOnly ?? false,
+        includeWorktrees: invocation.worktrees ?? false,
       });
       print(invocation.json ? renderJson(repositories.map(repoToDict)) : renderTable(repositories));
       return 0;
@@ -154,6 +172,7 @@ async function execute(
       const result = await app.searchRepositories(invocation.query, {
         technology: invocation.technology ?? null,
         notesOnly: invocation.notesOnly ?? false,
+        includeWorktrees: invocation.worktrees ?? false,
         limit: invocation.limit,
       });
       if (result.notice) printError(`Using basic matching: ${result.notice}`);

@@ -71,6 +71,8 @@ export interface FilterOptions {
   search?: string | null;
   technology?: string | null;
   notesOnly?: boolean;
+  /** Linked git worktrees are hidden unless this is set. */
+  includeWorktrees?: boolean;
 }
 
 export interface SearchOptions extends Omit<FilterOptions, "search"> {
@@ -131,7 +133,7 @@ export class GitLibApp {
   }
 
   private applyFilters(repositories: RepoRecord[], options: FilterOptions): RepoRecord[] {
-    let filtered = repositories;
+    let filtered = options.includeWorktrees ? repositories : repositories.filter((repo) => !repo.isWorktree);
 
     if (options.technology) {
       const needle = options.technology.toLowerCase();
@@ -266,6 +268,13 @@ export class GitLibApp {
     if (refresh) this.refresh();
     const repo = this.store.resolveRepository(selector);
     this.store.updateDescription(repo.id, description.trim());
+    return this.store.resolveRepository(selector);
+  }
+
+  saveRepositoryFavorite(selector: string, favorite: boolean, refresh = false): RepoRecord {
+    if (refresh) this.refresh();
+    const repo = this.store.resolveRepository(selector);
+    this.store.updateFavorite(repo.id, favorite);
     return this.store.resolveRepository(selector);
   }
 

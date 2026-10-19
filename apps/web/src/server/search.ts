@@ -19,14 +19,14 @@ export interface SearchResponse {
 export const MAX_QUERY_LENGTH = 200;
 
 export const searchRepos = createServerFn({ method: "GET" })
-  .validator((input: { q: string }) => {
+  .validator((input: { q: string; worktrees?: boolean }) => {
     if (typeof input?.q !== "string") throw new Error("Invalid search payload.");
-    return { q: input.q.slice(0, MAX_QUERY_LENGTH) };
+    return { q: input.q.slice(0, MAX_QUERY_LENGTH), worktrees: input.worktrees === true };
   })
   .handler(async ({ data }): Promise<SearchResponse> => {
     await loadAndIndexRepositories(false);
     await settleIndexing();
-    const result = await getApp().searchRepositories(data.q);
+    const result = await getApp().searchRepositories(data.q, { includeWorktrees: data.worktrees });
     return {
       mode: result.mode,
       notice: result.notice,

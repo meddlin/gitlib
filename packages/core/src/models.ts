@@ -3,6 +3,8 @@ export interface DiscoveredRepo {
   relativePath: string;
   absolutePath: string;
   name: string;
+  /** A linked `git worktree` checkout rather than a standalone clone. */
+  isWorktree: boolean;
 }
 
 export interface RepoRecord {
@@ -14,6 +16,10 @@ export interface RepoRecord {
   lastSeenAt: string;
   lastScannedAt: string | null;
   isMissing: boolean;
+  /** A linked `git worktree` checkout; hidden from listings unless worktrees are requested. */
+  isWorktree: boolean;
+  /** Pinned by the user; clients list favorites ahead of other repos. */
+  isFavorite: boolean;
   technologies: string[];
   notes: string;
   hasNotes: boolean;
