@@ -14,6 +14,7 @@ export interface RepoView {
   absolutePath: string;
   description: string;
   hasNotes: boolean;
+  isWorktree: boolean;
   lastScannedAt: string | null;
   technologies: TechnologyView[];
 }
@@ -35,6 +36,7 @@ function listing(force: boolean): RepoListing {
       absolutePath: repo.absolutePath,
       description: repo.description,
       hasNotes: repo.hasNotes,
+      isWorktree: repo.isWorktree,
       lastScannedAt: repo.lastScannedAt,
       technologies: repo.technologies.map((name) => ({ name, category: technologyCategory(name) })),
     }),

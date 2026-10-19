@@ -1,6 +1,7 @@
 import { FolderGit2, Pencil } from "lucide-react";
 import { DescriptionDialog } from "#/components/description-dialog";
 import { TechBadge } from "#/components/tech-badge";
+import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card";
 import type { RepoView } from "#/server/repos";
@@ -23,6 +24,11 @@ export function RepoCard({
         <CardTitle className="flex items-center gap-2 text-base">
           <FolderGit2 className="size-4 shrink-0 text-muted-foreground" aria-hidden />
           <span className="truncate">{repo.name}</span>
+          {repo.isWorktree ? (
+            <Badge variant="outline" className="ml-auto">
+              worktree
+            </Badge>
+          ) : null}
         </CardTitle>
         <CardDescription className="truncate font-mono text-xs" title={repo.absolutePath}>
           {repo.relativePath}

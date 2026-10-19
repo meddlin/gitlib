@@ -33,6 +33,7 @@ interface RepoRow {
   last_seen_at: string;
   last_scanned_at: string | null;
   is_missing: number;
+  is_worktree: number;
   notes: string;
   description: string;
 }
@@ -73,7 +74,18 @@ const SCHEMA = `
 export class Store {
   constructor(readonly dbPath: string) {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-    this.withConnection((db) => db.exec(SCHEMA));
+    this.withConnection((db) => {
+      db.exec(SCHEMA);
+      this.migrate(db);
+    });
+  }
+
+  /** Brings databases created by older versions up to the current schema. */
+  private migrate(db: DatabaseSync): void {
+    const columns = db.prepare("PRAGMA table_info(repos)").all() as { name: string }[];
+    if (!columns.some((column) => column.name === "is_worktree")) {
+      db.exec("ALTER TABLE repos ADD COLUMN is_worktree INTEGER NOT NULL DEFAULT 0");
+    }
   }
 
   /** Opens a short-lived connection, mirroring the one-connection-per-operation Python store. */
@@ -114,19 +126,27 @@ export class Store {
 
     this.transaction((db) => {
       const upsert = db.prepare(`
-        INSERT INTO repos (root_path, relative_path, absolute_path, name, last_seen_at, is_missing)
-        VALUES (?, ?, ?, ?, ?, 0)
+        INSERT INTO repos (root_path, relative_path, absolute_path, name, last_seen_at, is_missing, is_worktree)
+        VALUES (?, ?, ?, ?, ?, 0, ?)
         ON CONFLICT(root_path, relative_path) DO UPDATE SET
           absolute_path = excluded.absolute_path,
           name = excluded.name,
           last_seen_at = excluded.last_seen_at,
-          is_missing = 0
+          is_missing = 0,
+          is_worktree = excluded.is_worktree
       `);
       const selectId = db.prepare("SELECT id FROM repos WHERE root_path = ? AND relative_path = ?");
       const ensureNotes = db.prepare("INSERT OR IGNORE INTO repo_notes(repo_id, notes) VALUES (?, '')");
 
       for (const repo of discoveredList) {
-        upsert.run(repo.rootPath, repo.relativePath, repo.absolutePath, repo.name, seenAt);
+        upsert.run(
+          repo.rootPath,
+          repo.relativePath,
+          repo.absolutePath,
+          repo.name,
+          seenAt,
+          repo.isWorktree ? 1 : 0,
+        );
         const row = selectId.get(repo.rootPath, repo.relativePath) as { id: number } | undefined;
         if (!row) continue;
         repoIds.set(keyOf(repo.rootPath, repo.relativePath), Number(row.id));
@@ -170,6 +190,7 @@ export class Store {
           repos.last_seen_at,
           repos.last_scanned_at,
           repos.is_missing,
+          repos.is_worktree,
           COALESCE(repo_notes.notes, '') AS notes,
           COALESCE(repo_descriptions.description, '') AS description
         FROM repos
@@ -202,6 +223,7 @@ export class Store {
       lastSeenAt: row.last_seen_at,
       lastScannedAt: row.last_scanned_at || null,
       isMissing: Boolean(row.is_missing),
+      isWorktree: Boolean(row.is_worktree),
       technologies: sortTechnologies(technologies.get(row.id) ?? []),
       notes: row.notes,
       hasNotes: row.notes.trim().length > 0,

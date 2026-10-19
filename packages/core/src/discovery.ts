@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 import { isDirectory, resolvePath, walk } from "./fsutil.js";
 import type { DiscoveredRepo } from "./models.js";
@@ -5,6 +6,23 @@ import type { DiscoveredRepo } from "./models.js";
 function relativePath(root: string, repoPath: string): string {
   const relative = path.relative(root, repoPath).split(path.sep).join("/");
   return relative || ".";
+}
+
+/**
+ * A linked worktree has a `.git` *file* reading `gitdir: <common>/worktrees/<name>`.
+ * Submodules also use a `.git` file, but theirs points into `.git/modules/`, so they
+ * are not matched and stay ordinary repositories.
+ */
+export function isLinkedWorktree(repoPath: string): boolean {
+  let contents: string;
+  try {
+    contents = fs.readFileSync(path.join(repoPath, ".git"), "utf-8");
+  } catch {
+    return false; // `.git` is a directory (or unreadable): a standalone repo.
+  }
+  const match = /^gitdir:\s*(.+?)\s*$/m.exec(contents);
+  if (!match) return false;
+  return path.basename(path.dirname(path.resolve(repoPath, match[1]!))) === "worktrees";
 }
 
 export function discoverRepos(
@@ -31,6 +49,7 @@ export function discoverRepos(
         relativePath: relativePath(root, entry.dirpath),
         absolutePath: resolvePath(entry.dirpath),
         name: path.basename(entry.dirpath),
+        isWorktree: entry.filenames.includes(".git") && isLinkedWorktree(entry.dirpath),
       });
     }
   }

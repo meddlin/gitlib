@@ -18,7 +18,7 @@ import {
 import type { MouseEvent } from "./mouse.js";
 import { TextBuffer } from "./text-buffer.js";
 
-export type FocusTarget = "table" | "readme" | "search" | "technology" | "notes-only" | "notes";
+export type FocusTarget = "table" | "readme" | "search" | "technology" | "notes-only" | "worktrees" | "notes";
 
 /** The subset of Ink's `Key` that the model understands. */
 export interface KeyPress {
@@ -40,7 +40,14 @@ export interface KeyPress {
   meta?: boolean;
 }
 
-const TAB_ORDER: FocusTarget[] = ["table", "readme", "search", "technology", "notes-only"];
+const TAB_ORDER: FocusTarget[] = [
+  "table",
+  "readme",
+  "search",
+  "technology",
+  "notes-only",
+  "worktrees",
+];
 const TEXT_FOCUS = new Set<FocusTarget>(["search", "technology", "notes"]);
 
 /**
@@ -61,6 +68,8 @@ export class TuiModel {
   readonly search = new TextBuffer();
   readonly technology = new TextBuffer();
   notesOnly = false;
+  /** Linked git worktrees are hidden until toggled on. */
+  showWorktrees = false;
   notes = new TextBuffer();
 
   readmeScroll = 0;
@@ -97,6 +106,13 @@ export class TuiModel {
   get selectedRepository(): RepoRecord | null {
     if (this.selectedRelativePath === null) return null;
     return this.repositories.find((repo) => repo.relativePath === this.selectedRelativePath) ?? null;
+  }
+
+  /** Repositories in scope for the "N of M" header: hidden worktrees are not counted. */
+  get scopeCount(): number {
+    return this.showWorktrees
+      ? this.repositories.length
+      : this.repositories.filter((repo) => !repo.isWorktree).length;
   }
 
   get readmeText(): string {
@@ -179,6 +195,7 @@ export class TuiModel {
       search: this.search.value.trim(),
       technology: this.technology.value.trim(),
       notesOnly: this.notesOnly,
+      includeWorktrees: this.showWorktrees,
     });
 
     if (this.filteredRepositories.length === 0) {
@@ -350,6 +367,14 @@ export class TuiModel {
     this.rebuild(this.selectedRelativePath);
   }
 
+  setShowWorktrees(value: boolean): void {
+    this.showWorktrees = value;
+    this.rebuild(this.selectedRelativePath);
+    this.setStatus(
+      `${value ? "Showing" : "Hiding"} worktrees. ${this.filteredRepositories.length} repositories listed.`,
+    );
+  }
+
   // --- key handling ----------------------------------------------------------
 
   handleInput(input: string, key: KeyPress): void {
@@ -375,6 +400,9 @@ export class TuiModel {
     if (this.focus === "notes-only" && (input === " " || key.return)) {
       return this.setNotesOnly(!this.notesOnly);
     }
+    if (this.focus === "worktrees" && (input === " " || key.return)) {
+      return this.setShowWorktrees(!this.showWorktrees);
+    }
 
     if (!key.ctrl && !key.meta) {
       switch (input) {
@@ -390,6 +418,8 @@ export class TuiModel {
           return this.openVscode();
         case "o":
           return this.openRemote();
+        case "w":
+          return this.setShowWorktrees(!this.showWorktrees);
       }
     }
 
@@ -446,6 +476,8 @@ export class TuiModel {
         return this.refresh();
       case "search":
         return this.editMode ? this.setStatus("Save or cancel note edits first.") : this.focusSearch();
+      case "worktrees":
+        return this.editMode ? this.setStatus("Save or cancel note edits first.") : this.setShowWorktrees(!this.showWorktrees);
       case "edit":
         return this.editMode ? undefined : this.editNotes();
       case "vscode":
@@ -485,6 +517,10 @@ export class TuiModel {
     if (contains(layout.notesOnly, x, y)) {
       this.focus = "notes-only";
       return this.setNotesOnly(!this.notesOnly);
+    }
+    if (contains(layout.worktrees, x, y)) {
+      this.focus = "worktrees";
+      return this.setShowWorktrees(!this.showWorktrees);
     }
 
     if (contains(layout.tableRows, x, y)) {

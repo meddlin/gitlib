@@ -46,6 +46,24 @@ describe("discovery", () => {
     expect(discoverRepos([fx.gitRoot], ignoreDirs()).map((r) => r.relativePath)).toEqual(["wt"]);
   });
 
+  it("flags linked git worktrees but not submodules or standalone repos", () => {
+    fx.initRealGitRepo("main-repo");
+    fx.addWorktree("main-repo", "main-repo/.claude/worktrees/feature");
+    fx.makeDir("sub", { ".git": "gitdir: ../main-repo/.git/modules/sub" });
+    fx.makeRepo("plain");
+
+    const byPath = Object.fromEntries(
+      discoverRepos([fx.gitRoot], new Set(["node_modules"])).map((repo) => [repo.relativePath, repo.isWorktree]),
+    );
+
+    expect(byPath).toEqual({
+      "main-repo": false,
+      "main-repo/.claude/worktrees/feature": true,
+      plain: false,
+      sub: false,
+    });
+  });
+
   it("skips roots that do not exist", () => {
     expect(discoverRepos([path.join(fx.base, "missing")], ignoreDirs())).toEqual([]);
   });
@@ -142,6 +160,54 @@ describe("application", () => {
     expect(names({ search: "MILK" })).toEqual(["js"]);
     expect(names({ notesOnly: true })).toEqual(["js"]);
     expect(names({})).toEqual(["js", "py"]);
+  });
+
+  it("hides linked worktrees unless asked to include them", () => {
+    fx.writeConfig();
+    fx.initRealGitRepo("main-repo");
+    fx.addWorktree("main-repo", "main-repo/.claude/worktrees/feature");
+
+    const app = createApplication(fx.env());
+    const paths = (options: Parameters<typeof app.listRepositories>[0]) =>
+      app.listRepositories({ ...options, refresh: false }).map((repo) => repo.relativePath);
+
+    app.refresh();
+    expect(paths({})).toEqual(["main-repo"]);
+    expect(paths({ includeWorktrees: true })).toEqual([
+      "main-repo",
+      "main-repo/.claude/worktrees/feature",
+    ]);
+    // Search never sneaks hidden worktrees back in.
+    expect(paths({ search: "feature" })).toEqual([]);
+    expect(paths({ search: "feature", includeWorktrees: true })).toEqual([
+      "main-repo/.claude/worktrees/feature",
+    ]);
+  });
+
+  it("upgrades databases created before worktree tracking", () => {
+    fx.writeConfig();
+    const dbPath = path.join(fx.appHome, "gitlib.db");
+    const { DatabaseSync } = process.getBuiltinModule("node:sqlite");
+    const legacy = new DatabaseSync(dbPath);
+    legacy.exec(`
+      CREATE TABLE repos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        root_path TEXT NOT NULL,
+        relative_path TEXT NOT NULL,
+        absolute_path TEXT NOT NULL,
+        name TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        last_scanned_at TEXT,
+        is_missing INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(root_path, relative_path)
+      );
+      INSERT INTO repos (root_path, relative_path, absolute_path, name, last_seen_at)
+      VALUES ('/r', 'old', '/r/old', 'old', '2020-01-01T00:00:00+00:00');
+    `);
+    legacy.close();
+
+    const app = createApplication(fx.env());
+    expect(app.loadRepositories().map((repo) => [repo.relativePath, repo.isWorktree])).toEqual([["old", false]]);
   });
 
   it("marks repos missing once they disappear", () => {

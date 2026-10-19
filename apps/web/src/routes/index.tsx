@@ -10,16 +10,22 @@ import { getRepos, rescanRepos, type RepoView } from "#/server/repos";
 interface IndexSearch {
   q?: string;
   tech?: string;
+  /** Linked git worktrees are hidden unless this is set. */
+  worktrees?: true;
 }
 
 export const Route = createFileRoute("/")({
   validateSearch: (search: Record<string, unknown>): IndexSearch => ({
     q: typeof search.q === "string" && search.q ? search.q : undefined,
     tech: typeof search.tech === "string" && search.tech ? search.tech : undefined,
+    worktrees: isTruthyParam(search.worktrees) ? true : undefined,
   }),
   loader: () => getRepos(),
   component: RepoLibrary,
 });
+
+const isTruthyParam = (value: unknown): boolean =>
+  value === true || value === 1 || value === "true" || value === "1";
 
 function matches(repo: RepoView, q: string | undefined, tech: string | undefined): boolean {
   if (tech && !repo.technologies.some((t) => t.name.toLowerCase() === tech.toLowerCase())) return false;
@@ -34,12 +40,17 @@ function matches(repo: RepoView, q: string | undefined, tech: string | undefined
 }
 
 function RepoLibrary() {
-  const { repos, roots } = Route.useLoaderData();
-  const { q, tech } = Route.useSearch();
+  const { repos: allRepos, roots } = Route.useLoaderData();
+  const { q, tech, worktrees: showWorktrees } = Route.useSearch();
   const navigate = Route.useNavigate();
   const router = useRouter();
   const [scanning, setScanning] = useState(false);
 
+  const worktreeCount = useMemo(() => allRepos.filter((repo) => repo.isWorktree).length, [allRepos]);
+  const repos = useMemo(
+    () => (showWorktrees ? allRepos : allRepos.filter((repo) => !repo.isWorktree)),
+    [allRepos, showWorktrees],
+  );
   const visible = useMemo(() => repos.filter((repo) => matches(repo, q, tech)), [repos, q, tech]);
 
   // Every detected technology with how many repos use it; languages and frameworks first.
@@ -82,6 +93,7 @@ function RepoLibrary() {
           <h1 className="text-2xl font-semibold tracking-tight">Gitlib</h1>
           <p className="text-sm text-muted-foreground">
             {repos.length} {repos.length === 1 ? "repository" : "repositories"} · {described} described
+            {!showWorktrees && worktreeCount > 0 ? ` · ${worktreeCount} worktrees hidden` : ""}
           </p>
           {roots.length > 0 ? (
             <p className="mt-1 text-xs break-all text-muted-foreground">
@@ -110,6 +122,19 @@ function RepoLibrary() {
             onChange={(event) => setSearch({ q: event.target.value || undefined })}
           />
         </div>
+
+        {worktreeCount > 0 ? (
+          <label className="flex w-fit cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              className="size-4 accent-primary"
+              checked={Boolean(showWorktrees)}
+              onChange={(event) => setSearch({ worktrees: event.target.checked ? true : undefined })}
+            />
+            Show worktrees
+            <span className="text-xs">({worktreeCount})</span>
+          </label>
+        ) : null}
 
         {techCounts.length > 0 ? (
           <div className="flex flex-wrap items-center gap-1.5" aria-label="Filter by technology">
