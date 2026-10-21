@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
-import { loadRepoReadme, technologyCategory, type TechnologyCategory } from "@gitlib/core";
+import { loadRepoReadme, technologyCategory, type RepoRecord, type TechnologyCategory } from "@gitlib/core";
 import { getApp, loadAndIndexRepositories } from "./gitlib.server";
+import { clearIssueCounts } from "./issues";
 
 export interface TechnologyView {
   name: string;
@@ -27,28 +28,45 @@ export interface RepoListing {
 
 export const MAX_DESCRIPTION_LENGTH = 500;
 
+function toRepoView(repo: RepoRecord): RepoView {
+  return {
+    id: repo.id,
+    name: repo.name,
+    relativePath: repo.relativePath,
+    absolutePath: repo.absolutePath,
+    description: repo.description,
+    hasNotes: repo.hasNotes,
+    isWorktree: repo.isWorktree,
+    isFavorite: repo.isFavorite,
+    lastScannedAt: repo.lastScannedAt,
+    technologies: repo.technologies.map((name) => ({ name, category: technologyCategory(name) })),
+  };
+}
+
 async function listing(force: boolean): Promise<RepoListing> {
-  const app = getApp();
-  const repos = (await loadAndIndexRepositories(force)).map(
-    (repo): RepoView => ({
-      id: repo.id,
-      name: repo.name,
-      relativePath: repo.relativePath,
-      absolutePath: repo.absolutePath,
-      description: repo.description,
-      hasNotes: repo.hasNotes,
-      isWorktree: repo.isWorktree,
-      isFavorite: repo.isFavorite,
-      lastScannedAt: repo.lastScannedAt,
-      technologies: repo.technologies.map((name) => ({ name, category: technologyCategory(name) })),
-    }),
-  );
-  return { roots: app.config.roots, repos };
+  const repos = (await loadAndIndexRepositories(force)).map(toRepoView);
+  return { roots: getApp().config.roots, repos };
 }
 
 export const getRepos = createServerFn({ method: "GET" }).handler(async () => listing(false));
 
-export const rescanRepos = createServerFn({ method: "POST" }).handler(async () => listing(true));
+/** One repository by its relativePath, or null if gitlib doesn't know it. */
+export const getRepo = createServerFn({ method: "GET" })
+  .validator((input: { relativePath: string }) => {
+    if (typeof input?.relativePath !== "string" || !input.relativePath) {
+      throw new Error("Invalid repository request.");
+    }
+    return input;
+  })
+  .handler(async ({ data }): Promise<RepoView | null> => {
+    const repo = (await loadAndIndexRepositories()).find((candidate) => candidate.relativePath === data.relativePath);
+    return repo ? toRepoView(repo) : null;
+  });
+
+export const rescanRepos = createServerFn({ method: "POST" }).handler(async () => {
+  clearIssueCounts();
+  return listing(true);
+});
 
 export const saveDescription = createServerFn({ method: "POST" })
   .validator((input: { relativePath: string; description: string }) => {

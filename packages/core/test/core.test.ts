@@ -10,6 +10,9 @@ import {
   createApplication,
   discoverRepos,
   loadConfig,
+  parseGitHubRepo,
+  parseGitRemotes,
+  selectGitHubRepo,
   repoKey,
   scanRepo,
   technologyCategory,
@@ -361,6 +364,25 @@ describe("open in VS Code", () => {
 });
 
 describe("remotes", () => {
+  it("resolves the GitHub repository behind a remote", () => {
+    expect(parseGitHubRepo("https://github.com/example/project")).toEqual({ owner: "example", repo: "project" });
+    expect(parseGitHubRepo("https://gitlab.com/example/project")).toBeNull();
+    expect(parseGitHubRepo("https://github.com/example")).toBeNull();
+    expect(parseGitHubRepo(null)).toBeNull();
+
+    const remotes = parseGitRemotes(
+      [
+        "fork\tgit@github.com:me/project.git (fetch)",
+        "fork\tgit@github.com:me/project.git (push)",
+        "origin\thttps://gitlab.com/team/project.git (fetch)",
+        "origin\thttps://gitlab.com/team/project.git (push)",
+      ].join("\n"),
+    );
+    // origin isn't on GitHub, so the first remote that is wins.
+    expect(selectGitHubRepo(remotes)).toEqual({ owner: "me", repo: "project" });
+    expect(selectGitHubRepo([])).toBeNull();
+  });
+
   it("opens the origin landing page, preferring origin over other remotes", () => {
     fx.writeConfig();
     const repo = fx.initRealGitRepo("with-remotes");

@@ -1,3 +1,4 @@
+import "./env.server";
 import { createApplication, type GitLibApp } from "@gitlib/core";
 
 interface GitLibState {

@@ -115,3 +115,35 @@ export function selectPreferredRemote(remotes: readonly RemoteTarget[]): RemoteT
     null
   );
 }
+
+export interface GitHubRepoRef {
+  owner: string;
+  repo: string;
+}
+
+/** Extracts `owner/repo` from a github.com landing page URL; null for other hosts (including GitHub Enterprise). */
+export function parseGitHubRepo(landingPageUrl: string | null): GitHubRepoRef | null {
+  if (!landingPageUrl) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(landingPageUrl);
+  } catch {
+    return null;
+  }
+  if (parsed.hostname.toLowerCase() !== "github.com") return null;
+  const [owner, repo, ...rest] = parsed.pathname.split("/").filter(Boolean);
+  if (!owner || !repo || rest.length > 0) return null;
+  return { owner, repo };
+}
+
+/** The GitHub repository behind a repo's preferred remote, if that remote is on github.com. */
+export function selectGitHubRepo(remotes: readonly RemoteTarget[]): GitHubRepoRef | null {
+  const preferred = selectPreferredRemote(remotes);
+  const fromPreferred = preferred ? parseGitHubRepo(preferred.landingPageUrl) : null;
+  if (fromPreferred) return fromPreferred;
+  for (const remote of remotes) {
+    const ref = parseGitHubRepo(remote.landingPageUrl);
+    if (ref) return ref;
+  }
+  return null;
+}

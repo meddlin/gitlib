@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { GitBranch, Settings } from "lucide-react";
+import { useLibraryState } from "#/lib/library-state";
 import { cn } from "#/lib/utils";
 
 const LINKS = [
@@ -8,10 +9,12 @@ const LINKS = [
 ] as const;
 
 export function NavBar() {
+  // Links back to Repositories bring the table's filters and sort with them.
+  const library = useLibraryState();
   return (
     <nav aria-label="Main" className="sticky top-0 z-20 h-12 shrink-0 border-b bg-background/90 backdrop-blur">
       <div className="mx-auto flex h-full max-w-6xl items-center gap-6 px-4 sm:px-6">
-        <Link to="/" className="text-sm font-semibold tracking-tight outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <Link to="/" search={library} className="text-sm font-semibold tracking-tight outline-none focus-visible:ring-2 focus-visible:ring-ring">
           Gitlib
         </Link>
         <ul className="flex items-center gap-1">
@@ -19,7 +22,8 @@ export function NavBar() {
             <li key={to}>
               <Link
                 to={to}
-                activeOptions={{ exact: true }}
+                search={to === "/" ? library : undefined}
+                activeOptions={{ exact: true, includeSearch: false }}
                 className={cn(
                   "inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring",
                 )}
