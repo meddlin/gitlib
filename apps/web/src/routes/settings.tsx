@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Check } from "lucide-react";
 import { cn } from "#/lib/utils";
+import { OPTIONAL_REPO_TABS, useRepoTabs } from "#/lib/repo-tabs";
 import { THEMES, useTheme, type ThemeId } from "#/lib/themes";
 
 export const Route = createFileRoute("/settings")({
@@ -10,6 +11,7 @@ export const Route = createFileRoute("/settings")({
 
 function Settings() {
   const [theme, setTheme] = useTheme();
+  const [repoTabs, setRepoTabVisible] = useRepoTabs();
 
   return (
     <div className="mx-auto flex w-full flex-1 max-w-3xl flex-col gap-8 px-4 py-8 sm:px-6">
@@ -32,7 +34,67 @@ function Settings() {
           ))}
         </div>
       </section>
+
+      <section aria-labelledby="repo-tabs-heading" className="flex flex-col gap-4">
+        <div>
+          <h2 id="repo-tabs-heading" className="text-lg font-medium">
+            Repository tabs
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Choose which GitHub tabs appear on a repository's page. Saved in this browser.
+          </p>
+        </div>
+        <ul className="divide-y rounded-xl border bg-card text-card-foreground">
+          {OPTIONAL_REPO_TABS.map((tab) => (
+            <li key={tab.id} className="flex items-center justify-between gap-4 px-4 py-3">
+              <div className="min-w-0">
+                <div id={`repo-tab-${tab.id}-label`} className="text-sm font-medium">
+                  {tab.label}
+                </div>
+                <div className="text-xs text-muted-foreground">{tab.description}</div>
+              </div>
+              <Switch
+                labelledBy={`repo-tab-${tab.id}-label`}
+                checked={repoTabs[tab.id]}
+                onChange={(checked) => setRepoTabVisible(tab.id, checked)}
+              />
+            </li>
+          ))}
+        </ul>
+      </section>
     </div>
+  );
+}
+
+function Switch({
+  checked,
+  onChange,
+  labelledBy,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  labelledBy: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-labelledby={labelledBy}
+      onClick={() => onChange(!checked)}
+      className={cn(
+        "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border border-transparent outline-none transition-colors focus-visible:ring-[3px] focus-visible:ring-ring/50",
+        checked ? "bg-primary" : "bg-input",
+      )}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          "pointer-events-none block size-5 rounded-full bg-background shadow transition-transform",
+          checked ? "translate-x-[22px]" : "translate-x-0.5",
+        )}
+      />
+    </button>
   );
 }
 

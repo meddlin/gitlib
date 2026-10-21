@@ -4,6 +4,7 @@ import { RepoIssues } from "#/components/repo-issues";
 import { RepoPulls } from "#/components/repo-pulls";
 import { RepoOverview } from "#/components/repo-overview";
 import { useLibraryState } from "#/lib/library-state";
+import { useRepoTabs } from "#/lib/repo-tabs";
 import { TechBadge } from "#/components/tech-badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
 import { getRepo } from "#/server/repos";
@@ -52,8 +53,11 @@ function RepoNotFound() {
 
 function RepoDetail() {
   const repo = Route.useLoaderData();
-  const { tab = "overview" } = Route.useSearch();
+  const { tab: requestedTab = "overview" } = Route.useSearch();
   const navigate = Route.useNavigate();
+  const [visibleTabs] = useRepoTabs();
+  // A link to a tab that has since been switched off in Settings lands on Overview.
+  const tab = requestedTab !== "overview" && !visibleTabs[requestedTab] ? "overview" : requestedTab;
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 px-4 py-8 sm:px-6">
@@ -80,24 +84,32 @@ function RepoDetail() {
       >
         <TabsList aria-label="Repository sections">
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="issues">
-            <CircleDot className="size-3.5" aria-hidden />
-            Issues
-          </TabsTrigger>
-          <TabsTrigger value="pulls">
-            <GitPullRequest className="size-3.5" aria-hidden />
-            Pull requests
-          </TabsTrigger>
+          {visibleTabs.issues ? (
+            <TabsTrigger value="issues">
+              <CircleDot className="size-3.5" aria-hidden />
+              Issues
+            </TabsTrigger>
+          ) : null}
+          {visibleTabs.pulls ? (
+            <TabsTrigger value="pulls">
+              <GitPullRequest className="size-3.5" aria-hidden />
+              Pull requests
+            </TabsTrigger>
+          ) : null}
         </TabsList>
         <TabsContent value="overview">
           <RepoOverview repo={repo} />
         </TabsContent>
-        <TabsContent value="issues">
-          <RepoIssues relativePath={repo.relativePath} />
-        </TabsContent>
-        <TabsContent value="pulls">
-          <RepoPulls relativePath={repo.relativePath} />
-        </TabsContent>
+        {visibleTabs.issues ? (
+          <TabsContent value="issues">
+            <RepoIssues relativePath={repo.relativePath} />
+          </TabsContent>
+        ) : null}
+        {visibleTabs.pulls ? (
+          <TabsContent value="pulls">
+            <RepoPulls relativePath={repo.relativePath} />
+          </TabsContent>
+        ) : null}
       </Tabs>
     </div>
   );
