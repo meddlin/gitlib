@@ -3,6 +3,7 @@ export * from "./config.js";
 export * from "./discovery.js";
 export * from "./errors.js";
 export * from "./models.js";
+export * from "./planning/index.js";
 export * from "./remotes.js";
 export * from "./scanner.js";
 export * from "./search/index.js";

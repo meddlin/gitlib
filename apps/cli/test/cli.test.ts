@@ -166,6 +166,40 @@ describe("list and show", () => {
   });
 });
 
+describe("planning backup", () => {
+  it("writes a snapshot of planning.db to the given path", async () => {
+    fx.writeConfig();
+    const target = path.join(fx.base, "snapshots", "planning.db");
+
+    const result = await fx.runCli(["planning", "backup", target]);
+
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toBe(`Backed up the planning database to ${target}.`);
+    expect(fs.statSync(target).size).toBeGreaterThan(0);
+  });
+
+  it("defaults to a timestamped file under the gitlib home", async () => {
+    fx.writeConfig();
+
+    const result = await fx.runCli(["planning", "backup"]);
+
+    expect(result.code, result.stderr).toBe(0);
+    expect(fs.readdirSync(path.join(fx.appHome, "backups"))).toHaveLength(1);
+  });
+
+  it("refuses to overwrite an existing file", async () => {
+    fx.writeConfig();
+    const target = path.join(fx.base, "taken.db");
+    fs.writeFileSync(target, "keep me");
+
+    const result = await fx.runCli(["planning", "backup", target]);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("already exists");
+    expect(fs.readFileSync(target, "utf-8")).toBe("keep me");
+  });
+});
+
 describe("argument parsing", () => {
   it("shows help and succeeds", async () => {
     const result = await fx.runCli(["--help"]);
