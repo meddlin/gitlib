@@ -4,6 +4,16 @@ import { loadConfig, type AppConfig, type Env } from "./config.js";
 import { discoverRepos } from "./discovery.js";
 import { GitLibError } from "./errors.js";
 import type { DiscoveredRepo, RemoteTarget, RepoDetails, RepoRecord } from "./models.js";
+import {
+  LocalIssueNotFoundError,
+  PlanningStore,
+  normalizeIssueBody,
+  normalizeIssueTitle,
+  type LocalIssue,
+  type LocalIssueChanges,
+  type LocalIssueQuery,
+  type LocalIssueState,
+} from "./planning/index.js";
 import { parseGitRemotes, selectPreferredRemote } from "./remotes.js";
 import { scanRepo } from "./scanner.js";
 import { RepoSearch, SearchUnavailableError, type SearchBackend, type SearchHit, type SearchResult } from "./search/index.js";
@@ -90,6 +100,7 @@ export class GitLibApp {
     readonly store: Store,
     readonly system: SystemDeps = defaultSystemDeps,
     searchBackend?: SearchBackend | null,
+    readonly planning: PlanningStore = new PlanningStore(config.planningDbPath),
   ) {
     this.search = new RepoSearch(config.search, searchBackend);
   }
@@ -280,6 +291,45 @@ export class GitLibApp {
 
   editRepositoryNotes(selector: string, notes: string): RepoRecord {
     return this.saveRepositoryNotes(selector, notes, true);
+  }
+
+  /**
+   * Files an issue against a repository gitlib has scanned. It is stored in gitlib's planning
+   * database only; nothing is sent to GitHub or GitLab.
+   */
+  createLocalIssue(selector: string, input: { title: string; body?: string }): LocalIssue {
+    const title = normalizeIssueTitle(input.title);
+    const body = normalizeIssueBody(input.body ?? "");
+    const repo = this.store.resolveRepository(selector);
+    return this.planning.createIssue({ repoPath: repo.relativePath, title, body }, utcNow());
+  }
+
+  getLocalIssue(id: number): LocalIssue {
+    const issue = this.planning.getIssue(id);
+    if (!issue) throw new LocalIssueNotFoundError(`Issue ${id} was not found.`);
+    return issue;
+  }
+
+  /** Issues across every repo, including ones whose repo has since moved or been removed. */
+  listLocalIssues(query: LocalIssueQuery = {}): LocalIssue[] {
+    return this.planning.listIssues(query);
+  }
+
+  updateLocalIssue(id: number, changes: LocalIssueChanges): LocalIssue {
+    const normalized: LocalIssueChanges = {};
+    if (changes.title !== undefined) normalized.title = normalizeIssueTitle(changes.title);
+    if (changes.body !== undefined) normalized.body = normalizeIssueBody(changes.body);
+    return this.planning.updateIssue(id, normalized, utcNow());
+  }
+
+  setLocalIssueState(id: number, state: LocalIssueState): LocalIssue {
+    return this.planning.setIssueState(id, state, utcNow());
+  }
+
+  /** Snapshots the planning database, by default into `<app home>/backups/`. Returns the file written. */
+  backupPlanning(destination?: string): string {
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    return this.planning.backup(destination ?? path.join(this.config.appHome, "backups", `planning-${stamp}.db`));
   }
 }
 

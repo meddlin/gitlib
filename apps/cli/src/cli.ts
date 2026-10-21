@@ -40,7 +40,8 @@ type Invocation =
   | { name: "tui" }
   | { name: "open-code"; repo: string }
   | { name: "open-remote"; repo: string }
-  | { name: "notes-edit"; repo: string };
+  | { name: "notes-edit"; repo: string }
+  | { name: "planning-backup"; destination?: string };
 
 function parsePositiveInt(value: string): number {
   const parsed = Number(value);
@@ -142,6 +143,13 @@ function buildProgram(
     .argument("<repo>")
     .action((repo: string) => onInvoke({ name: "notes-edit", repo }));
 
+  const planning = program.command("planning").description("Manage gitlib's own planning data (issues)");
+  planning
+    .command("backup")
+    .description("Snapshot planning.db, which cannot be rebuilt by rescanning")
+    .argument("[path]", "file to write (default: <gitlib home>/backups/planning-<timestamp>.db)")
+    .action((destination: string | undefined) => onInvoke({ name: "planning-backup", destination }));
+
   return program;
 }
 
@@ -231,6 +239,10 @@ async function execute(
           printError(`Search index not updated: ${error.message}`);
         }
       }
+      return 0;
+    }
+    case "planning-backup": {
+      print(`Backed up the planning database to ${app.backupPlanning(invocation.destination)}.`);
       return 0;
     }
   }

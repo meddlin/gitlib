@@ -42,6 +42,8 @@ export interface AppConfig {
   appHome: string;
   configPath: string;
   dbPath: string;
+  /** gitlib's own planning data; kept apart from `dbPath` because it cannot be rebuilt by rescanning. */
+  planningDbPath: string;
   roots: string[];
   vscodeCommand: string[];
   ignoreDirs: ReadonlySet<string>;
@@ -121,6 +123,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
   const appHome = getAppHome(env);
   const configPath = path.join(appHome, "config.toml");
   const dbPath = path.join(appHome, "gitlib.db");
+  const planningDbPath = path.join(appHome, "planning.db");
 
   if (!fs.existsSync(configPath)) writeDefaultConfig(configPath);
 
@@ -154,6 +157,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
     appHome,
     configPath,
     dbPath,
+    planningDbPath,
     roots: rootsRaw.map((item) => normalizeRoot(item, configPath)),
     vscodeCommand: vscodeCommandRaw,
     ignoreDirs: new Set(ignoreDirsRaw),

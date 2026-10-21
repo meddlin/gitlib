@@ -106,6 +106,33 @@ index = "gitlib_repos"
 `GITLIB_MEILI_HOST` and `GITLIB_MEILI_API_KEY` override `host` and `api_key`. The web app's search bar
 is pinned to the top of the Repositories page (press `/` to focus it).
 
+## Planning
+
+The web app's **Planning** page (`/planning`) is a place to file and track work against any
+repository gitlib has scanned. Issues are **gitlib's own**: they are stored in gitlib and are never
+read from, copied from or sent to GitHub or GitLab (the repo page's **Issues** and **Pull requests**
+tabs are separate and stay read-only GitHub views).
+
+- **New issue** files one against any repo (title, optional Markdown description). Issues are numbered
+  per repo, so they read as `repo#3`. Open an issue to edit it, close it, or reopen it. The list filters
+  by state and repo, and the filters live in the URL (`?state=closed&repo=…`).
+- Descriptions are rendered as Markdown with raw HTML dropped and only `http(s)` links made live.
+- An issue is tied to its repo by the repo's relative path. If a repo is moved or deleted its issues
+  stay readable and are labelled "repository not found"; new issues can only be filed against repos
+  gitlib currently sees.
+
+Planning data lives in its own file, `~/.git-library/planning.db`, not in `gitlib.db`. `gitlib.db` is
+rebuilt by rescanning and its tables are shared with the original Python version; planning data cannot
+be rebuilt, so it has its own versioned schema (append-only migrations tracked in `PRAGMA
+user_version`; a database written by a newer gitlib is refused rather than opened). Snapshot it with:
+
+```bash
+gitlib planning backup                    # ~/.git-library/backups/planning-<timestamp>.db
+gitlib planning backup /path/to/copy.db   # refuses to overwrite an existing file
+```
+
+In Docker, `planning.db` sits in the `gitlib-data` volume with the rest of gitlib's data.
+
 ## Web App
 
 `apps/web/` is a [TanStack Start](https://tanstack.com/start) app that reads the same
@@ -121,6 +148,7 @@ npm run build -w @gitlib/web && npm run preview -w @gitlib/web   # production bu
   `GITLIB_GITHUB_TOKEN` (or `GITHUB_TOKEN`) for private repos and a higher rate limit. The web server
   reads it from the environment or from `.env.local` / `.env` in `apps/web/` or the repo root (both
   gitignored); `apps/web/.env.example` shows the format.
+- The **Planning** page (`/planning`) holds gitlib's own issues; see [Planning](#planning).
 - Lists every git repo found under your configured scan roots (scanned on first load; use
   **Rescan** after adding repos).
 - Add or edit a short **description** per repo. It is stored in the shared SQLite database
@@ -206,7 +234,9 @@ check `docker volume ls` if yours differs.)
 The web app has **no authentication**. Do not expose port 3000 to the internet. Keep it on your
 LAN/VPN, or put a reverse proxy with authentication in front of it (Caddy, Nginx Proxy Manager,
 Traefik, Authelia, …) and bind the port to localhost by changing the `ports` entry in
-`docker-compose.yml` to `"127.0.0.1:3000:3000"`.
+`docker-compose.yml` to `"127.0.0.1:3000:3000"`. Anyone who can reach the app can read and change
+your planning issues as well as repo descriptions. The framework refuses cross-site browser requests to
+the app's server functions, but that is not a login.
 
 The CLI, TUI and VS Code / browser launchers are desktop features and are not part of the
 container.
@@ -223,6 +253,7 @@ gitlib open code <repo>
 gitlib open remote <repo>
 gitlib tui
 gitlib notes edit <repo>
+gitlib planning backup [path]
 ```
 
 Command summary:
@@ -238,6 +269,7 @@ Command summary:
 - `gitlib open remote <repo>` opens the preferred configured remote in your browser.
 - `gitlib tui` launches the interactive terminal UI.
 - `gitlib notes edit <repo>` opens your configured editor to update repo notes.
+- `gitlib planning backup [path]` snapshots the planning database (see [Planning](#planning)).
 
 ## TUI Mode
 

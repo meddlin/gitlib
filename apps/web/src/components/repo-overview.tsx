@@ -1,30 +1,8 @@
 import { Pencil } from "lucide-react";
 import { useEffect, useState } from "react";
-import Markdown, { type Components } from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { DescriptionDialog } from "#/components/description-dialog";
+import { MarkdownBody } from "#/components/markdown-body";
 import { getReadme, type ReadmeView, type RepoView } from "#/server/repos";
-
-const isRemote = (url: string | undefined): url is string => !!url && /^https?:\/\//i.test(url);
-
-// README links and images are relative to the repo on disk, which the browser can't reach,
-// so only absolute http(s) ones are live. Raw HTML is dropped, never rendered.
-const MARKDOWN_COMPONENTS: Components = {
-  a: ({ href, children }) =>
-    isRemote(href) ? (
-      <a href={href} target="_blank" rel="noopener noreferrer">
-        {children}
-      </a>
-    ) : (
-      <span>{children}</span>
-    ),
-  img: ({ src, alt }) =>
-    typeof src === "string" && isRemote(src) ? (
-      <img src={src} alt={alt ?? ""} loading="lazy" referrerPolicy="no-referrer" />
-    ) : alt ? (
-      <span className="text-muted-foreground">[{alt}]</span>
-    ) : null,
-};
 
 type ReadmeState = { status: "loading" } | ({ status: "done" } & ReadmeView);
 
@@ -85,11 +63,7 @@ export function RepoOverview({ repo }: { repo: RepoView }) {
         ) : readme.markdown === null ? (
           <p className="text-sm text-muted-foreground">This repository has no README.md.</p>
         ) : (
-          <div className="markdown">
-            <Markdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS} skipHtml>
-              {readme.markdown}
-            </Markdown>
-          </div>
+          <MarkdownBody>{readme.markdown}</MarkdownBody>
         )}
       </section>
     </div>
