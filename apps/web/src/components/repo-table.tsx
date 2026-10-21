@@ -1,4 +1,4 @@
-import { useRouter } from "@tanstack/react-router";
+import { Link, useRouter } from "@tanstack/react-router";
 import { useState } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, Pencil, Star } from "lucide-react";
 import { DescriptionDialog } from "#/components/description-dialog";
@@ -6,6 +6,7 @@ import { Highlighted } from "#/components/highlighted";
 import { TechBadge } from "#/components/tech-badge";
 import { cn } from "#/lib/utils";
 import { setFavorite, type RepoView } from "#/server/repos";
+import type { IssueCountsView } from "#/server/issues";
 import type { SearchHitView } from "#/server/search";
 
 export type RepoHighlights = ReadonlyMap<number, SearchHitView["highlights"]>;
@@ -15,7 +16,10 @@ const SNIPPETS = [
   ["readme", "README"],
 ] as const;
 
-export type SortKey = "name" | "description" | "stack" | "scanned";
+/** Open GitHub issue counts by repo relativePath; undefined while they are still loading. */
+export type IssueCounts = IssueCountsView["counts"] | undefined;
+
+export type SortKey = "name" | "description" | "stack" | "issues" | "scanned";
 export type SortDir = "asc" | "desc";
 
 export interface Sort {
@@ -33,8 +37,8 @@ function orderedTech(repo: RepoView) {
 const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
 
 /** Sorts by the chosen column, but always lists favorites ahead of everything else. */
-export function sortRepos(repos: RepoView[], { key, dir }: Sort): RepoView[] {
-  const value = (repo: RepoView): string => {
+export function sortRepos(repos: RepoView[], { key, dir }: Sort, issueCounts?: IssueCounts): RepoView[] {
+  const text = (repo: RepoView): string => {
     switch (key) {
       case "name":
         return repo.name;
@@ -44,12 +48,21 @@ export function sortRepos(repos: RepoView[], { key, dir }: Sort): RepoView[] {
         return orderedTech(repo)[0]?.name ?? "";
       case "scanned":
         return repo.lastScannedAt ?? "";
+      case "issues":
+        return "";
     }
   };
   const sign = dir === "asc" ? 1 : -1;
   return [...repos].sort((a, b) => {
     if (a.isFavorite !== b.isFavorite) return a.isFavorite ? -1 : 1;
-    const [va, vb] = [value(a), value(b)];
+    if (key === "issues") {
+      const [ca, cb] = [issueCounts?.[a.relativePath], issueCounts?.[b.relativePath]];
+      // Repos with no count (no GitHub remote, or not loaded yet) sink to the bottom; zero is a real count.
+      if ((ca === undefined) !== (cb === undefined)) return ca === undefined ? 1 : -1;
+      if (ca !== undefined && cb !== undefined && ca !== cb) return sign * (ca - cb);
+      return collator.compare(a.relativePath, b.relativePath);
+    }
+    const [va, vb] = [text(a), text(b)];
     // Empty values always sink to the bottom, whichever way we sort.
     if (!va !== !vb) return va ? -1 : 1;
     return sign * collator.compare(va, vb) || collator.compare(a.relativePath, b.relativePath);
@@ -69,8 +82,10 @@ function SortHeader({
   sort,
   onSort,
   className,
+  title,
 }: {
   label: string;
+  title?: string;
   column: SortKey;
   sort: Sort | null;
   onSort: (key: SortKey) => void;
@@ -87,6 +102,7 @@ function SortHeader({
       <button
         type="button"
         onClick={() => onSort(column)}
+        title={title}
         className={cn(
           "-mx-1 inline-flex items-center gap-1 px-1 py-0.5 uppercase tracking-wide outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring",
           active && "text-foreground",
@@ -96,6 +112,26 @@ function SortHeader({
         <Icon className={cn("size-3", !active && "opacity-40")} aria-hidden />
       </button>
     </th>
+  );
+}
+
+function IssueCount({ repo, counts }: { repo: RepoView; counts: IssueCounts }) {
+  if (!counts) return <span aria-label="Loading issue count">…</span>;
+  const count = counts[repo.relativePath];
+  if (count === undefined) return <span>—</span>;
+  return (
+    <Link
+      to="/repos/$"
+      params={{ _splat: repo.relativePath }}
+      search={{ tab: "issues" }}
+      aria-label={`${count} open GitHub ${count === 1 ? "issue" : "issues"} for ${repo.name}`}
+      className={cn(
+        "outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring",
+        count > 0 && "font-medium text-foreground",
+      )}
+    >
+      {count}
+    </Link>
   );
 }
 
@@ -138,6 +174,7 @@ export function RepoTable({
   onSort,
   activeTech,
   onToggleTech,
+  issueCounts,
   selectedPath,
   onSelect,
 }: {
@@ -149,6 +186,7 @@ export function RepoTable({
   onSort: (key: SortKey) => void;
   activeTech: string | undefined;
   onToggleTech: (name: string) => void;
+  issueCounts: IssueCounts;
   selectedPath: string | undefined;
   onSelect: (repo: RepoView) => void;
 }) {
@@ -160,9 +198,17 @@ export function RepoTable({
             <th scope="col" className="w-10 px-3">
               <span className="sr-only">Favorite</span>
             </th>
-            <SortHeader label="Repository" column="name" sort={sort} onSort={onSort} className="w-[26%]" />
-            <SortHeader label="Description" column="description" sort={sort} onSort={onSort} className="w-[34%]" />
-            <SortHeader label="Stack" column="stack" sort={sort} onSort={onSort} className="w-[28%]" />
+            <SortHeader label="Repository" column="name" sort={sort} onSort={onSort} className="w-[24%]" />
+            <SortHeader label="Description" column="description" sort={sort} onSort={onSort} className="w-[30%]" />
+            <SortHeader label="Stack" column="stack" sort={sort} onSort={onSort} className="w-[24%]" />
+            <SortHeader
+              label="Issues"
+              title="Open GitHub issues"
+              column="issues"
+              sort={sort}
+              onSort={onSort}
+              className="w-[8%]"
+            />
             <SortHeader label="Scanned" column="scanned" sort={sort} onSort={onSort} className="w-[10%]" />
             <th scope="col" className="w-10 px-3">
               <span className="sr-only">Actions</span>
@@ -177,9 +223,9 @@ export function RepoTable({
                 key={repo.id}
                 data-testid="repo-row"
                 onClick={(event) => {
-                  // Ignore clicks that came from portalled dialogs or from the row's other controls.
+                  // Ignore clicks that came from portalled dialogs or from the row's links and other controls.
                   const target = event.target as HTMLElement;
-                  if (!event.currentTarget.contains(target) || target.closest("button:not([data-row-trigger])")) return;
+                  if (!event.currentTarget.contains(target) || target.closest("a, button:not([data-row-trigger])")) return;
                   onSelect(repo);
                 }}
                 className={cn(
@@ -191,7 +237,17 @@ export function RepoTable({
                   <FavoriteButton repo={repo} />
                 </td>
                 <td className="px-3 py-3">
-                  {/* The real button gives keyboard users a way in; mouse clicks anywhere on the row land on the row. */}
+                  <Link
+                    to="/repos/$"
+                    params={{ _splat: repo.relativePath }}
+                    className="block truncate font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <Highlighted segments={matches?.name} fallback={repo.name} />
+                    {repo.isWorktree ? (
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">worktree</span>
+                    ) : null}
+                  </Link>
+                  {/* The real button gives keyboard users a way into the preview; mouse clicks anywhere on the row land on the row. */}
                   <button
                     type="button"
                     data-row-trigger
@@ -199,12 +255,6 @@ export function RepoTable({
                     aria-label={`Preview ${repo.name}`}
                     className="block w-full text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
-                    <span className="block truncate font-medium">
-                      <Highlighted segments={matches?.name} fallback={repo.name} />
-                      {repo.isWorktree ? (
-                        <span className="ml-2 text-xs font-normal text-muted-foreground">worktree</span>
-                      ) : null}
-                    </span>
                     <span className="block truncate font-mono text-xs text-muted-foreground" title={repo.absolutePath}>
                       <Highlighted segments={matches?.relativePath} fallback={repo.relativePath} />
                     </span>
@@ -251,6 +301,9 @@ export function RepoTable({
                       ))}
                     </div>
                   )}
+                </td>
+                <td className="px-3 py-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+                  <IssueCount repo={repo} counts={issueCounts} />
                 </td>
                 <td className="px-3 py-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
                   {formatScanned(repo.lastScannedAt)}

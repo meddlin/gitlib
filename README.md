@@ -116,6 +116,11 @@ npm run web          # dev server at http://localhost:3000
 npm run build -w @gitlib/web && npm run preview -w @gitlib/web   # production build
 ```
 
+- Each repo has a detail page (click its name) with Overview, **Issues** and **Pull requests** tabs; the
+  last two list open GitHub items and say so in a banner. Public repos work as-is; set
+  `GITLIB_GITHUB_TOKEN` (or `GITHUB_TOKEN`) for private repos and a higher rate limit. The web server
+  reads it from the environment or from `.env.local` / `.env` in `apps/web/` or the repo root (both
+  gitignored); `apps/web/.env.example` shows the format.
 - Lists every git repo found under your configured scan roots (scanned on first load; use
   **Rescan** after adding repos).
 - Add or edit a short **description** per repo. It is stored in the shared SQLite database

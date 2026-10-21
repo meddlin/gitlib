@@ -2,21 +2,22 @@ import { createFileRoute, useRouter, useRouterState } from "@tanstack/react-rout
 import { RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { RepoPreview } from "#/components/repo-preview";
-import { RepoTable, sortRepos, type RepoHighlights, type Sort, type SortKey } from "#/components/repo-table";
+import { RepoTable, sortRepos, type IssueCounts, type RepoHighlights, type Sort, type SortDir, type SortKey } from "#/components/repo-table";
 import { SearchBar } from "#/components/search-bar";
 import { TechBadge } from "#/components/tech-badge";
+import { saveLibraryState, type LibraryTableState } from "#/lib/library-state";
 import { cn } from "#/lib/utils";
+import { getIssueCounts, type IssueCountsView } from "#/server/issues";
 import { getRepos, rescanRepos, type RepoView } from "#/server/repos";
 import { searchRepos } from "#/server/search";
 
-interface IndexSearch {
-  q?: string;
-  tech?: string;
+interface IndexSearch extends LibraryTableState {
   /** relativePath of the repo shown in the preview pane. */
   repo?: string;
-  /** Linked git worktrees are hidden unless this is set. */
-  worktrees?: true;
 }
+
+const SORT_KEYS: readonly SortKey[] = ["name", "description", "stack", "issues", "scanned"];
+const SORT_DIRS: readonly SortDir[] = ["asc", "desc"];
 
 export const Route = createFileRoute("/")({
   validateSearch: (search: Record<string, unknown>): IndexSearch => ({
@@ -24,6 +25,8 @@ export const Route = createFileRoute("/")({
     tech: typeof search.tech === "string" && search.tech ? search.tech : undefined,
     repo: typeof search.repo === "string" && search.repo ? search.repo : undefined,
     worktrees: isTruthyParam(search.worktrees) ? true : undefined,
+    sort: SORT_KEYS.find((key) => key === search.sort),
+    dir: SORT_DIRS.find((dir) => dir === search.dir),
   }),
   // The query (and whether worktrees count) re-runs the search; the technology filter is applied client-side.
   loaderDeps: ({ search }) => ({ q: search.q, worktrees: search.worktrees }),
@@ -46,13 +49,36 @@ function hasTech(repo: RepoView, tech: string | undefined): boolean {
 
 const DEFAULT_SORT: Sort = { key: "name", dir: "asc" };
 
+/**
+ * GitHub issue counts for every repo, fetched after the list renders (it's a network call the table
+ * shouldn't wait on). Undefined until they arrive; the server caches them, so refetching is cheap.
+ */
+function useIssueCounts(refreshKey: unknown): IssueCountsView | undefined {
+  const [result, setResult] = useState<IssueCountsView>();
+  useEffect(() => {
+    let cancelled = false;
+    getIssueCounts()
+      .then((next) => !cancelled && setResult(next))
+      .catch((caught: unknown) => {
+        const error = caught instanceof Error ? caught.message : "Could not load issue counts.";
+        if (!cancelled) setResult({ status: "error", counts: {}, error });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshKey]);
+  return result;
+}
+
 function RepoLibrary() {
   const { repos: allRepos, roots, found } = Route.useLoaderData();
-  const { q, tech, repo: selectedPath, worktrees: showWorktrees } = Route.useSearch();
+  const { q, tech, repo: selectedPath, worktrees: showWorktrees, sort: sortKey, dir: sortDir } = Route.useSearch();
   const navigate = Route.useNavigate();
   const router = useRouter();
   const [scanning, setScanning] = useState(false);
-  const [sort, setSort] = useState<Sort | null>(null);
+
+  const issueCountsResult = useIssueCounts(allRepos);
+  const issueCounts: IssueCounts = issueCountsResult?.counts;
 
   const searching = useRouterState({ select: (state) => state.isLoading });
 
@@ -76,15 +102,21 @@ function RepoLibrary() {
     [results],
   );
 
-  // A new query goes back to relevance order until the user picks a column to sort by.
-  useEffect(() => setSort(null), [q]);
+  // Filters and sort live in the URL (and are remembered for links back here), so they survive navigating away.
+  useEffect(
+    () => saveLibraryState({ q, tech, worktrees: showWorktrees, sort: sortKey, dir: sortDir }),
+    [q, tech, showWorktrees, sortKey, sortDir],
+  );
+
+  // Without a chosen column the rows keep search-relevance order (or name order when not searching).
+  const sort = useMemo<Sort | null>(() => (sortKey ? { key: sortKey, dir: sortDir ?? "asc" } : null), [sortKey, sortDir]);
   const ranked = Boolean(q && found);
   const activeSort = sort ?? (ranked ? null : DEFAULT_SORT);
 
   const visible = useMemo(() => {
     const filtered = results.map(({ repo }) => repo).filter((repo) => hasTech(repo, tech));
-    return activeSort ? sortRepos(filtered, activeSort) : filtered;
-  }, [results, tech, activeSort]);
+    return activeSort ? sortRepos(filtered, activeSort, issueCounts) : filtered;
+  }, [results, tech, activeSort, issueCounts]);
 
   // Every detected technology with how many repos use it; languages and frameworks first.
   const techCounts = useMemo(() => {
@@ -106,7 +138,11 @@ function RepoLibrary() {
     (next: IndexSearch) => navigate({ search: (prev) => ({ ...prev, ...next }), replace: true }),
     [navigate],
   );
-  const setQuery = useCallback((next: string) => setSearch({ q: next.trim() || undefined }), [setSearch]);
+  // A new query goes back to relevance order until the user picks a column to sort by.
+  const setQuery = useCallback(
+    (next: string) => setSearch({ q: next.trim() || undefined, sort: undefined, dir: undefined }),
+    [setSearch],
+  );
   const toggleTech = (name: string) =>
     setSearch({ tech: tech?.toLowerCase() === name.toLowerCase() ? undefined : name });
 
@@ -135,8 +171,13 @@ function RepoLibrary() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [selected, closePreview]);
 
+  // Issue counts read most useful biggest-first, so that column starts descending.
   const toggleSort = (key: SortKey) =>
-    setSort(activeSort?.key === key ? { key, dir: activeSort.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
+    setSearch(
+      activeSort?.key === key
+        ? { sort: key, dir: activeSort.dir === "asc" ? "desc" : "asc" }
+        : { sort: key, dir: key === "issues" ? "desc" : "asc" },
+    );
 
   return (
     <>
@@ -190,6 +231,14 @@ function RepoLibrary() {
             </p>
           ) : null}
 
+          {issueCountsResult && issueCountsResult.status !== "ok" ? (
+            <p className="text-xs text-muted-foreground" role="status">
+              {issueCountsResult.status === "no-token"
+                ? "GitHub issue counts are off: set GITLIB_GITHUB_TOKEN (or GITHUB_TOKEN) to show and sort by them."
+                : `Some GitHub issue counts couldn't be loaded: ${issueCountsResult.error}`}
+            </p>
+          ) : null}
+
           {worktreeCount > 0 ? (
             <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
               <input
@@ -221,7 +270,7 @@ function RepoLibrary() {
               {tech || q ? (
                 <button
                   type="button"
-                  onClick={() => setSearch({ q: undefined, tech: undefined })}
+                  onClick={() => setSearch({ q: undefined, tech: undefined, sort: undefined, dir: undefined })}
                   className="inline-flex items-center gap-1 text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <X className="size-3" aria-hidden /> Clear filters
@@ -248,6 +297,7 @@ function RepoLibrary() {
                 onSort={toggleSort}
                 activeTech={tech}
                 onToggleTech={toggleTech}
+                issueCounts={issueCounts}
                 selectedPath={selected?.relativePath}
                 onSelect={(repo) => setSearch({ repo: repo.relativePath })}
               />

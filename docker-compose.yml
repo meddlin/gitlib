@@ -8,6 +8,8 @@ services:
       - "${GITLIB_PORT:-3000}:3000"
     environment:
       TZ: ${TZ:-UTC}
+      # Optional: lets the Issues tab read private repos and avoids GitHub's low anonymous rate limit.
+      GITLIB_GITHUB_TOKEN: ${GITLIB_GITHUB_TOKEN:-}
     volumes:
       # Directory containing the git repositories you want to browse (mounted read-only).
       - ${GITLIB_REPOS:-./repos}:/home/node/git:ro
