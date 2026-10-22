@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as PlanningIndexRouteImport } from './routes/planning.index'
+import { Route as PlanningBoardRouteImport } from './routes/planning.board'
 import { Route as ReposSplatRouteImport } from './routes/repos.$'
 import { Route as PlanningIssuesIdRouteImport } from './routes/planning.issues.$id'
 
@@ -30,6 +31,11 @@ const PlanningIndexRoute = PlanningIndexRouteImport.update({
   path: '/planning/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PlanningBoardRoute = PlanningBoardRouteImport.update({
+  id: '/planning/board',
+  path: '/planning/board',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ReposSplatRoute = ReposSplatRouteImport.update({
   id: '/repos/$',
   path: '/repos/$',
@@ -44,6 +50,7 @@ const PlanningIssuesIdRoute = PlanningIssuesIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
+  '/planning/board': typeof PlanningBoardRoute
   '/repos/$': typeof ReposSplatRoute
   '/planning/': typeof PlanningIndexRoute
   '/planning/issues/$id': typeof PlanningIssuesIdRoute
@@ -51,6 +58,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
+  '/planning/board': typeof PlanningBoardRoute
   '/repos/$': typeof ReposSplatRoute
   '/planning': typeof PlanningIndexRoute
   '/planning/issues/$id': typeof PlanningIssuesIdRoute
@@ -59,6 +67,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
+  '/planning/board': typeof PlanningBoardRoute
   '/repos/$': typeof ReposSplatRoute
   '/planning/': typeof PlanningIndexRoute
   '/planning/issues/$id': typeof PlanningIssuesIdRoute
@@ -66,13 +75,25 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/settings' | '/repos/$' | '/planning/' | '/planning/issues/$id'
+    | '/'
+    | '/settings'
+    | '/planning/board'
+    | '/repos/$'
+    | '/planning/'
+    | '/planning/issues/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/settings' | '/repos/$' | '/planning' | '/planning/issues/$id'
+  to:
+    | '/'
+    | '/settings'
+    | '/planning/board'
+    | '/repos/$'
+    | '/planning'
+    | '/planning/issues/$id'
   id:
     | '__root__'
     | '/'
     | '/settings'
+    | '/planning/board'
     | '/repos/$'
     | '/planning/'
     | '/planning/issues/$id'
@@ -81,6 +102,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   SettingsRoute: typeof SettingsRoute
+  PlanningBoardRoute: typeof PlanningBoardRoute
   ReposSplatRoute: typeof ReposSplatRoute
   PlanningIndexRoute: typeof PlanningIndexRoute
   PlanningIssuesIdRoute: typeof PlanningIssuesIdRoute
@@ -109,6 +131,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PlanningIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/planning/board': {
+      id: '/planning/board'
+      path: '/planning/board'
+      fullPath: '/planning/board'
+      preLoaderRoute: typeof PlanningBoardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/repos/$': {
       id: '/repos/$'
       path: '/repos/$'
@@ -129,6 +158,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   SettingsRoute: SettingsRoute,
+  PlanningBoardRoute: PlanningBoardRoute,
   ReposSplatRoute: ReposSplatRoute,
   PlanningIndexRoute: PlanningIndexRoute,
   PlanningIssuesIdRoute: PlanningIssuesIdRoute,

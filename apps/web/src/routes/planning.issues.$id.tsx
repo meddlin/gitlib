@@ -5,8 +5,10 @@ import { IssueFormDialog } from "#/components/issue-form-dialog";
 import { MarkdownBody } from "#/components/markdown-body";
 import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
+import { NativeSelect } from "#/components/ui/native-select";
 import { formatDate } from "#/lib/format";
-import { getLocalIssue, setLocalIssueState } from "#/server/planning";
+import { STATUS_COLUMNS, isStatus } from "#/lib/issue-status";
+import { getLocalIssue, setLocalIssueState, setLocalIssueStatus } from "#/server/planning";
 
 export const Route = createFileRoute("/planning/issues/$id")({
   loader: async ({ params }) => {
@@ -62,6 +64,20 @@ function IssueDetail() {
     }
   }
 
+  async function changeStatus(status: string) {
+    if (!isStatus(status)) return;
+    setChanging(true);
+    setError(null);
+    try {
+      await setLocalIssueStatus({ data: { id: issue.id, status } });
+      await router.invalidate();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not change the issue's status.");
+    } finally {
+      setChanging(false);
+    }
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 px-4 py-8 sm:px-6">
       <BackLink />
@@ -97,6 +113,19 @@ function IssueDetail() {
               <Pencil aria-hidden /> Edit
             </Button>
           </IssueFormDialog>
+          <NativeSelect
+            aria-label="Status"
+            value={issue.status}
+            onChange={(event) => void changeStatus(event.target.value)}
+            disabled={changing}
+            className="w-auto"
+          >
+            {STATUS_COLUMNS.map((column) => (
+              <option key={column.status} value={column.status}>
+                {column.label}
+              </option>
+            ))}
+          </NativeSelect>
           <Button variant="outline" onClick={toggleState} disabled={changing}>
             {open ? "Close issue" : "Reopen issue"}
           </Button>

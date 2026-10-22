@@ -1,11 +1,13 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { CircleCheck, CircleDot, HardDrive, Plus } from "lucide-react";
+import { CircleCheck, CircleDot, HardDrive, KanbanSquare, Plus } from "lucide-react";
 import { useMemo } from "react";
 import { IssueFormDialog } from "#/components/issue-form-dialog";
 import { Button } from "#/components/ui/button";
 import { NativeSelect } from "#/components/ui/native-select";
 import { Tabs, TabsList, TabsTrigger } from "#/components/ui/tabs";
+import { Badge } from "#/components/ui/badge";
 import { formatDate } from "#/lib/format";
+import { statusLabel } from "#/lib/issue-status";
 import { getPlanning, type LocalIssueView } from "#/server/planning";
 
 type IssueFilter = "open" | "closed" | "all";
@@ -57,17 +59,24 @@ function Planning() {
           <h1 className="text-2xl font-semibold tracking-tight">Planning</h1>
           <p className="text-sm text-muted-foreground">File and track work against any of your repositories.</p>
         </div>
-        <IssueFormDialog
-          mode="create"
-          repos={repos}
-          defaultRepo={repo && repos.some((option) => option.relativePath === repo) ? repo : undefined}
-          limits={limits}
-          onSaved={(issue) => navigate({ to: "/planning/issues/$id", params: { id: String(issue.id) } })}
-        >
-          <Button disabled={repos.length === 0}>
-            <Plus aria-hidden /> New issue
+        <div className="flex items-center gap-2">
+          <Button variant="outline" asChild>
+            <Link to="/planning/board" search={repo ? { repo } : {}}>
+              <KanbanSquare aria-hidden /> Board
+            </Link>
           </Button>
-        </IssueFormDialog>
+          <IssueFormDialog
+            mode="create"
+            repos={repos}
+            defaultRepo={repo && repos.some((option) => option.relativePath === repo) ? repo : undefined}
+            limits={limits}
+            onSaved={(issue) => navigate({ to: "/planning/issues/$id", params: { id: String(issue.id) } })}
+          >
+            <Button disabled={repos.length === 0}>
+              <Plus aria-hidden /> New issue
+            </Button>
+          </IssueFormDialog>
+        </div>
       </header>
 
       <p className="inline-flex items-center gap-2 border bg-muted/40 px-3 py-2 text-sm">
@@ -150,7 +159,7 @@ function IssueRow({ issue }: { issue: LocalIssueView }) {
         className={open ? "mt-0.5 size-4 shrink-0 text-primary" : "mt-0.5 size-4 shrink-0 text-muted-foreground"}
         aria-label={open ? "Open" : "Closed"}
       />
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <Link
           to="/planning/issues/$id"
           params={{ id: String(issue.id) }}
@@ -166,6 +175,7 @@ function IssueRow({ issue }: { issue: LocalIssueView }) {
           {open ? ` · updated ${formatDate(issue.updatedAt)}` : issue.closedAt ? ` · closed ${formatDate(issue.closedAt)}` : ""}
         </p>
       </div>
+      {open ? <Badge variant="outline">{statusLabel(issue.status)}</Badge> : null}
     </li>
   );
 }

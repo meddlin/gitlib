@@ -9,6 +9,7 @@ import {
   PlanningStore,
   normalizeIssueBody,
   normalizeIssueTitle,
+  type IssueStatus,
   type LocalIssue,
   type LocalIssueChanges,
   type LocalIssueQuery,
@@ -324,6 +325,10 @@ export class GitLibApp {
 
   setLocalIssueState(id: number, state: LocalIssueState): LocalIssue {
     return this.planning.setIssueState(id, state, utcNow());
+  }
+
+  setLocalIssueStatus(id: number, status: IssueStatus): LocalIssue {
+    return this.planning.setIssueStatus(id, status, utcNow());
   }
 
   /** Snapshots the planning database, by default into `<app home>/backups/`. Returns the file written. */

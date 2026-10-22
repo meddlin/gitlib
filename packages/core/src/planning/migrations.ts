@@ -36,6 +36,16 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX local_issues_by_state ON local_issues (state, updated_at DESC);
     `,
   },
+  {
+    version: 2,
+    name: "issue status",
+    sql: `
+      ALTER TABLE local_issues ADD COLUMN status TEXT NOT NULL DEFAULT 'todo'
+        CHECK (status IN ('todo', 'in_progress', 'in_review', 'done'));
+      UPDATE local_issues SET status = 'done' WHERE state = 'closed';
+      CREATE INDEX local_issues_by_status ON local_issues (status, updated_at DESC);
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;
