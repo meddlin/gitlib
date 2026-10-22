@@ -1,12 +1,14 @@
 import { createFileRoute, useRouter, useRouterState } from "@tanstack/react-router";
 import { RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ContributionGraph, type ContributionSource } from "#/components/contribution-graph";
 import { RepoPreview } from "#/components/repo-preview";
 import { RepoTable, sortRepos, type IssueCounts, type RepoHighlights, type Sort, type SortDir, type SortKey } from "#/components/repo-table";
 import { SearchBar } from "#/components/search-bar";
 import { TechBadge } from "#/components/tech-badge";
 import { saveLibraryState, type LibraryTableState } from "#/lib/library-state";
 import { cn } from "#/lib/utils";
+import { getContributions, type ContributionsView } from "#/server/contributions";
 import { getIssueCounts, type IssueCountsView } from "#/server/issues";
 import { getRepos, rescanRepos, type RepoView } from "#/server/repos";
 import { searchRepos } from "#/server/search";
@@ -70,6 +72,45 @@ function useIssueCounts(refreshKey: unknown): IssueCountsView | undefined {
   return result;
 }
 
+const CONTRIBUTION_SOURCE_KEY = "gitlib-contribution-source";
+
+function readSource(): ContributionSource {
+  try {
+    return localStorage.getItem(CONTRIBUTION_SOURCE_KEY) === "all" ? "all" : "local";
+  } catch {
+    return "local";
+  }
+}
+
+/**
+ * Commit activity across all repos, fetched after the page renders since it shells out to git. The chosen
+ * source is remembered in this browser; the previous graph stays up while a different source loads.
+ */
+function useContributions(refreshKey: unknown) {
+  const [source, setSourceState] = useState<ContributionSource>("local");
+  const [result, setResult] = useState<{ source: ContributionSource; view: ContributionsView }>();
+  // Read after mount so server and client markup agree.
+  useEffect(() => setSourceState(readSource()), []);
+  useEffect(() => {
+    let cancelled = false;
+    getContributions({ data: { source } })
+      .then((view) => !cancelled && setResult({ source, view }))
+      .catch(() => !cancelled && setResult({ source, view: { days: {}, total: 0, repoCount: 0, notices: [] } }));
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshKey, source]);
+  const setSource = useCallback((next: ContributionSource) => {
+    setSourceState(next);
+    try {
+      localStorage.setItem(CONTRIBUTION_SOURCE_KEY, next);
+    } catch {
+      // Not persisted; the choice still applies for this page view.
+    }
+  }, []);
+  return { source, setSource, data: result?.view, loading: result?.source !== source };
+}
+
 function RepoLibrary() {
   const { repos: allRepos, roots, found } = Route.useLoaderData();
   const { q, tech, repo: selectedPath, worktrees: showWorktrees, sort: sortKey, dir: sortDir } = Route.useSearch();
@@ -77,6 +118,7 @@ function RepoLibrary() {
   const router = useRouter();
   const [scanning, setScanning] = useState(false);
 
+  const contributions = useContributions(allRepos);
   const issueCountsResult = useIssueCounts(allRepos);
   const issueCounts: IssueCounts = issueCountsResult?.counts;
 
@@ -188,6 +230,13 @@ function RepoLibrary() {
           selected ? "max-w-[96rem]" : "max-w-6xl",
         )}
       >
+        <ContributionGraph
+          data={contributions.data}
+          loading={contributions.loading}
+          source={contributions.source}
+          onSourceChange={contributions.setSource}
+        />
+
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div className="min-w-0">
             <h1 className="text-lg font-semibold tracking-tight">Repositories</h1>
