@@ -183,6 +183,41 @@ describe("local issues", () => {
     expect(store.listIssues({ repoPath: "missing" })).toEqual([]);
   });
 
+  it("starts issues at todo and keeps status and state in step", () => {
+    const store = new PlanningStore(planningDbPath());
+    const issue = store.createIssue({ repoPath: "alpha", title: "t", body: "" }, "2026-01-01T00:00:00+00:00");
+    expect(issue).toMatchObject({ status: "todo", state: "open" });
+
+    const moving = store.setIssueStatus(issue.id, "in_progress", "2026-01-02T00:00:00+00:00");
+    expect(moving).toMatchObject({ status: "in_progress", state: "open", closedAt: null });
+
+    const done = store.setIssueStatus(issue.id, "done", "2026-01-03T00:00:00+00:00");
+    expect(done).toMatchObject({ status: "done", state: "closed", closedAt: "2026-01-03T00:00:00+00:00" });
+
+    expect(store.setIssueStatus(issue.id, "done", "2026-01-04T00:00:00+00:00")).toEqual(done);
+
+    const back = store.setIssueStatus(issue.id, "in_review", "2026-01-05T00:00:00+00:00");
+    expect(back).toMatchObject({ status: "in_review", state: "open", closedAt: null });
+
+    expect(store.setIssueState(issue.id, "closed", "2026-01-06T00:00:00+00:00")).toMatchObject({ status: "done" });
+    expect(store.setIssueState(issue.id, "open", "2026-01-07T00:00:00+00:00")).toMatchObject({ status: "todo" });
+  });
+
+  it("backfills status from state when migrating an older database", () => {
+    const v1 = MIGRATIONS[0]!;
+    const old = new PlanningStore(planningDbPath(), [v1]);
+    const open = old.createIssue({ repoPath: "alpha", title: "open", body: "" }, "2026-01-01T00:00:00+00:00");
+    const closed = old.createIssue({ repoPath: "alpha", title: "closed", body: "" }, "2026-01-01T00:00:00+00:00");
+    const db = new DatabaseSync(planningDbPath());
+    db.prepare("UPDATE local_issues SET state = 'closed', closed_at = ? WHERE id = ?").run("2026-01-02T00:00:00+00:00", closed.id);
+    db.close();
+
+    const upgraded = new PlanningStore(planningDbPath());
+
+    expect(upgraded.getIssue(open.id)?.status).toBe("todo");
+    expect(upgraded.getIssue(closed.id)?.status).toBe("done");
+  });
+
   it("edits title and body and bumps updatedAt", () => {
     const store = new PlanningStore(planningDbPath());
     const issue = store.createIssue({ repoPath: "alpha", title: "old", body: "old body" }, "2026-01-01T00:00:00+00:00");
@@ -217,6 +252,7 @@ describe("local issues", () => {
     expect(() => app.getLocalIssue(999)).toThrow(LocalIssueNotFoundError);
     expect(() => app.updateLocalIssue(999, { title: "x" })).toThrow(LocalIssueNotFoundError);
     expect(() => app.setLocalIssueState(999, "closed")).toThrow(LocalIssueNotFoundError);
+    expect(() => app.setLocalIssueStatus(999, "done")).toThrow(LocalIssueNotFoundError);
   });
 
   it("survives a restart, a rebuilt scan database, and the repo going missing", () => {

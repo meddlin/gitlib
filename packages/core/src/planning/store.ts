@@ -4,6 +4,7 @@ import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { GitLibError } from "../errors.js";
 import { MIGRATIONS, migrate, schemaVersion, type Migration } from "./migrations.js";
 import type {
+  IssueStatus,
   LocalIssue,
   LocalIssueChanges,
   LocalIssueQuery,
@@ -27,6 +28,7 @@ interface LocalIssueRow {
   title: string;
   body: string;
   state: LocalIssueState;
+  status: IssueStatus;
   created_at: string;
   updated_at: string;
   closed_at: string | null;
@@ -39,6 +41,7 @@ const toLocalIssue = (row: LocalIssueRow): LocalIssue => ({
   title: row.title,
   body: row.body,
   state: row.state,
+  status: row.status,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   closedAt: row.closed_at || null,
@@ -143,9 +146,28 @@ export class PlanningStore {
       const current = this.requireIssue(db, id);
       // Setting the state an issue already has changes nothing, including its timestamps.
       if (current.state === state) return current;
-      db.prepare("UPDATE local_issues SET state = ?, closed_at = ?, updated_at = ? WHERE id = ?").run(
+      // Closing finishes the issue; reopening puts it back at the start of the board.
+      db.prepare("UPDATE local_issues SET state = ?, status = ?, closed_at = ?, updated_at = ? WHERE id = ?").run(
         state,
+        state === "closed" ? "done" : "todo",
         state === "closed" ? now : null,
+        now,
+        id,
+      );
+      return this.requireIssue(db, id);
+    });
+  }
+
+  /** Moves an issue to a board column. `done` closes it and any other status reopens it. */
+  setIssueStatus(id: number, status: IssueStatus, now: string): LocalIssue {
+    return this.transaction((db) => {
+      const current = this.requireIssue(db, id);
+      if (current.status === status) return current;
+      const closing = status === "done";
+      db.prepare("UPDATE local_issues SET state = ?, status = ?, closed_at = ?, updated_at = ? WHERE id = ?").run(
+        closing ? "closed" : "open",
+        status,
+        closing ? (current.closedAt ?? now) : null,
         now,
         id,
       );

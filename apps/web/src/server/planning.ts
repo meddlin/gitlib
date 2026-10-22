@@ -2,6 +2,8 @@ import { createServerFn } from "@tanstack/react-start";
 import {
   MAX_ISSUE_BODY_LENGTH,
   MAX_ISSUE_TITLE_LENGTH,
+  isIssueStatus,
+  type IssueStatus,
   type LocalIssue,
   type LocalIssueState,
   type RepoRecord,
@@ -111,5 +113,15 @@ export const setLocalIssueState = createServerFn({ method: "POST" })
   })
   .handler(async ({ data }): Promise<LocalIssueView> => {
     const issue = getApp().setLocalIssueState(data.id, data.state);
+    return toView(issue, loadRepositories());
+  });
+
+export const setLocalIssueStatus = createServerFn({ method: "POST" })
+  .validator((input: { id: number; status: IssueStatus }) => {
+    if (!isId(input?.id) || !isIssueStatus(input?.status)) throw new Error("Invalid issue status payload.");
+    return input;
+  })
+  .handler(async ({ data }): Promise<LocalIssueView> => {
+    const issue = getApp().setLocalIssueStatus(data.id, data.status);
     return toView(issue, loadRepositories());
   });
