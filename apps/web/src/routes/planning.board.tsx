@@ -116,7 +116,7 @@ function Board() {
         </p>
       ) : null}
 
-      <div className="grid flex-1 grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4" data-testid="issue-board">
+      <div className="flex flex-1 items-stretch gap-4 overflow-x-auto pb-2" data-testid="issue-board">
         {columns.map((column) => (
           <section
             key={column.status}
@@ -131,7 +131,7 @@ function Board() {
             }}
             onDrop={(event) => drop(event, column.status)}
             className={cn(
-              "flex min-h-40 flex-col gap-2 border bg-muted/30 p-2 transition-colors",
+              "flex min-h-40 w-72 min-w-72 flex-1 shrink-0 flex-col gap-2 border bg-muted/30 p-2 transition-colors",
               dragOver === column.status && "border-ring bg-muted/70",
             )}
           >
