@@ -4,7 +4,7 @@ import { useState } from "react";
 import { DeleteProjectDialog } from "#/components/delete-project-dialog";
 import { ProjectNameDialog } from "#/components/project-name-dialog";
 import { Button } from "#/components/ui/button";
-import { NativeSelect } from "#/components/ui/native-select";
+import { SearchSelect } from "#/components/ui/search-select";
 import { statusLabel } from "#/lib/issue-status";
 import { addProjectRepo, getProjectDetail, removeProjectRepo, setIssueProject } from "#/server/projects";
 
@@ -96,23 +96,18 @@ function ProjectDetailPage() {
             Repositories <span className="text-sm font-normal text-muted-foreground">{project.repos.length}</span>
           </h2>
           {project.availableRepos.length > 0 ? (
-            <NativeSelect
+            <SearchSelect
               aria-label="Add a repository"
-              value=""
+              placeholder="Add a repository…"
+              searchPlaceholder="Search repositories…"
+              emptyText="No matching repositories."
               disabled={busy}
-              onChange={(event) => {
-                const repo = event.target.value;
-                if (repo) void run(() => addProjectRepo({ data: { id: project.id, repo } }), "Could not add the repository.");
-              }}
-              className="w-auto max-w-full sm:max-w-xs"
-            >
-              <option value="">Add a repository…</option>
-              {project.availableRepos.map((repo) => (
-                <option key={repo.relativePath} value={repo.relativePath}>
-                  {repo.relativePath}
-                </option>
-              ))}
-            </NativeSelect>
+              options={project.availableRepos.map((repo) => ({ value: repo.relativePath, label: repo.relativePath }))}
+              onSelect={(repo) =>
+                void run(() => addProjectRepo({ data: { id: project.id, repo } }), "Could not add the repository.")
+              }
+              className="sm:w-72"
+            />
           ) : null}
         </div>
         {project.repos.length === 0 ? (
@@ -162,25 +157,24 @@ function ProjectDetailPage() {
             Issues <span className="text-sm font-normal text-muted-foreground">{project.issues.length}</span>
           </h2>
           {project.unassignedIssues.length > 0 ? (
-            <NativeSelect
+            <SearchSelect
               aria-label="Add an issue"
-              value=""
+              placeholder="Add an issue…"
+              searchPlaceholder="Search issues…"
+              emptyText="No matching issues."
               disabled={busy}
-              onChange={(event) => {
-                const issueId = Number(event.target.value);
-                if (issueId) {
-                  void run(() => setIssueProject({ data: { issueId, projectId: project.id } }), "Could not add the issue.");
-                }
-              }}
-              className="w-auto max-w-full sm:max-w-xs"
-            >
-              <option value="">Add an issue…</option>
-              {project.unassignedIssues.map((issue) => (
-                <option key={issue.id} value={issue.id}>
-                  {issue.repoName}#{issue.number} {issue.title}
-                </option>
-              ))}
-            </NativeSelect>
+              options={project.unassignedIssues.map((issue) => ({
+                value: String(issue.id),
+                label: `${issue.repoName}#${issue.number} ${issue.title}`,
+              }))}
+              onSelect={(value) =>
+                void run(
+                  () => setIssueProject({ data: { issueId: Number(value), projectId: project.id } }),
+                  "Could not add the issue.",
+                )
+              }
+              className="sm:w-72"
+            />
           ) : null}
         </div>
         {project.issues.length === 0 ? (
