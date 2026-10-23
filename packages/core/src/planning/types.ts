@@ -28,6 +28,8 @@ export interface LocalIssue {
   state: LocalIssueState;
   /** Where the issue sits on the board. */
   status: IssueStatus;
+  /** The project this issue is filed under, or null. Deleting a project sets this back to null. */
+  projectId: number | null;
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;
@@ -37,6 +39,8 @@ export interface LocalIssueQuery {
   /** Only issues filed against this repo (its `relativePath`). */
   repoPath?: string;
   state?: LocalIssueState;
+  /** Only issues in this project. */
+  projectId?: number;
 }
 
 export interface NewLocalIssue {
@@ -48,4 +52,17 @@ export interface NewLocalIssue {
 export interface LocalIssueChanges {
   title?: string;
   body?: string;
+}
+
+/**
+ * A named group of repositories and issues. Repos are referenced by `relativePath` (see
+ * `LocalIssue.repoPath`), so a project can mention a repo gitlib has since lost track of.
+ */
+export interface Project {
+  id: number;
+  name: string;
+  /** `relativePath` of every repo in the project, sorted. */
+  repoPaths: string[];
+  createdAt: string;
+  updatedAt: string;
 }

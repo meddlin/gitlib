@@ -10,6 +10,7 @@ import type {
   LocalIssueQuery,
   LocalIssueState,
   NewLocalIssue,
+  Project,
 } from "./types.js";
 
 // Loaded via getBuiltinModule for the same bundler reason as in store.ts.
@@ -20,6 +21,8 @@ type DatabaseSync = DatabaseSyncType;
 const BUSY_TIMEOUT_MS = 5_000;
 
 export class LocalIssueNotFoundError extends GitLibError {}
+export class ProjectNotFoundError extends GitLibError {}
+export class ProjectNameTakenError extends GitLibError {}
 
 interface LocalIssueRow {
   id: number;
@@ -29,6 +32,7 @@ interface LocalIssueRow {
   body: string;
   state: LocalIssueState;
   status: IssueStatus;
+  project_id: number | null;
   created_at: string;
   updated_at: string;
   closed_at: string | null;
@@ -42,10 +46,29 @@ const toLocalIssue = (row: LocalIssueRow): LocalIssue => ({
   body: row.body,
   state: row.state,
   status: row.status,
+  projectId: row.project_id === null || row.project_id === undefined ? null : Number(row.project_id),
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   closedAt: row.closed_at || null,
 });
+
+interface ProjectRow {
+  id: number;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+const toProject = (row: ProjectRow, repoPaths: string[]): Project => ({
+  id: Number(row.id),
+  name: row.name,
+  repoPaths,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+const isUniqueViolation = (error: unknown): boolean =>
+  error instanceof Error && /UNIQUE constraint failed/i.test(error.message);
 
 /**
  * gitlib's own planning data (`planning.db`). Unlike `gitlib.db` this cannot be rebuilt by rescanning,
@@ -109,7 +132,7 @@ export class PlanningStore {
   /** Most recently updated first. */
   listIssues(query: LocalIssueQuery = {}): LocalIssue[] {
     const conditions: string[] = [];
-    const params: string[] = [];
+    const params: (string | number)[] = [];
     if (query.repoPath !== undefined) {
       conditions.push("repo_path = ?");
       params.push(query.repoPath);
@@ -117,6 +140,10 @@ export class PlanningStore {
     if (query.state !== undefined) {
       conditions.push("state = ?");
       params.push(query.state);
+    }
+    if (query.projectId !== undefined) {
+      conditions.push("project_id = ?");
+      params.push(query.projectId);
     }
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
@@ -175,6 +202,93 @@ export class PlanningStore {
     });
   }
 
+  /** Files an issue under a project, or takes it out of its project with `null`. */
+  setIssueProject(id: number, projectId: number | null, now: string): LocalIssue {
+    return this.transaction((db) => {
+      const current = this.requireIssue(db, id);
+      if (projectId !== null) this.requireProject(db, projectId);
+      if (current.projectId === projectId) return current;
+      db.prepare("UPDATE local_issues SET project_id = ?, updated_at = ? WHERE id = ?").run(projectId, now, id);
+      return this.requireIssue(db, id);
+    });
+  }
+
+  createProject(name: string, now: string): Project {
+    return this.transaction((db) => {
+      try {
+        const { lastInsertRowid } = db
+          .prepare("INSERT INTO projects (name, created_at, updated_at) VALUES (?, ?, ?)")
+          .run(name, now, now);
+        return this.requireProject(db, Number(lastInsertRowid));
+      } catch (error) {
+        throw this.nameTaken(error, name);
+      }
+    });
+  }
+
+  getProject(id: number): Project | null {
+    return this.withConnection((db) => this.findProject(db, id));
+  }
+
+  /** By name, A to Z. */
+  listProjects(): Project[] {
+    return this.withConnection((db) => {
+      const rows = db.prepare("SELECT * FROM projects ORDER BY name").all() as unknown as ProjectRow[];
+      const members = new Map<number, string[]>();
+      const memberRows = db
+        .prepare("SELECT project_id, repo_path FROM project_repos ORDER BY repo_path")
+        .all() as unknown as { project_id: number; repo_path: string }[];
+      for (const { project_id, repo_path } of memberRows) {
+        const list = members.get(Number(project_id)) ?? [];
+        list.push(repo_path);
+        members.set(Number(project_id), list);
+      }
+      return rows.map((row) => toProject(row, members.get(Number(row.id)) ?? []));
+    });
+  }
+
+  renameProject(id: number, name: string, now: string): Project {
+    return this.transaction((db) => {
+      this.requireProject(db, id);
+      try {
+        db.prepare("UPDATE projects SET name = ?, updated_at = ? WHERE id = ?").run(name, now, id);
+      } catch (error) {
+        throw this.nameTaken(error, name);
+      }
+      return this.requireProject(db, id);
+    });
+  }
+
+  /** Removes the project and its repo memberships. Its issues stay, no longer in any project. */
+  deleteProject(id: number): void {
+    this.transaction((db) => {
+      this.requireProject(db, id);
+      db.prepare("DELETE FROM projects WHERE id = ?").run(id);
+    });
+  }
+
+  addRepoToProject(id: number, repoPath: string, now: string): Project {
+    return this.transaction((db) => {
+      this.requireProject(db, id);
+      const { changes } = db
+        .prepare("INSERT OR IGNORE INTO project_repos (project_id, repo_path, added_at) VALUES (?, ?, ?)")
+        .run(id, repoPath, now);
+      if (Number(changes) > 0) db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(now, id);
+      return this.requireProject(db, id);
+    });
+  }
+
+  removeRepoFromProject(id: number, repoPath: string, now: string): Project {
+    return this.transaction((db) => {
+      this.requireProject(db, id);
+      const { changes } = db
+        .prepare("DELETE FROM project_repos WHERE project_id = ? AND repo_path = ?")
+        .run(id, repoPath);
+      if (Number(changes) > 0) db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(now, id);
+      return this.requireProject(db, id);
+    });
+  }
+
   /**
    * Writes a consistent snapshot of the database to `destination` (SQLite `VACUUM INTO`), which is
    * safe to run while the web app is using the database. Never overwrites an existing file.
@@ -200,5 +314,24 @@ export class PlanningStore {
     const issue = this.findIssue(db, id);
     if (!issue) throw new LocalIssueNotFoundError(`Issue ${id} was not found.`);
     return issue;
+  }
+
+  private findProject(db: DatabaseSync, id: number): Project | null {
+    const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(id) as unknown as ProjectRow | undefined;
+    if (!row) return null;
+    const repos = db
+      .prepare("SELECT repo_path FROM project_repos WHERE project_id = ? ORDER BY repo_path")
+      .all(id) as unknown as { repo_path: string }[];
+    return toProject(row, repos.map((repo) => repo.repo_path));
+  }
+
+  private requireProject(db: DatabaseSync, id: number): Project {
+    const project = this.findProject(db, id);
+    if (!project) throw new ProjectNotFoundError(`Project ${id} was not found.`);
+    return project;
+  }
+
+  private nameTaken(error: unknown, name: string): unknown {
+    return isUniqueViolation(error) ? new ProjectNameTakenError(`A project named "${name}" already exists.`) : error;
   }
 }

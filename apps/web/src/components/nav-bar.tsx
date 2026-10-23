@@ -1,10 +1,11 @@
 import { Link } from "@tanstack/react-router";
-import { GitBranch, ListTodo, Settings } from "lucide-react";
+import { FolderKanban, GitBranch, ListTodo, Settings } from "lucide-react";
 import { useLibraryState } from "#/lib/library-state";
 import { cn } from "#/lib/utils";
 
 const LINKS = [
   { to: "/", label: "Repositories", icon: GitBranch },
+  { to: "/projects", label: "Projects", icon: FolderKanban },
   { to: "/planning", label: "Planning", icon: ListTodo },
   { to: "/settings", label: "Settings", icon: Settings },
 ] as const;
@@ -31,7 +32,7 @@ export function NavBar() {
                 )}
                 activeProps={{ className: "bg-accent text-accent-foreground font-medium", "aria-current": "page" }}
               >
-                {/* Three labelled links don't fit a phone's width with their icons. */}
+                {/* Four labelled links don't fit a phone's width with their icons. */}
                 <Icon className="size-3.5 max-sm:hidden" aria-hidden />
                 {label}
               </Link>

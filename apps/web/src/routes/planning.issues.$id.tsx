@@ -8,6 +8,7 @@ import { Button } from "#/components/ui/button";
 import { NativeSelect } from "#/components/ui/native-select";
 import { formatDate } from "#/lib/format";
 import { STATUS_COLUMNS, isStatus } from "#/lib/issue-status";
+import { setIssueProject } from "#/server/projects";
 import { getLocalIssue, setLocalIssueState, setLocalIssueStatus } from "#/server/planning";
 
 export const Route = createFileRoute("/planning/issues/$id")({
@@ -45,7 +46,8 @@ function IssueNotFound() {
 }
 
 function IssueDetail() {
-  const { issue, limits } = Route.useLoaderData();
+  const { issue, limits, projects } = Route.useLoaderData();
+  const project = projects.find((candidate) => candidate.id === issue.projectId);
   const router = useRouter();
   const [changing, setChanging] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,6 +80,19 @@ function IssueDetail() {
     }
   }
 
+  async function changeProject(value: string) {
+    setChanging(true);
+    setError(null);
+    try {
+      await setIssueProject({ data: { issueId: issue.id, projectId: value ? Number(value) : null } });
+      await router.invalidate();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not change the issue's project.");
+    } finally {
+      setChanging(false);
+    }
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 px-4 py-8 sm:px-6">
       <BackLink />
@@ -92,6 +107,15 @@ function IssueDetail() {
               {open ? <CircleDot aria-hidden /> : <CircleCheck aria-hidden />}
               {open ? "Open" : "Closed"}
             </Badge>
+            {project ? (
+              <Link
+                to="/projects/$id"
+                params={{ id: String(project.id) }}
+                className="text-xs outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {project.name}
+              </Link>
+            ) : null}
             {issue.repoKnown ? (
               <Link
                 to="/repos/$"
@@ -113,6 +137,20 @@ function IssueDetail() {
               <Pencil aria-hidden /> Edit
             </Button>
           </IssueFormDialog>
+          <NativeSelect
+            aria-label="Project"
+            value={issue.projectId ?? ""}
+            onChange={(event) => void changeProject(event.target.value)}
+            disabled={changing}
+            className="w-auto max-w-40"
+          >
+            <option value="">No project</option>
+            {projects.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.name}
+              </option>
+            ))}
+          </NativeSelect>
           <NativeSelect
             aria-label="Status"
             value={issue.status}

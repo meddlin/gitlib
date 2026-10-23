@@ -46,6 +46,27 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX local_issues_by_status ON local_issues (status, updated_at DESC);
     `,
   },
+  {
+    version: 3,
+    name: "projects",
+    sql: `
+      CREATE TABLE projects (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE project_repos (
+        project_id INTEGER NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+        repo_path TEXT NOT NULL,
+        added_at TEXT NOT NULL,
+        PRIMARY KEY (project_id, repo_path)
+      );
+      CREATE INDEX project_repos_by_repo ON project_repos (repo_path);
+      ALTER TABLE local_issues ADD COLUMN project_id INTEGER REFERENCES projects (id) ON DELETE SET NULL;
+      CREATE INDEX local_issues_by_project ON local_issues (project_id);
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;
