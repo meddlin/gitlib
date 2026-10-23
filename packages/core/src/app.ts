@@ -9,6 +9,9 @@ import {
   PlanningStore,
   normalizeIssueBody,
   normalizeIssueTitle,
+  normalizeProjectName,
+  ProjectNotFoundError,
+  type Project,
   type IssueStatus,
   type LocalIssue,
   type LocalIssueChanges,
@@ -329,6 +332,44 @@ export class GitLibApp {
 
   setLocalIssueStatus(id: number, status: IssueStatus): LocalIssue {
     return this.planning.setIssueStatus(id, status, utcNow());
+  }
+
+  listProjects(): Project[] {
+    return this.planning.listProjects();
+  }
+
+  getProject(id: number): Project {
+    const project = this.planning.getProject(id);
+    if (!project) throw new ProjectNotFoundError(`Project ${id} was not found.`);
+    return project;
+  }
+
+  createProject(name: string): Project {
+    return this.planning.createProject(normalizeProjectName(name), utcNow());
+  }
+
+  renameProject(id: number, name: string): Project {
+    return this.planning.renameProject(id, normalizeProjectName(name), utcNow());
+  }
+
+  deleteProject(id: number): void {
+    this.planning.deleteProject(id);
+  }
+
+  /** Puts a repository gitlib has scanned into a project. A repo can belong to several projects. */
+  addRepoToProject(id: number, selector: string): Project {
+    const repo = this.store.resolveRepository(selector);
+    return this.planning.addRepoToProject(id, repo.relativePath, utcNow());
+  }
+
+  /** Takes a repo out by its `relativePath`, which works even for a repo gitlib no longer finds. */
+  removeRepoFromProject(id: number, repoPath: string): Project {
+    return this.planning.removeRepoFromProject(id, repoPath, utcNow());
+  }
+
+  /** Files an issue under a project, or pass `null` to take it out of its project. */
+  setLocalIssueProject(id: number, projectId: number | null): LocalIssue {
+    return this.planning.setIssueProject(id, projectId, utcNow());
   }
 
   /** Snapshots the planning database, by default into `<app home>/backups/`. Returns the file written. */

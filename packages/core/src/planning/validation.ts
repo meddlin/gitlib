@@ -21,3 +21,16 @@ export function normalizeIssueBody(body: string): string {
   }
   return trimmed;
 }
+
+export const MAX_PROJECT_NAME_LENGTH = 100;
+
+export class ProjectValidationError extends GitLibError {}
+
+export function normalizeProjectName(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) throw new ProjectValidationError("A project needs a name.");
+  if (trimmed.length > MAX_PROJECT_NAME_LENGTH) {
+    throw new ProjectValidationError(`Project names are limited to ${MAX_PROJECT_NAME_LENGTH} characters.`);
+  }
+  return trimmed;
+}

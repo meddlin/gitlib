@@ -13,6 +13,8 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as PlanningIndexRouteImport } from './routes/planning.index'
 import { Route as PlanningBoardRouteImport } from './routes/planning.board'
+import { Route as ProjectsIndexRouteImport } from './routes/projects.index'
+import { Route as ProjectsIdRouteImport } from './routes/projects.$id'
 import { Route as ReposSplatRouteImport } from './routes/repos.$'
 import { Route as PlanningIssuesIdRouteImport } from './routes/planning.issues.$id'
 
@@ -36,6 +38,16 @@ const PlanningBoardRoute = PlanningBoardRouteImport.update({
   path: '/planning/board',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProjectsIndexRoute = ProjectsIndexRouteImport.update({
+  id: '/projects/',
+  path: '/projects/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProjectsIdRoute = ProjectsIdRouteImport.update({
+  id: '/projects/$id',
+  path: '/projects/$id',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ReposSplatRoute = ReposSplatRouteImport.update({
   id: '/repos/$',
   path: '/repos/$',
@@ -51,16 +63,20 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
   '/planning/board': typeof PlanningBoardRoute
+  '/projects/$id': typeof ProjectsIdRoute
   '/repos/$': typeof ReposSplatRoute
   '/planning/': typeof PlanningIndexRoute
+  '/projects/': typeof ProjectsIndexRoute
   '/planning/issues/$id': typeof PlanningIssuesIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
   '/planning/board': typeof PlanningBoardRoute
+  '/projects/$id': typeof ProjectsIdRoute
   '/repos/$': typeof ReposSplatRoute
   '/planning': typeof PlanningIndexRoute
+  '/projects': typeof ProjectsIndexRoute
   '/planning/issues/$id': typeof PlanningIssuesIdRoute
 }
 export interface FileRoutesById {
@@ -68,8 +84,10 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
   '/planning/board': typeof PlanningBoardRoute
+  '/projects/$id': typeof ProjectsIdRoute
   '/repos/$': typeof ReposSplatRoute
   '/planning/': typeof PlanningIndexRoute
+  '/projects/': typeof ProjectsIndexRoute
   '/planning/issues/$id': typeof PlanningIssuesIdRoute
 }
 export interface FileRouteTypes {
@@ -78,24 +96,30 @@ export interface FileRouteTypes {
     | '/'
     | '/settings'
     | '/planning/board'
+    | '/projects/$id'
     | '/repos/$'
     | '/planning/'
+    | '/projects/'
     | '/planning/issues/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/settings'
     | '/planning/board'
+    | '/projects/$id'
     | '/repos/$'
     | '/planning'
+    | '/projects'
     | '/planning/issues/$id'
   id:
     | '__root__'
     | '/'
     | '/settings'
     | '/planning/board'
+    | '/projects/$id'
     | '/repos/$'
     | '/planning/'
+    | '/projects/'
     | '/planning/issues/$id'
   fileRoutesById: FileRoutesById
 }
@@ -103,8 +127,10 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   SettingsRoute: typeof SettingsRoute
   PlanningBoardRoute: typeof PlanningBoardRoute
+  ProjectsIdRoute: typeof ProjectsIdRoute
   ReposSplatRoute: typeof ReposSplatRoute
   PlanningIndexRoute: typeof PlanningIndexRoute
+  ProjectsIndexRoute: typeof ProjectsIndexRoute
   PlanningIssuesIdRoute: typeof PlanningIssuesIdRoute
 }
 
@@ -138,6 +164,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PlanningBoardRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/projects/': {
+      id: '/projects/'
+      path: '/projects'
+      fullPath: '/projects/'
+      preLoaderRoute: typeof ProjectsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/projects/$id': {
+      id: '/projects/$id'
+      path: '/projects/$id'
+      fullPath: '/projects/$id'
+      preLoaderRoute: typeof ProjectsIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/repos/$': {
       id: '/repos/$'
       path: '/repos/$'
@@ -159,8 +199,10 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   SettingsRoute: SettingsRoute,
   PlanningBoardRoute: PlanningBoardRoute,
+  ProjectsIdRoute: ProjectsIdRoute,
   ReposSplatRoute: ReposSplatRoute,
   PlanningIndexRoute: PlanningIndexRoute,
+  ProjectsIndexRoute: ProjectsIndexRoute,
   PlanningIssuesIdRoute: PlanningIssuesIdRoute,
 }
 export const routeTree = rootRouteImport

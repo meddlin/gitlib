@@ -10,6 +10,9 @@ import {
   MIGRATIONS,
   PlanningSchemaError,
   PlanningStore,
+  ProjectNameTakenError,
+  ProjectNotFoundError,
+  ProjectValidationError,
   RepoNotFoundError,
   createApplication,
   loadConfig,
@@ -305,5 +308,85 @@ describe("planning backup", () => {
     expect(path.dirname(written)).toBe(path.join(fx.appHome, "backups"));
     expect(path.basename(written)).toMatch(/^planning-.*\.db$/);
     expect(fs.existsSync(written)).toBe(true);
+  });
+});
+
+describe("projects", () => {
+  beforeEach(() => {
+    fx.makeRepo("alpha");
+    fx.makeRepo("group/beta");
+  });
+
+  const appWithRepos = () => {
+    const app = createApplication(fx.env());
+    app.refresh();
+    return app;
+  };
+
+  it("creates, renames, lists and deletes projects", () => {
+    const app = appWithRepos();
+    const project = app.createProject("  Launch  ");
+    expect(project.name).toBe("Launch");
+    expect(project.repoPaths).toEqual([]);
+
+    expect(app.renameProject(project.id, "Relaunch").name).toBe("Relaunch");
+    expect(app.listProjects().map((p) => p.name)).toEqual(["Relaunch"]);
+
+    app.deleteProject(project.id);
+    expect(app.listProjects()).toEqual([]);
+    expect(() => app.getProject(project.id)).toThrow(ProjectNotFoundError);
+  });
+
+  it("rejects blank, overlong and duplicate names", () => {
+    const app = appWithRepos();
+    const first = app.createProject("Launch");
+    const second = app.createProject("Other");
+    expect(() => app.createProject("   ")).toThrow(ProjectValidationError);
+    expect(() => app.createProject("x".repeat(101))).toThrow(ProjectValidationError);
+    expect(() => app.createProject("launch")).toThrow(ProjectNameTakenError);
+    expect(() => app.renameProject(second.id, "LAUNCH")).toThrow(ProjectNameTakenError);
+    // Changing only the case of its own name is allowed.
+    expect(app.renameProject(first.id, "LAUNCH").name).toBe("LAUNCH");
+  });
+
+  it("holds several repos, and a repo can be in several projects", () => {
+    const app = appWithRepos();
+    const a = app.createProject("A");
+    const b = app.createProject("B");
+
+    app.addRepoToProject(a.id, "alpha");
+    app.addRepoToProject(a.id, "alpha");
+    app.addRepoToProject(a.id, "group/beta");
+    app.addRepoToProject(b.id, "alpha");
+
+    expect(app.getProject(a.id).repoPaths).toEqual(["alpha", "group/beta"]);
+    expect(app.getProject(b.id).repoPaths).toEqual(["alpha"]);
+    expect(() => app.addRepoToProject(a.id, "missing")).toThrow(RepoNotFoundError);
+
+    app.removeRepoFromProject(a.id, "alpha");
+    expect(app.getProject(a.id).repoPaths).toEqual(["group/beta"]);
+  });
+
+  it("files issues under a project and keeps them when the project is deleted", () => {
+    const app = appWithRepos();
+    const project = app.createProject("Launch");
+    const issue = app.createLocalIssue("alpha", { title: "Ship it" });
+    expect(issue.projectId).toBeNull();
+
+    expect(app.setLocalIssueProject(issue.id, project.id).projectId).toBe(project.id);
+    expect(app.listLocalIssues({ projectId: project.id }).map((i) => i.id)).toEqual([issue.id]);
+    expect(() => app.setLocalIssueProject(issue.id, 999)).toThrow(ProjectNotFoundError);
+
+    app.deleteProject(project.id);
+    expect(app.getLocalIssue(issue.id).projectId).toBeNull();
+    expect(app.setLocalIssueProject(issue.id, null).projectId).toBeNull();
+  });
+
+  it("drops repo memberships with the project", () => {
+    const app = appWithRepos();
+    const project = app.createProject("Launch");
+    app.addRepoToProject(project.id, "alpha");
+    app.deleteProject(project.id);
+    expect(app.createProject("Launch").repoPaths).toEqual([]);
   });
 });

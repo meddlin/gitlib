@@ -30,7 +30,7 @@ export const Route = createFileRoute("/planning/")({
 });
 
 function Planning() {
-  const { repos, issues, limits } = Route.useLoaderData();
+  const { repos, issues, limits, projects } = Route.useLoaderData();
   const { state = "open", repo } = Route.useSearch();
   const navigate = Route.useNavigate();
 
@@ -142,7 +142,7 @@ function Planning() {
       ) : (
         <ul className="divide-y border-y" data-testid="local-issue-list">
           {visible.map((issue) => (
-            <IssueRow key={issue.id} issue={issue} />
+            <IssueRow key={issue.id} issue={issue} projectName={projects.find((p) => p.id === issue.projectId)?.name} />
           ))}
         </ul>
       )}
@@ -150,7 +150,7 @@ function Planning() {
   );
 }
 
-function IssueRow({ issue }: { issue: LocalIssueView }) {
+function IssueRow({ issue, projectName }: { issue: LocalIssueView; projectName?: string }) {
   const open = issue.state === "open";
   const StateIcon = open ? CircleDot : CircleCheck;
   return (
@@ -171,7 +171,8 @@ function IssueRow({ issue }: { issue: LocalIssueView }) {
           <span className="font-mono" title={issue.repoPath}>
             {issue.repoName}#{issue.number}
           </span>
-          {issue.repoKnown ? null : " (repository not found)"} · opened {formatDate(issue.createdAt)}
+          {issue.repoKnown ? null : " (repository not found)"}
+          {projectName ? ` · ${projectName}` : ""} · opened {formatDate(issue.createdAt)}
           {open ? ` · updated ${formatDate(issue.updatedAt)}` : issue.closedAt ? ` · closed ${formatDate(issue.closedAt)}` : ""}
         </p>
       </div>

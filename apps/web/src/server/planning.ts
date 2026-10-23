@@ -35,17 +35,20 @@ export interface PlanningView {
   /** Every issue, most recently updated first; the page filters them. */
   issues: LocalIssueView[];
   limits: IssueLimits;
+  /** Every project, by name, for labelling and choosing. */
+  projects: { id: number; name: string }[];
 }
 
 export interface LocalIssueDetail {
   issue: LocalIssueView;
   limits: IssueLimits;
+  projects: { id: number; name: string }[];
 }
 
 // A function, not a constant: client bundles must not keep a runtime import of @gitlib/core.
 const issueLimits = (): IssueLimits => ({ title: MAX_ISSUE_TITLE_LENGTH, body: MAX_ISSUE_BODY_LENGTH });
 
-function toView(issue: LocalIssue, repos: readonly RepoRecord[]): LocalIssueView {
+export function toView(issue: LocalIssue, repos: readonly RepoRecord[]): LocalIssueView {
   const repo = repos.find((candidate) => candidate.relativePath === issue.repoPath);
   return {
     ...issue,
@@ -64,8 +67,11 @@ export const getPlanning = createServerFn({ method: "GET" }).handler(async (): P
       .listLocalIssues()
       .map((issue) => toView(issue, repos)),
     limits: issueLimits(),
+    projects: projectOptions(),
   };
 });
+
+const projectOptions = () => getApp().listProjects().map(({ id, name }) => ({ id, name }));
 
 const isId = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value > 0;
 
@@ -77,7 +83,7 @@ export const getLocalIssue = createServerFn({ method: "GET" })
   })
   .handler(async ({ data }): Promise<LocalIssueDetail | null> => {
     const issue = getApp().planning.getIssue(data.id);
-    return issue ? { issue: toView(issue, loadRepositories()), limits: issueLimits() } : null;
+    return issue ? { issue: toView(issue, loadRepositories()), limits: issueLimits(), projects: projectOptions() } : null;
   });
 
 export const createLocalIssue = createServerFn({ method: "POST" })
