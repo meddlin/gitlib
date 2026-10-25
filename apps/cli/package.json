@@ -20,7 +20,7 @@
     "@gitlib/core": "*",
     "commander": "^15.0.0",
     "ink": "^8.0.0",
-    "marked": "^15.0.0",
+    "marked": "^18.1.1",
     "marked-terminal": "^7.3.0",
     "react": "^19.3.1",
     "smol-toml": "^1.9.1"
