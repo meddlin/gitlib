@@ -24,7 +24,7 @@ export type IssueCounts = IssueCountsView["counts"] | undefined;
 /** GitHub community scores by repo relativePath; undefined while they are still loading. */
 export type CommunityScores = CommunityScoresView["scores"] | undefined;
 
-export type SortKey = "name" | "description" | "stack" | "issues" | "health" | "scanned";
+export type SortKey = "name" | "description" | "stack" | "issues" | "community" | "scanned";
 export type SortDir = "asc" | "desc";
 
 export interface Sort {
@@ -59,7 +59,7 @@ export function sortRepos(
       case "scanned":
         return repo.lastScannedAt ?? "";
       case "issues":
-      case "health":
+      case "community":
         return "";
     }
   };
@@ -68,7 +68,7 @@ export function sortRepos(
   const sign = dir === "asc" ? 1 : -1;
   return [...repos].sort((a, b) => {
     if (a.isFavorite !== b.isFavorite) return a.isFavorite ? -1 : 1;
-    if (key === "issues" || key === "health") {
+    if (key === "issues" || key === "community") {
       const [ca, cb] = [number(a), number(b)];
       // Repos with no number (no GitHub remote, or not loaded yet) sink to the bottom; zero is a real value.
       if ((ca === undefined) !== (cb === undefined)) return ca === undefined ? 1 : -1;
@@ -149,7 +149,7 @@ function IssueCount({ repo, counts }: { repo: RepoView; counts: IssueCounts }) {
 }
 
 /** A score with one square per checklist item, so what is missing shows without opening the repo. */
-function CommunityHealth({ repo, scores }: { repo: RepoView; scores: CommunityScores }) {
+function CommunityScore({ repo, scores }: { repo: RepoView; scores: CommunityScores }) {
   if (!scores) return <span aria-label="Loading community score">…</span>;
   const entry = scores[repo.relativePath];
   if (!entry) return <span>—</span>;
@@ -161,7 +161,7 @@ function CommunityHealth({ repo, scores }: { repo: RepoView; scores: CommunitySc
       to="/repos/$"
       params={{ _splat: repo.relativePath }}
       search={{ tab: "community" }}
-      aria-label={`Community health ${entry.score}% for ${repo.name}${
+      aria-label={`Community profile score ${entry.score}% for ${repo.name}${
         missing.length > 0 ? `; missing ${missing.map((item) => item.label).join(", ")}` : ""
       }`}
       title={missing.length > 0 ? `Missing: ${missing.map((item) => item.label).join(", ")}` : "Nothing missing"}
@@ -257,9 +257,9 @@ export function RepoTable({
               className="w-[8%]"
             />
             <SortHeader
-              label="Health"
-              title="GitHub community health score"
-              column="health"
+              label="Community"
+              title="GitHub community profile score"
+              column="community"
               sort={sort}
               onSort={onSort}
               className="w-[10%]"
@@ -361,7 +361,7 @@ export function RepoTable({
                   <IssueCount repo={repo} counts={issueCounts} />
                 </td>
                 <td className="px-3 py-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
-                  <CommunityHealth repo={repo} scores={communityScores} />
+                  <CommunityScore repo={repo} scores={communityScores} />
                 </td>
                 <td className="px-3 py-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
                   {formatScanned(repo.lastScannedAt)}

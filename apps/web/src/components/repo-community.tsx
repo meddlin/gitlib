@@ -167,7 +167,7 @@ export function RepoCommunity({ relativePath, canPlan }: { relativePath: string;
         <div className="min-w-0 flex-1 pb-1.5">
           <div
             role="meter"
-            aria-label="Community health"
+            aria-label="Community profile score"
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={score}

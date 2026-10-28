@@ -1,5 +1,5 @@
 /**
- * GitHub's community profile ("community standards") for a repo: a health percentage plus which of the
+ * GitHub's community profile ("community standards") for a repo: a percentage score plus which of the
  * recommended project files exist. Parsing lives here, free of server code, so it is shared with the UI.
  */
 
@@ -92,7 +92,7 @@ export function planningIssueDraft(
     body: [
       item.hint,
       "",
-      `GitHub's community profile for ${repo.slug} lists the ${item.label.toLowerCase()} as missing (health score ${repo.score}%).`,
+      `GitHub's community profile for ${repo.slug} lists the ${item.label.toLowerCase()} as missing (community profile score ${repo.score}%).`,
       "",
       `Community standards: https://github.com/${repo.slug}/community`,
     ].join("\n"),

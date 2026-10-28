@@ -10,7 +10,7 @@ export const OPTIONAL_REPO_TABS = [
   {
     id: "community",
     label: "Community",
-    description: "GitHub's community health score and which recommended files the repository is missing.",
+    description: "GitHub's community profile score and which recommended files the repository is missing.",
   },
 ] as const;
 

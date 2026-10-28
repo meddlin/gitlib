@@ -148,7 +148,7 @@ npm run build -w @gitlib/web && npm run preview -w @gitlib/web   # production bu
   `GITLIB_GITHUB_TOKEN` (or `GITHUB_TOKEN`) for private repos and a higher rate limit. The web server
   reads it from the environment or from `.env.local` / `.env` in `apps/web/` or the repo root (both
   gitignored); `apps/web/.env.example` shows the format.
-- The repo table's **Health** column and each repo's **Community** tab show GitHub's
+- The repo table's **Community** column and each repo's **Community** tab show GitHub's
   [community profile](https://docs.github.com/rest/metrics/community) score. The column gives the
   percentage plus one square per recommended item (description, README, license, code of conduct,
   contributing guide, issue and pull request templates), hollow when missing; hover for the names, click

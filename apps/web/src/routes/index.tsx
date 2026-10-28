@@ -28,7 +28,7 @@ interface IndexSearch extends LibraryTableState {
   repo?: string;
 }
 
-const SORT_KEYS: readonly SortKey[] = ["name", "description", "stack", "issues", "health", "scanned"];
+const SORT_KEYS: readonly SortKey[] = ["name", "description", "stack", "issues", "community", "scanned"];
 const SORT_DIRS: readonly SortDir[] = ["asc", "desc"];
 
 export const Route = createFileRoute("/")({
@@ -228,7 +228,7 @@ function RepoLibrary() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [selected, closePreview]);
 
-  // Issue counts read most useful biggest-first, so that column starts descending. Health starts ascending:
+  // Issue counts read most useful biggest-first, so that column starts descending. Community starts ascending:
   // the repos missing the most are the ones to look at first.
   const toggleSort = (key: SortKey) =>
     setSearch(
