@@ -1,5 +1,6 @@
 import { Link, createFileRoute, notFound } from "@tanstack/react-router";
-import { ArrowLeft, CircleDot, GitPullRequest } from "lucide-react";
+import { ArrowLeft, CircleDot, GitPullRequest, HeartPulse } from "lucide-react";
+import { RepoCommunity } from "#/components/repo-community";
 import { RepoIssues } from "#/components/repo-issues";
 import { RepoPulls } from "#/components/repo-pulls";
 import { RepoOverview } from "#/components/repo-overview";
@@ -9,7 +10,7 @@ import { TechBadge } from "#/components/tech-badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
 import { getRepo } from "#/server/repos";
 
-const TABS = ["overview", "issues", "pulls"] as const;
+const TABS = ["overview", "issues", "pulls", "community"] as const;
 type RepoTab = (typeof TABS)[number];
 
 export const Route = createFileRoute("/repos/$")({
@@ -96,6 +97,12 @@ function RepoDetail() {
               Pull requests
             </TabsTrigger>
           ) : null}
+          {visibleTabs.community ? (
+            <TabsTrigger value="community">
+              <HeartPulse className="size-3.5" aria-hidden />
+              Community
+            </TabsTrigger>
+          ) : null}
         </TabsList>
         <TabsContent value="overview">
           <RepoOverview repo={repo} />
@@ -108,6 +115,11 @@ function RepoDetail() {
         {visibleTabs.pulls ? (
           <TabsContent value="pulls">
             <RepoPulls relativePath={repo.relativePath} />
+          </TabsContent>
+        ) : null}
+        {visibleTabs.community ? (
+          <TabsContent value="community">
+            <RepoCommunity relativePath={repo.relativePath} canPlan={!repo.isWorktree} />
           </TabsContent>
         ) : null}
       </Tabs>

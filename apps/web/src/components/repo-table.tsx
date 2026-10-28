@@ -4,7 +4,9 @@ import { ArrowDown, ArrowUp, ArrowUpDown, Pencil, Star } from "lucide-react";
 import { DescriptionDialog } from "#/components/description-dialog";
 import { Highlighted } from "#/components/highlighted";
 import { TechBadge } from "#/components/tech-badge";
+import { COMMUNITY_ITEMS, TONE_CLASSES, scoreTone } from "#/lib/community";
 import { cn } from "#/lib/utils";
+import type { CommunityScoresView } from "#/server/community";
 import { setFavorite, type RepoView } from "#/server/repos";
 import type { IssueCountsView } from "#/server/issues";
 import type { SearchHitView } from "#/server/search";
@@ -19,7 +21,10 @@ const SNIPPETS = [
 /** Open GitHub issue counts by repo relativePath; undefined while they are still loading. */
 export type IssueCounts = IssueCountsView["counts"] | undefined;
 
-export type SortKey = "name" | "description" | "stack" | "issues" | "scanned";
+/** GitHub community scores by repo relativePath; undefined while they are still loading. */
+export type CommunityScores = CommunityScoresView["scores"] | undefined;
+
+export type SortKey = "name" | "description" | "stack" | "issues" | "health" | "scanned";
 export type SortDir = "asc" | "desc";
 
 export interface Sort {
@@ -37,7 +42,12 @@ function orderedTech(repo: RepoView) {
 const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
 
 /** Sorts by the chosen column, but always lists favorites ahead of everything else. */
-export function sortRepos(repos: RepoView[], { key, dir }: Sort, issueCounts?: IssueCounts): RepoView[] {
+export function sortRepos(
+  repos: RepoView[],
+  { key, dir }: Sort,
+  issueCounts?: IssueCounts,
+  communityScores?: CommunityScores,
+): RepoView[] {
   const text = (repo: RepoView): string => {
     switch (key) {
       case "name":
@@ -49,15 +59,18 @@ export function sortRepos(repos: RepoView[], { key, dir }: Sort, issueCounts?: I
       case "scanned":
         return repo.lastScannedAt ?? "";
       case "issues":
+      case "health":
         return "";
     }
   };
+  const number = (repo: RepoView): number | undefined =>
+    key === "issues" ? issueCounts?.[repo.relativePath] : communityScores?.[repo.relativePath]?.score;
   const sign = dir === "asc" ? 1 : -1;
   return [...repos].sort((a, b) => {
     if (a.isFavorite !== b.isFavorite) return a.isFavorite ? -1 : 1;
-    if (key === "issues") {
-      const [ca, cb] = [issueCounts?.[a.relativePath], issueCounts?.[b.relativePath]];
-      // Repos with no count (no GitHub remote, or not loaded yet) sink to the bottom; zero is a real count.
+    if (key === "issues" || key === "health") {
+      const [ca, cb] = [number(a), number(b)];
+      // Repos with no number (no GitHub remote, or not loaded yet) sink to the bottom; zero is a real value.
       if ((ca === undefined) !== (cb === undefined)) return ca === undefined ? 1 : -1;
       if (ca !== undefined && cb !== undefined && ca !== cb) return sign * (ca - cb);
       return collator.compare(a.relativePath, b.relativePath);
@@ -135,6 +148,38 @@ function IssueCount({ repo, counts }: { repo: RepoView; counts: IssueCounts }) {
   );
 }
 
+/** A score with one square per checklist item, so what is missing shows without opening the repo. */
+function CommunityHealth({ repo, scores }: { repo: RepoView; scores: CommunityScores }) {
+  if (!scores) return <span aria-label="Loading community score">…</span>;
+  const entry = scores[repo.relativePath];
+  if (!entry) return <span>—</span>;
+
+  const missing = COMMUNITY_ITEMS.filter((item) => entry.missing.includes(item.id));
+  const tone = TONE_CLASSES[scoreTone(entry.score)];
+  return (
+    <Link
+      to="/repos/$"
+      params={{ _splat: repo.relativePath }}
+      search={{ tab: "community" }}
+      aria-label={`Community health ${entry.score}% for ${repo.name}${
+        missing.length > 0 ? `; missing ${missing.map((item) => item.label).join(", ")}` : ""
+      }`}
+      title={missing.length > 0 ? `Missing: ${missing.map((item) => item.label).join(", ")}` : "Nothing missing"}
+      className="flex w-fit flex-col gap-1 outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <span className={cn("text-sm font-medium", tone.text)}>{entry.score}%</span>
+      <span className="flex gap-[3px]" aria-hidden>
+        {COMMUNITY_ITEMS.map((item) => (
+          <span
+            key={item.id}
+            className={cn("size-2", entry.missing.includes(item.id) ? "border border-muted-foreground/70" : tone.bar)}
+          />
+        ))}
+      </span>
+    </Link>
+  );
+}
+
 function FavoriteButton({ repo }: { repo: RepoView }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -175,6 +220,7 @@ export function RepoTable({
   activeTech,
   onToggleTech,
   issueCounts,
+  communityScores,
   selectedPath,
   onSelect,
 }: {
@@ -187,20 +233,21 @@ export function RepoTable({
   activeTech: string | undefined;
   onToggleTech: (name: string) => void;
   issueCounts: IssueCounts;
+  communityScores: CommunityScores;
   selectedPath: string | undefined;
   onSelect: (repo: RepoView) => void;
 }) {
   return (
     <div className="overflow-x-auto border-y">
-      <table className="w-full min-w-176 table-fixed border-collapse text-sm">
+      <table className="w-full min-w-192 table-fixed border-collapse text-sm">
         <thead className="border-b">
           <tr>
             <th scope="col" className="w-10 px-3">
               <span className="sr-only">Favorite</span>
             </th>
-            <SortHeader label="Repository" column="name" sort={sort} onSort={onSort} className="w-[24%]" />
-            <SortHeader label="Description" column="description" sort={sort} onSort={onSort} className="w-[30%]" />
-            <SortHeader label="Stack" column="stack" sort={sort} onSort={onSort} className="w-[24%]" />
+            <SortHeader label="Repository" column="name" sort={sort} onSort={onSort} className="w-[22%]" />
+            <SortHeader label="Description" column="description" sort={sort} onSort={onSort} className="w-[27%]" />
+            <SortHeader label="Stack" column="stack" sort={sort} onSort={onSort} className="w-[22%]" />
             <SortHeader
               label="Issues"
               title="Open GitHub issues"
@@ -208,6 +255,14 @@ export function RepoTable({
               sort={sort}
               onSort={onSort}
               className="w-[8%]"
+            />
+            <SortHeader
+              label="Health"
+              title="GitHub community health score"
+              column="health"
+              sort={sort}
+              onSort={onSort}
+              className="w-[10%]"
             />
             <SortHeader label="Scanned" column="scanned" sort={sort} onSort={onSort} className="w-[10%]" />
             <th scope="col" className="w-10 px-3">
@@ -304,6 +359,9 @@ export function RepoTable({
                 </td>
                 <td className="px-3 py-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
                   <IssueCount repo={repo} counts={issueCounts} />
+                </td>
+                <td className="px-3 py-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+                  <CommunityHealth repo={repo} scores={communityScores} />
                 </td>
                 <td className="px-3 py-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
                   {formatScanned(repo.lastScannedAt)}

@@ -1,5 +1,5 @@
-import { loadGitRemotes, selectGitHubRepo } from "@gitlib/core";
-import { getApp } from "./gitlib.server";
+import { loadGitRemotes, selectGitHubRepo, type GitHubRepoRef } from "@gitlib/core";
+import { getApp, loadAndIndexRepositories } from "./gitlib.server";
 import type { Provider } from "./provider";
 
 export const githubToken = (): string | undefined =>
@@ -24,12 +24,31 @@ export function resolveGitHubSource(relativePath: string): { source: GitHubSourc
   return { source: { provider: "github", owner: ref.owner, repo: ref.repo, slug: `${ref.owner}/${ref.repo}` }, error: null };
 }
 
+/**
+ * Every GitHub repository behind the repos gitlib knows about, with the relativePaths that share it.
+ * Linked worktrees share a remote with their main repo, so callers can ask GitHub about each repository once.
+ */
+export async function groupReposByGitHubSlug(): Promise<{ ref: GitHubRepoRef; paths: string[] }[]> {
+  const app = getApp();
+  const bySlug = new Map<string, { ref: GitHubRepoRef; paths: string[] }>();
+  for (const repo of await loadAndIndexRepositories()) {
+    const { remotes, error } = loadGitRemotes(repo.absolutePath, app.system);
+    const ref = error ? null : selectGitHubRepo(remotes);
+    if (!ref) continue;
+    const key = `${ref.owner}/${ref.repo}`.toLowerCase();
+    const entry = bySlug.get(key) ?? { ref, paths: [] };
+    entry.paths.push(repo.relativePath);
+    bySlug.set(key, entry);
+  }
+  return [...bySlug.values()];
+}
+
 /** GETs a repo-scoped GitHub REST endpoint, turning the common failures into messages worth showing. */
 export async function githubGet<T>(
   source: GitHubSource,
   path: string,
   params: Record<string, string>,
-): Promise<{ data: T; error: null } | { data: null; error: string }> {
+): Promise<{ data: T; error: null; rateRemaining: number | null } | { data: null; error: string; status: number }> {
   const url = new URL(
     `https://api.github.com/repos/${encodeURIComponent(source.owner)}/${encodeURIComponent(source.repo)}${path}`,
   );
@@ -48,6 +67,7 @@ export async function githubGet<T>(
   if (response.status === 404) {
     return {
       data: null,
+      status: 404,
       error: token
         ? `${source.slug} was not found on GitHub.`
         : `${source.slug} was not found on GitHub. If it is private, set GITHUB_TOKEN.`,
@@ -56,9 +76,15 @@ export async function githubGet<T>(
   if (response.status === 403 || response.status === 429) {
     return {
       data: null,
+      status: response.status,
       error: token ? "GitHub rate limit reached. Try again later." : "GitHub rate limit reached. Set GITHUB_TOKEN to raise it.",
     };
   }
-  if (!response.ok) return { data: null, error: `GitHub responded with ${response.status}.` };
-  return { data: (await response.json()) as T, error: null };
+  if (!response.ok) return { data: null, status: response.status, error: `GitHub responded with ${response.status}.` };
+  const remaining = response.headers.get("x-ratelimit-remaining");
+  return {
+    data: (await response.json()) as T,
+    error: null,
+    rateRemaining: remaining !== null && Number.isFinite(Number(remaining)) ? Number(remaining) : null,
+  };
 }

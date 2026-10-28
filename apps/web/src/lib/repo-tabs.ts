@@ -7,14 +7,19 @@ import { useSyncExternalStore } from "react";
 export const OPTIONAL_REPO_TABS = [
   { id: "issues", label: "Issues", description: "Open issues from the repository's GitHub remote." },
   { id: "pulls", label: "Pull requests", description: "Open pull requests from the repository's GitHub remote." },
+  {
+    id: "community",
+    label: "Community",
+    description: "GitHub's community health score and which recommended files the repository is missing.",
+  },
 ] as const;
 
 export type OptionalRepoTab = (typeof OPTIONAL_REPO_TABS)[number]["id"];
 
 export type RepoTabVisibility = Record<OptionalRepoTab, boolean>;
 
-/** Both tabs are on until the user turns them off. */
-export const DEFAULT_REPO_TABS: RepoTabVisibility = { issues: true, pulls: true };
+/** Every tab is on until the user turns it off. */
+export const DEFAULT_REPO_TABS: RepoTabVisibility = { issues: true, pulls: true, community: true };
 
 export const REPO_TABS_STORAGE_KEY = "gitlib-repo-tabs";
 const REPO_TABS_CHANGE_EVENT = "gitlib-repo-tabs-change";

@@ -1,7 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
-import { loadGitRemotes, selectGitHubRepo, type GitHubRepoRef } from "@gitlib/core";
-import { githubGet, githubToken, resolveGitHubSource } from "./github.server";
-import { getApp, loadAndIndexRepositories } from "./gitlib.server";
+import type { GitHubRepoRef } from "@gitlib/core";
+import { githubGet, githubToken, groupReposByGitHubSlug, resolveGitHubSource } from "./github.server";
 import type { Provider } from "./provider";
 
 export interface IssueView {
@@ -150,20 +149,7 @@ async function fetchIssueCounts(): Promise<IssueCountsView> {
   const token = githubToken();
   if (!token) return { status: "no-token", counts: {}, error: null };
 
-  const app = getApp();
-  // Linked worktrees share a remote with their main repo, so ask GitHub about each repository once.
-  const bySlug = new Map<string, { ref: GitHubRepoRef; paths: string[] }>();
-  for (const repo of await loadAndIndexRepositories()) {
-    const { remotes, error } = loadGitRemotes(repo.absolutePath, app.system);
-    const ref = error ? null : selectGitHubRepo(remotes);
-    if (!ref) continue;
-    const key = `${ref.owner}/${ref.repo}`.toLowerCase();
-    const entry = bySlug.get(key) ?? { ref, paths: [] };
-    entry.paths.push(repo.relativePath);
-    bySlug.set(key, entry);
-  }
-
-  const entries = [...bySlug.values()];
+  const entries = await groupReposByGitHubSlug();
   const counts: Record<string, number> = {};
   try {
     for (let i = 0; i < entries.length; i += COUNT_BATCH) {
