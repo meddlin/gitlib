@@ -3,11 +3,21 @@ import { RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ContributionGraph, type ContributionSource } from "#/components/contribution-graph";
 import { RepoPreview } from "#/components/repo-preview";
-import { RepoTable, sortRepos, type IssueCounts, type RepoHighlights, type Sort, type SortDir, type SortKey } from "#/components/repo-table";
+import {
+  RepoTable,
+  sortRepos,
+  type CommunityScores,
+  type IssueCounts,
+  type RepoHighlights,
+  type Sort,
+  type SortDir,
+  type SortKey,
+} from "#/components/repo-table";
 import { SearchBar } from "#/components/search-bar";
 import { TechBadge } from "#/components/tech-badge";
 import { saveLibraryState, type LibraryTableState } from "#/lib/library-state";
 import { cn } from "#/lib/utils";
+import { getCommunityScores, type CommunityScoresView } from "#/server/community";
 import { getContributions, type ContributionsView } from "#/server/contributions";
 import { getIssueCounts, type IssueCountsView } from "#/server/issues";
 import { getRepos, rescanRepos, type RepoView } from "#/server/repos";
@@ -18,7 +28,7 @@ interface IndexSearch extends LibraryTableState {
   repo?: string;
 }
 
-const SORT_KEYS: readonly SortKey[] = ["name", "description", "stack", "issues", "scanned"];
+const SORT_KEYS: readonly SortKey[] = ["name", "description", "stack", "issues", "community", "scanned"];
 const SORT_DIRS: readonly SortDir[] = ["asc", "desc"];
 
 export const Route = createFileRoute("/")({
@@ -52,25 +62,28 @@ function hasTech(repo: RepoView, tech: string | undefined): boolean {
 const DEFAULT_SORT: Sort = { key: "name", dir: "asc" };
 
 /**
- * GitHub issue counts for every repo, fetched after the list renders (it's a network call the table
- * shouldn't wait on). Undefined until they arrive; the server caches them, so refetching is cheap.
+ * Data about every repo that comes from GitHub, fetched after the list renders (it's a network call the table
+ * shouldn't wait on). Undefined until it arrives; the server caches it, so refetching is cheap.
  */
-function useIssueCounts(refreshKey: unknown): IssueCountsView | undefined {
-  const [result, setResult] = useState<IssueCountsView>();
+function useBackgroundView<T>(load: () => Promise<T>, onError: (message: string) => T, refreshKey: unknown): T | undefined {
+  const [result, setResult] = useState<T>();
   useEffect(() => {
     let cancelled = false;
-    getIssueCounts()
+    load()
       .then((next) => !cancelled && setResult(next))
       .catch((caught: unknown) => {
-        const error = caught instanceof Error ? caught.message : "Could not load issue counts.";
-        if (!cancelled) setResult({ status: "error", counts: {}, error });
+        if (!cancelled) setResult(onError(caught instanceof Error ? caught.message : "Something went wrong."));
       });
     return () => {
       cancelled = true;
     };
+    // `load` and `onError` are stable in every caller, so `refreshKey` is the only real input.
   }, [refreshKey]);
   return result;
 }
+
+const issueCountsFailed = (error: string): IssueCountsView => ({ status: "error", counts: {}, error });
+const communityScoresFailed = (error: string): CommunityScoresView => ({ status: "error", scores: {}, error });
 
 const CONTRIBUTION_SOURCE_KEY = "gitlib-contribution-source";
 
@@ -119,8 +132,10 @@ function RepoLibrary() {
   const [scanning, setScanning] = useState(false);
 
   const contributions = useContributions(allRepos);
-  const issueCountsResult = useIssueCounts(allRepos);
+  const issueCountsResult = useBackgroundView(getIssueCounts, issueCountsFailed, allRepos);
   const issueCounts: IssueCounts = issueCountsResult?.counts;
+  const communityResult = useBackgroundView(getCommunityScores, communityScoresFailed, allRepos);
+  const communityScores: CommunityScores = communityResult?.scores;
 
   const searching = useRouterState({ select: (state) => state.isLoading });
 
@@ -157,8 +172,8 @@ function RepoLibrary() {
 
   const visible = useMemo(() => {
     const filtered = results.map(({ repo }) => repo).filter((repo) => hasTech(repo, tech));
-    return activeSort ? sortRepos(filtered, activeSort, issueCounts) : filtered;
-  }, [results, tech, activeSort, issueCounts]);
+    return activeSort ? sortRepos(filtered, activeSort, issueCounts, communityScores) : filtered;
+  }, [results, tech, activeSort, issueCounts, communityScores]);
 
   // Every detected technology with how many repos use it; languages and frameworks first.
   const techCounts = useMemo(() => {
@@ -213,7 +228,8 @@ function RepoLibrary() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [selected, closePreview]);
 
-  // Issue counts read most useful biggest-first, so that column starts descending.
+  // Issue counts read most useful biggest-first, so that column starts descending. Community starts ascending:
+  // the repos missing the most are the ones to look at first.
   const toggleSort = (key: SortKey) =>
     setSearch(
       activeSort?.key === key
@@ -288,6 +304,12 @@ function RepoLibrary() {
             </p>
           ) : null}
 
+          {communityResult && communityResult.status !== "ok" ? (
+            <p className="text-xs text-muted-foreground" role="status">
+              Some GitHub community scores couldn't be loaded: {communityResult.error}
+            </p>
+          ) : null}
+
           {worktreeCount > 0 ? (
             <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
               <input
@@ -347,6 +369,7 @@ function RepoLibrary() {
                 activeTech={tech}
                 onToggleTech={toggleTech}
                 issueCounts={issueCounts}
+                communityScores={communityScores}
                 selectedPath={selected?.relativePath}
                 onSelect={(repo) => setSearch({ repo: repo.relativePath })}
               />

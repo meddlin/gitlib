@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { loadRepoReadme, technologyCategory, type RepoRecord, type TechnologyCategory } from "@gitlib/core";
 import { getApp, loadAndIndexRepositories } from "./gitlib.server";
+import { clearCommunity } from "./community";
 import { clearContributions } from "./contributions";
 import { clearIssueCounts } from "./issues";
 
@@ -67,6 +68,7 @@ export const getRepo = createServerFn({ method: "GET" })
 export const rescanRepos = createServerFn({ method: "POST" }).handler(async () => {
   clearIssueCounts();
   clearContributions();
+  clearCommunity();
   return listing(true);
 });
 

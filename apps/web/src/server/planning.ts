@@ -86,6 +86,19 @@ export const getLocalIssue = createServerFn({ method: "GET" })
     return issue ? { issue: toView(issue, loadRepositories()), limits: issueLimits(), projects: projectOptions() } : null;
   });
 
+/** Every planning issue filed against one repo (open and closed), most recently updated first. */
+export const getRepoLocalIssues = createServerFn({ method: "GET" })
+  .validator((input: { relativePath: string }) => {
+    if (typeof input?.relativePath !== "string" || !input.relativePath) throw new Error("Invalid issues request.");
+    return input;
+  })
+  .handler(async ({ data }): Promise<LocalIssueView[]> => {
+    const repos = loadRepositories();
+    return getApp()
+      .listLocalIssues({ repoPath: data.relativePath })
+      .map((issue) => toView(issue, repos));
+  });
+
 export const createLocalIssue = createServerFn({ method: "POST" })
   .validator((input: { repo: string; title: string; body: string }) => {
     if (typeof input?.repo !== "string" || typeof input?.title !== "string" || typeof input?.body !== "string") {

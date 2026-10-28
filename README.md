@@ -148,6 +148,16 @@ npm run build -w @gitlib/web && npm run preview -w @gitlib/web   # production bu
   `GITLIB_GITHUB_TOKEN` (or `GITHUB_TOKEN`) for private repos and a higher rate limit. The web server
   reads it from the environment or from `.env.local` / `.env` in `apps/web/` or the repo root (both
   gitignored); `apps/web/.env.example` shows the format.
+- The repo table's **Community** column and each repo's **Community** tab show GitHub's
+  [community profile](https://docs.github.com/rest/metrics/community) score. The column gives the
+  percentage plus one square per recommended item (description, README, license, code of conduct,
+  contributing guide, issue and pull request templates), hollow when missing; hover for the names, click
+  through to the tab for what each item is for. It is sortable (lowest first). Scores are cached for 30
+  minutes and **Rescan** refreshes them. This costs one GitHub request per repo, so without a token
+  (60 requests an hour) the table stops early and says so, leaving the rest of the limit for the Issues and
+  Pull requests tabs; set `GITLIB_GITHUB_TOKEN` to score everything.
+  Each missing item on the Community tab has an **Add to planning** button that files a gitlib
+  [planning](#planning) issue for it (stored in gitlib only); once filed, the row links to that issue.
 - The **Planning** page (`/planning`) holds gitlib's own issues; see [Planning](#planning).
 - Lists every git repo found under your configured scan roots (scanned on first load; use
   **Rescan** after adding repos).
