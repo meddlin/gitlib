@@ -8,6 +8,16 @@ for each project without depending on GitHub.
 
 On first run, Gitlib bootstraps its local app data in `~/.git-library/`.
 
+## Quick Standup
+
+Use these commands to quickly get the project running locally after you've cloned it. You may need
+to update values in `.env` after this.
+
+```
+cp .env.example .env
+docker compose up -d --build
+```
+
 ## Project Layout
 
 Gitlib is an npm-workspaces monorepo written entirely in TypeScript:
