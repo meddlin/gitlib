@@ -82,6 +82,21 @@ export const MIGRATIONS: readonly Migration[] = [
       );
     `,
   },
+  {
+    version: 5,
+    name: "dependabot schedule",
+    sql: `
+      -- When the web server should check Dependabot on its own. One row, written by the user from the page.
+      -- days is a comma-separated list of weekdays (0 = Sunday); time is HH:MM in the server's time zone.
+      CREATE TABLE dependabot_schedule (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        enabled INTEGER NOT NULL,
+        days TEXT NOT NULL,
+        time TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

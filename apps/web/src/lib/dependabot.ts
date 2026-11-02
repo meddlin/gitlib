@@ -75,3 +75,22 @@ export function snoozeUntil(days: number, now: Date = new Date()): string {
 
 /** `meddlin/gitlib#41`, the way the CLI prints a pull request. */
 export const prKey = (pr: { repo: string; number: number }): string => `${pr.repo}#${pr.number}`;
+
+export const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+/** Monday first, the way a week is usually drawn. */
+export const WEEKDAY_ORDER = [1, 2, 3, 4, 5, 6, 0] as const;
+
+/** A short phrase: "off", "every day at 08:00", "weekdays at 08:00", "Mon, Wed at 06:45". */
+export function describeSchedule(schedule: { enabled: boolean; days: readonly number[]; time: string }): string {
+  if (!schedule.enabled) return "off";
+  const days = [...schedule.days].sort((a, b) => a - b);
+  const which =
+    days.length === 7
+      ? "every day"
+      : days.join() === "1,2,3,4,5"
+        ? "weekdays"
+        : days.join() === "0,6"
+          ? "weekends"
+          : WEEKDAY_ORDER.filter((day) => days.includes(day)).map((day) => WEEKDAY_NAMES[day]).join(", ");
+  return `${which} at ${schedule.time}`;
+}

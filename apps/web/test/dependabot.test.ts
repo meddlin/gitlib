@@ -12,8 +12,8 @@ import {
   type GitLibApp,
   type OwnerPulls,
 } from "@gitlib/core";
-import { BUCKET_ORDER, ciLabel, codeSegments, holderName, prKey, safeHref, snoozeUntil } from "../src/lib/dependabot";
-import { applyDismissal, buildBadge, buildView, runCheck } from "../src/server/dependabot.server";
+import { BUCKET_ORDER, ciLabel, codeSegments, describeSchedule, holderName, prKey, safeHref, snoozeUntil } from "../src/lib/dependabot";
+import { attempt, buildBadge, buildView, ensureScheduler, runCheck } from "../src/server/dependabot.server";
 
 // --- lib/dependabot.ts -------------------------------------------------------------------------------------------
 
@@ -45,6 +45,15 @@ describe("display helpers", () => {
       { text: "dangling ", code: false },
       { text: "tick", code: true },
     ]);
+  });
+
+  it("describes a schedule in a few words", () => {
+    expect(describeSchedule({ enabled: false, days: [1, 2], time: "08:00" })).toBe("off");
+    expect(describeSchedule({ enabled: true, days: [1, 2, 3, 4, 5], time: "08:00" })).toBe("weekdays at 08:00");
+    expect(describeSchedule({ enabled: true, days: [0, 1, 2, 3, 4, 5, 6], time: "06:30" })).toBe("every day at 06:30");
+    expect(describeSchedule({ enabled: true, days: [6, 0], time: "10:00" })).toBe("weekends at 10:00");
+    // Monday first, even though Sunday is day 0.
+    expect(describeSchedule({ enabled: true, days: [0, 3, 1], time: "06:45" })).toBe("Mon, Wed, Sun at 06:45");
   });
 
   it("names who holds the lock, and a snooze end a number of days away", () => {
@@ -161,9 +170,9 @@ describe("buildView", () => {
     // The PR list is the page's to show; it is not repeated inside the report part.
     expect(view.report).not.toHaveProperty("items");
 
-    expect(applyDismissal(() => void app.dismissDependabotPr("meddlin/gitlib", 2))).toBeNull();
+    expect(attempt(() => void app.dismissDependabotPr("meddlin/gitlib", 2))).toBeNull();
     const week = new Date(Date.now() + 7 * 86_400_000).toISOString();
-    expect(applyDismissal(() => void app.dismissDependabotPr("meddlin/gitlib", 4, week))).toBeNull();
+    expect(attempt(() => void app.dismissDependabotPr("meddlin/gitlib", 4, week))).toBeNull();
     const after = buildView(new Date(), app);
     expect(after.items.map((item) => item.pr.number)).toEqual([1, 3]);
     // Set-aside rows keep the buckets' order.
@@ -222,12 +231,58 @@ describe("runCheck", () => {
   });
 });
 
-describe("applyDismissal", () => {
+describe("attempt", () => {
   it("answers with the reason when the request is refused", () => {
     const app = makeApp(null);
-    expect(applyDismissal(() => void app.dismissDependabotPr("not a repo", 1))).toContain("is not a GitHub repository");
-    expect(applyDismissal(() => void app.dismissDependabotPr("a/b", 1, "someday"))).toContain("is not a date");
-    expect(applyDismissal(() => app.restoreDependabotPr("a/b", 1))).toBeNull();
-    expect(() => applyDismissal(() => { throw new TypeError("bug"); })).toThrow("bug");
+    expect(attempt(() => void app.dismissDependabotPr("not a repo", 1))).toContain("is not a GitHub repository");
+    expect(attempt(() => void app.dismissDependabotPr("a/b", 1, "someday"))).toContain("is not a date");
+    expect(attempt(() => app.restoreDependabotPr("a/b", 1))).toBeNull();
+    expect(() => attempt(() => { throw new TypeError("bug"); })).toThrow("bug");
+  });
+});
+
+describe("the schedule on the page", () => {
+  it("is off until saved, and then says when the next check is", () => {
+    const app = makeApp(null);
+    expect(buildView(new Date(), app).schedule).toMatchObject({ enabled: false, days: [1, 2, 3, 4, 5], time: "08:00", nextRunAt: null, active: false, lastAttemptAt: null, lastError: null });
+
+    expect(attempt(() => void app.saveDependabotSchedule({ enabled: true, days: [0, 1, 2, 3, 4, 5, 6], time: "09:30" }))).toBeNull();
+    const view = buildView(new Date("2026-11-02T08:00:00"), app);
+    expect(view.schedule).toMatchObject({ enabled: true, time: "09:30", timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+    // The next slot is today at 09:30 on the server's wall clock.
+    expect(new Date(view.schedule.nextRunAt!).getTime()).toBe(new Date("2026-11-02T09:30:00").getTime());
+  });
+
+  it("refuses a schedule the server could not follow, with the reason", () => {
+    const app = makeApp(null);
+    expect(attempt(() => void app.saveDependabotSchedule({ enabled: true, days: [], time: "08:00" }))).toBe("Pick at least one day, or turn the schedule off.");
+    expect(attempt(() => void app.saveDependabotSchedule({ enabled: true, days: [1], time: "8am" }))).toContain("08:00");
+    expect(buildView(new Date(), app).schedule.enabled).toBe(false);
+  });
+
+  it("shows the scheduler's state: running, and what went wrong last", () => {
+    const app = makeApp(null);
+    const scheduler = app.createDependabotScheduler();
+    expect(buildView(new Date(), app, scheduler).schedule.active).toBe(false);
+    scheduler.start(3_600_000);
+    try {
+      expect(buildView(new Date(), app, scheduler).schedule).toMatchObject({ active: true, lastError: null });
+    } finally {
+      scheduler.stop();
+    }
+  });
+
+  it("starts one scheduler per server, however often it is asked", () => {
+    const shared = globalThis as { __gitlibDependabot?: { scheduler?: { stop(): void; started: boolean } } };
+    delete shared.__gitlibDependabot;
+    try {
+      const app = makeApp(null);
+      const first = ensureScheduler(app);
+      expect(first.started).toBe(true);
+      expect(ensureScheduler(app)).toBe(first);
+    } finally {
+      shared.__gitlibDependabot?.scheduler?.stop();
+      delete shared.__gitlibDependabot;
+    }
   });
 });

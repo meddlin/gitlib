@@ -5,6 +5,8 @@ import { GitLibError } from "../errors.js";
 import { MIGRATIONS, migrate, schemaVersion, type Migration } from "./migrations.js";
 import type {
   DependabotDismissal,
+  DependabotSchedule,
+  StoredDependabotSchedule,
   IssueStatus,
   LocalIssue,
   LocalIssueChanges,
@@ -20,6 +22,9 @@ type DatabaseSync = DatabaseSyncType;
 
 /** How long a connection waits on another process's write lock before giving up. */
 const BUSY_TIMEOUT_MS = 5_000;
+
+/** Off, on weekdays at 08:00, until the user chooses otherwise. */
+export const DEFAULT_DEPENDABOT_SCHEDULE: DependabotSchedule = { enabled: false, days: [1, 2, 3, 4, 5], time: "08:00" };
 
 export class LocalIssueNotFoundError extends GitLibError {}
 export class ProjectNotFoundError extends GitLibError {}
@@ -322,6 +327,32 @@ export class PlanningStore {
         }[]
       ).map((row) => ({ repo: row.repo, number: Number(row.number), snoozedUntil: row.snoozed_until, createdAt: row.created_at })),
     );
+  }
+
+  /** The saved schedule, or the default (off) until the user saves one. */
+  getDependabotSchedule(): StoredDependabotSchedule {
+    return this.withConnection((db) => {
+      const row = db.prepare("SELECT enabled, days, time, updated_at FROM dependabot_schedule WHERE id = 1").get() as unknown as
+        | { enabled: number; days: string; time: string; updated_at: string }
+        | undefined;
+      if (!row) return { ...DEFAULT_DEPENDABOT_SCHEDULE, days: [...DEFAULT_DEPENDABOT_SCHEDULE.days], updatedAt: null };
+      const days = row.days.split(",").flatMap((day) => (/^[0-6]$/.test(day) ? [Number(day)] : []));
+      return { enabled: Boolean(row.enabled), days, time: row.time, updatedAt: row.updated_at };
+    });
+  }
+
+  /** Saves the schedule. The caller has validated it (see `normalizeSchedule`). */
+  saveDependabotSchedule(schedule: DependabotSchedule, now: string): StoredDependabotSchedule {
+    this.transaction(
+      (db) =>
+        void db
+          .prepare(
+            `INSERT INTO dependabot_schedule (id, enabled, days, time, updated_at) VALUES (1, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET enabled = excluded.enabled, days = excluded.days, time = excluded.time, updated_at = excluded.updated_at`,
+          )
+          .run(schedule.enabled ? 1 : 0, schedule.days.join(","), schedule.time, now),
+    );
+    return { ...schedule, days: [...schedule.days], updatedAt: now };
   }
 
   /**

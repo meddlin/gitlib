@@ -79,3 +79,17 @@ export interface DependabotDismissal {
   snoozedUntil: string | null;
   createdAt: string;
 }
+
+/** When the web server checks Dependabot on its own: on these weekdays, at this time of day. */
+export interface DependabotSchedule {
+  enabled: boolean;
+  /** Weekdays it runs on, 0 (Sunday) to 6, sorted and without repeats. */
+  days: number[];
+  /** `HH:MM`, 24-hour, in the server's time zone. */
+  time: string;
+}
+
+export interface StoredDependabotSchedule extends DependabotSchedule {
+  /** When the user last saved it; null while it is still the default. A slot before this is never "missed". */
+  updatedAt: string | null;
+}
