@@ -8,6 +8,8 @@ x-gitlib-env: &gitlib-env
   TZ: ${TZ:-UTC}
   # Optional: lets the Issues tab read private repos and avoids GitHub's low anonymous rate limit.
   GITLIB_GITHUB_TOKEN: ${GITLIB_GITHUB_TOKEN:-}
+  # Optional: hours between automatic refreshes of the GitHub community scores (blank = 24, 0 = off).
+  GITLIB_COMMUNITY_REFRESH_HOURS: ${GITLIB_COMMUNITY_REFRESH_HOURS:-}
   # Optional: the contribution graph's "Local + GitHub & GitLab" mode.
   GITLIB_GITLAB_USERNAME: ${GITLIB_GITLAB_USERNAME:-}
   GITLIB_GITLAB_URL: ${GITLIB_GITLAB_URL:-}

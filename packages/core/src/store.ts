@@ -75,7 +75,23 @@ const SCHEMA = `
     PRIMARY KEY (repo_id, technology),
     FOREIGN KEY (repo_id) REFERENCES repos(id) ON DELETE CASCADE
   );
+
+  -- GitHub's community profile per remote repository. Keyed by lowercased "owner/repo" rather than repo_id
+  -- because linked worktrees share a remote and a repo can come and go between scans.
+  CREATE TABLE IF NOT EXISTS github_community_profiles (
+    slug TEXT PRIMARY KEY,
+    payload TEXT NOT NULL,
+    fetched_at TEXT NOT NULL
+  );
 `;
+
+/** A GitHub community profile as last fetched; `payload` is opaque to the store (the caller serializes it). */
+export interface StoredCommunityProfile {
+  /** Lowercased `owner/repo`. */
+  slug: string;
+  payload: string;
+  fetchedAt: string;
+}
 
 export class Store {
   constructor(readonly dbPath: string) {
@@ -274,6 +290,37 @@ export class Store {
       if (favorite) db.prepare("INSERT OR IGNORE INTO repo_favorites(repo_id) VALUES (?)").run(repoId);
       else db.prepare("DELETE FROM repo_favorites WHERE repo_id = ?").run(repoId);
     });
+  }
+
+  /** Keeps the newest community profile for a GitHub repo; `slug` is matched case-insensitively. */
+  saveCommunityProfile(slug: string, payload: string, fetchedAt: string): void {
+    this.transaction((db) => {
+      db.prepare(
+        `INSERT INTO github_community_profiles(slug, payload, fetched_at) VALUES (?, ?, ?)
+         ON CONFLICT(slug) DO UPDATE SET payload = excluded.payload, fetched_at = excluded.fetched_at`,
+      ).run(slug.toLowerCase(), payload, fetchedAt);
+    });
+  }
+
+  getCommunityProfile(slug: string): StoredCommunityProfile | null {
+    return this.withConnection((db) => {
+      const row = db
+        .prepare("SELECT slug, payload, fetched_at FROM github_community_profiles WHERE slug = ?")
+        .get(slug.toLowerCase()) as { slug: string; payload: string; fetched_at: string } | undefined;
+      return row ? { slug: row.slug, payload: row.payload, fetchedAt: row.fetched_at } : null;
+    });
+  }
+
+  listCommunityProfiles(): StoredCommunityProfile[] {
+    return this.withConnection((db) =>
+      (
+        db.prepare("SELECT slug, payload, fetched_at FROM github_community_profiles ORDER BY slug").all() as {
+          slug: string;
+          payload: string;
+          fetched_at: string;
+        }[]
+      ).map((row) => ({ slug: row.slug, payload: row.payload, fetchedAt: row.fetched_at })),
+    );
   }
 
   updateNotes(repoId: number, notes: string): void {

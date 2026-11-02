@@ -164,10 +164,15 @@ npm run build -w @gitlib/web && npm run preview -w @gitlib/web   # production bu
   [community profile](https://docs.github.com/rest/metrics/community) score. The column gives the
   percentage plus one square per recommended item (description, README, license, code of conduct,
   contributing guide, issue and pull request templates), hollow when missing; hover for the names, click
-  through to the tab for what each item is for. It is sortable (lowest first). Scores are cached for 30
-  minutes and **Rescan** refreshes them. This costs one GitHub request per repo, so without a token
-  (60 requests an hour) the table stops early and says so, leaving the rest of the limit for the Issues and
-  Pull requests tabs; set `GITLIB_GITHUB_TOKEN` to score everything.
+  through to the tab for what each item is for. It is sortable (lowest first). Scores are stored in the
+  local database (`github_community_profiles` table in `gitlib.db`), so the table shows them at once and
+  works offline. They are fetched from GitHub again once a day (the server checks hourly, and a page load
+  also starts a refresh when scores are older than that), or whenever you press **Refresh scores** on the
+  repository list or **Refresh** on a repo's Community tab. **Rescan** does not touch them. Set
+  `GITLIB_COMMUNITY_REFRESH_HOURS` to change the interval (`0` = only on the buttons). A refresh costs one
+  GitHub request per repo, so without a token (60 requests an hour) it stops early and says so, leaving the
+  rest of the limit for the Issues and Pull requests tabs; the oldest scores are refreshed first, so the
+  next run carries on. Set `GITLIB_GITHUB_TOKEN` to refresh everything.
   Each missing item on the Community tab has an **Add to planning** button that files a gitlib
   [planning](#planning) issue for it (stored in gitlib only); once filed, the row links to that issue.
 - The **Planning** page (`/planning`) holds gitlib's own issues; see [Planning](#planning).
