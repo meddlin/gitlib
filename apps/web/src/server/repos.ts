@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { loadRepoReadme, technologyCategory, type RepoRecord, type TechnologyCategory } from "@gitlib/core";
 import { getApp, loadAndIndexRepositories } from "./gitlib.server";
-import { clearCatalogClones } from "./catalog";
+import { clearCatalogClones } from "./catalog.server";
 import { clearContributions } from "./contributions";
 import { clearIssueCounts } from "./issues";
 

@@ -9,10 +9,14 @@ import type { RepoView } from "#/server/repos";
 
 const chip = "inline-flex h-5 items-center gap-1 border px-1.5 text-xs whitespace-nowrap";
 
-function RemoteChip({ label, link, configured }: { label: string; link: RemoteLink | null; configured: boolean }) {
+/** Whether gitlib holds a list from this host, so a repo absent from it really is missing there. */
+const wasListed = (status: ProviderStatus | undefined): boolean =>
+  status !== undefined && status.status !== "not-configured" && status.fetchedAt !== null;
+
+function RemoteChip({ label, link, listed }: { label: string; link: RemoteLink | null; listed: boolean }) {
   if (!link) {
-    // Only call a repo "missing" from a host gitlib could actually ask.
-    return configured ? (
+    // Only call a repo "missing" from a host gitlib has actually listed.
+    return listed ? (
       <span className={cn(chip, "border-dashed text-muted-foreground/60")} aria-label={`Not on ${label}`}>
         {label}
         <span aria-hidden>—</span>
@@ -129,8 +133,8 @@ export function CatalogTable({
                         <span aria-hidden>—</span>
                       </span>
                     )}
-                    <RemoteChip label="GitHub" link={entry.github} configured={github?.status === "ok"} />
-                    <RemoteChip label="GitLab" link={entry.gitlab} configured={gitlab?.status === "ok"} />
+                    <RemoteChip label="GitHub" link={entry.github} listed={wasListed(github)} />
+                    <RemoteChip label="GitLab" link={entry.gitlab} listed={wasListed(gitlab)} />
                   </div>
                 </td>
                 <td className="px-3 py-3">

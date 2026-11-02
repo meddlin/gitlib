@@ -23,6 +23,31 @@ export interface RemoteRepo {
   language: string | null;
 }
 
+/** One page of a host's repository listing with the ETag it came with, so the next check can revalidate it. */
+export interface ListingPage {
+  etag: string | null;
+  repos: RemoteRepo[];
+}
+
+/** What is stored for one host: its pages, and the account they were listed for. */
+export interface StoredListing {
+  /** Which account and host the pages belong to; a listing for a different one is never reused. */
+  scope: string;
+  pages: ListingPage[];
+}
+
+/** Reads a stored listing back; null when it is unreadable or was listed for a different `scope`. */
+export function parseStoredListing(payload: string, scope: string): StoredListing | null {
+  try {
+    const value = JSON.parse(payload) as Partial<StoredListing> | null;
+    if (!value || value.scope !== scope || !Array.isArray(value.pages)) return null;
+    for (const page of value.pages) if (!page || !Array.isArray(page.repos)) return null;
+    return value as StoredListing;
+  } catch {
+    return null;
+  }
+}
+
 /** A remote of a local clone that points at a known hosting service. */
 export interface LocalRemote {
   provider: RemoteProvider;

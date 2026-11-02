@@ -1,6 +1,7 @@
 import "./env.server";
-import { remoteKey, type RemoteRepo } from "#/lib/catalog";
+import { remoteKey, type ListingPage } from "#/lib/catalog";
 import { ProviderSetupError } from "./provider-errors";
+import { PAGE_SIZE, fetchListingPages } from "./remote-listing.server";
 
 export const gitlabUsername = (): string | undefined => process.env["GITLIB_GITLAB_USERNAME"] || undefined;
 
@@ -22,18 +23,17 @@ interface GitLabProject {
   forked_from_project?: unknown;
 }
 
-/** Pages of 100, capped like the GitHub listing. */
-const PROJECT_PAGES = 10;
-
 /**
  * The projects the token's user is a member of, or, with only a username configured, that user's public
  * projects. Owned, group and shared projects all count as membership.
  */
-export async function listGitLabProjects(): Promise<RemoteRepo[]> {
+export async function listGitLabProjects(previous: readonly ListingPage[] = []) {
   const token = gitlabToken();
   const username = gitlabUsername();
   if (!token && !username) {
-    throw new ProviderSetupError("Set GITLIB_GITLAB_TOKEN (or GITLIB_GITLAB_USERNAME for public projects), and GITLIB_GITLAB_URL if self-hosted.");
+    throw new ProviderSetupError(
+      "Set GITLIB_GITLAB_TOKEN (or GITLIB_GITLAB_USERNAME for public projects), and GITLIB_GITLAB_URL if self-hosted.",
+    );
   }
 
   const endpoint = token
@@ -41,28 +41,33 @@ export async function listGitLabProjects(): Promise<RemoteRepo[]> {
     : `${gitlabBase()}/api/v4/users/${encodeURIComponent(username!)}/projects`;
   const host = gitlabHost();
 
-  const repos: RemoteRepo[] = [];
-  for (let page = 1; page <= PROJECT_PAGES; page += 1) {
-    const url = new URL(endpoint);
-    url.search = new URLSearchParams({
-      per_page: "100",
-      page: String(page),
-      order_by: "last_activity_at",
-      sort: "desc",
-      ...(token ? { membership: "true" } : {}),
-    }).toString();
-    const response = await fetch(url, {
-      headers: { Accept: "application/json", "User-Agent": "gitlib", ...(token ? { "PRIVATE-TOKEN": token } : {}) },
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (response.status === 401) throw new Error("GitLab rejected the token (401).");
-    if (response.status === 404 && !token) throw new Error(`GitLab has no user named ${username}.`);
-    if (response.status === 429) throw new Error("GitLab rate limit reached. Try again later.");
-    if (!response.ok) throw new Error(`GitLab responded with ${response.status}.`);
-
-    const batch = (await response.json()) as GitLabProject[];
-    for (const item of batch) {
-      repos.push({
+  return fetchListingPages(
+    async (page, etag) => {
+      const url = new URL(endpoint);
+      url.search = new URLSearchParams({
+        per_page: String(PAGE_SIZE),
+        page: String(page),
+        order_by: "last_activity_at",
+        sort: "desc",
+        ...(token ? { membership: "true" } : {}),
+      }).toString();
+      const response = await fetch(url, {
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "gitlib",
+          ...(token ? { "PRIVATE-TOKEN": token } : {}),
+          ...(etag ? { "If-None-Match": etag } : {}),
+        },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (response.status === 401) throw new Error("GitLab rejected the token (401).");
+      if (response.status === 404 && !token) throw new Error(`GitLab has no user named ${username}.`);
+      if (response.status === 429) throw new Error("GitLab rate limit reached. Try again later.");
+      if (!response.ok && response.status !== 304) throw new Error(`GitLab responded with ${response.status}.`);
+      return response;
+    },
+    (body) =>
+      (body as GitLabProject[]).map((item) => ({
         provider: "gitlab",
         key: remoteKey(host, item.path_with_namespace),
         fullName: item.path_with_namespace,
@@ -74,9 +79,10 @@ export async function listGitLabProjects(): Promise<RemoteRepo[]> {
         isArchived: item.archived === true,
         updatedAt: item.last_activity_at,
         language: null,
-      });
-    }
-    if (batch.length < 100) break;
-  }
-  return repos;
+      })),
+    previous,
+  );
 }
+
+/** Which host and account a stored listing was made for, so changing either never shows the old one's repos. */
+export const gitlabScope = (): string => `${gitlabBase()}|${gitlabToken() ? "member" : `user:${gitlabUsername() ?? ""}`}`;

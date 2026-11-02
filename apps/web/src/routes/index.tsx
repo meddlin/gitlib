@@ -162,9 +162,12 @@ function useCommunityScores(refreshKey: unknown) {
 
 const catalogFailed = (error: string) => error;
 
+/** How often to look again while the server lists a host in the background. */
+const CATALOG_POLL_MS = 3_000;
+
 /**
- * Every repo across clones, GitHub and GitLab, fetched after the page renders since it asks both hosts. The
- * server caches the hosts' listings, so refetching is cheap; `refresh` makes it ask them again.
+ * Every repo across clones, GitHub and GitLab, fetched after the page renders. The hosts' listings come from
+ * gitlib's database and are re-checked in the background, so loading is cheap; `refresh` asks the hosts again.
  */
 function useCatalog(refreshKey: unknown) {
   const [view, setView] = useState<CatalogView>();
@@ -188,6 +191,22 @@ function useCatalog(refreshKey: unknown) {
     // `refreshKey` is the only real input; the server function is stable.
   }, [refreshKey]);
 
+  // While a host is being listed (the first time, or a scheduled check) keep looking so the table fills in.
+  const refreshing = view?.github.refreshing === true || view?.gitlab.refreshing === true;
+  useEffect(() => {
+    if (!refreshing) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      getCatalog()
+        .then((next) => !cancelled && setView(next))
+        .catch(() => undefined);
+    }, CATALOG_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [view, refreshing]);
+
   const refresh = useCallback(async () => {
     setRequesting(true);
     try {
@@ -200,7 +219,7 @@ function useCatalog(refreshKey: unknown) {
     }
   }, []);
 
-  return { view, error, refresh, busy: requesting };
+  return { view, error, refresh, busy: requesting || refreshing };
 }
 
 const CONTRIBUTION_SOURCE_KEY = "gitlib-contribution-source";
@@ -441,7 +460,7 @@ function RepoLibrary() {
                 type="button"
                 onClick={catalog.refresh}
                 disabled={catalog.busy}
-                title="Ask GitHub and GitLab for their repository lists again. They are otherwise cached for a few minutes."
+                title="Ask GitHub and GitLab for their complete repository lists now. They are otherwise re-checked in the background."
                 className="inline-flex h-8 items-center gap-1.5 border px-3 text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
               >
                 <RefreshCw className={cn("size-3.5", catalog.busy && "animate-spin")} aria-hidden />
@@ -602,7 +621,29 @@ function statusNotice(label: string, status: ProviderStatus | undefined): string
   if (!status || status.status === "ok") return null;
   return status.status === "not-configured"
     ? `${label} isn't included. ${status.message ?? ""}`.trim()
-    : `${label} couldn't be listed: ${status.message ?? "unknown error"}`;
+    : `${label} couldn't be refreshed${status.fetchedAt ? ` (showing the list from ${formatAgo(status.fetchedAt)})` : ""}: ${
+        status.message ?? "unknown error"
+      }`;
+}
+
+/** When each host's list was last checked, for the hosts this tab shows. */
+function checkedNotice(source: Exclude<CatalogSource, "local">, github: ProviderStatus | undefined, gitlab: ProviderStatus | undefined) {
+  const describe = (label: string, status: ProviderStatus | undefined): string | null => {
+    if (!status || status.status === "not-configured") return null;
+    if (status.refreshing) return `${label} is being checked…`;
+    return status.fetchedAt ? `${label} checked ${formatAgo(status.fetchedAt)}` : null;
+  };
+  const parts = [
+    source !== "gitlab" ? describe("GitHub", github) : null,
+    source !== "github" ? describe("GitLab", gitlab) : null,
+  ].filter((part): part is string => part !== null);
+  return parts.length > 0 ? `Lists stored in gitlib · ${parts.join(" · ")}` : null;
+}
+
+/** Whether a host this tab depends on has nothing stored yet but is being listed. */
+function isChecking(source: Exclude<CatalogSource, "local">, github: ProviderStatus | undefined, gitlab: ProviderStatus | undefined) {
+  const waiting = (status: ProviderStatus | undefined) => status?.refreshing === true && status.fetchedAt === null;
+  return source === "github" ? waiting(github) : source === "gitlab" ? waiting(gitlab) : waiting(github) || waiting(gitlab);
 }
 
 /** The Combined, GitHub and GitLab tabs: one catalog table, plus what is missing when a host can't be listed. */
@@ -633,23 +674,29 @@ function SourceBody({
           (notice): notice is string => notice !== null,
         )
       : [];
+  const checked = checkedNotice(source, github, gitlab);
   const hostNotice =
     source === "github" ? statusNotice("GitHub", github) : source === "gitlab" ? statusNotice("GitLab", gitlab) : null;
 
   return (
     <>
-      {notices.length > 0 ? (
+      {notices.length > 0 || checked ? (
         <div className="flex flex-col gap-1">
           {notices.map((notice) => (
             <p key={notice} className="text-xs text-muted-foreground" role="status">
               {notice}
             </p>
           ))}
+          {checked ? <p className="text-xs text-muted-foreground">{checked}</p> : null}
         </div>
       ) : null}
       {rows.length === 0 ? (
         <EmptyState>
-          {query ? "No repositories match your search." : (hostNotice ?? "No repositories found.")}
+          {query
+            ? "No repositories match your search."
+            : isChecking(source, github, gitlab)
+              ? "Listing repositories for the first time…"
+              : (hostNotice ?? "No repositories found.")}
         </EmptyState>
       ) : (
         <CatalogTable entries={rows} reposByPath={reposByPath} github={github} gitlab={gitlab} />

@@ -4,6 +4,7 @@ import {
   matchesQuery,
   mergeCatalog,
   parseLandingPage,
+  parseStoredListing,
   remoteKey,
   type LocalClone,
   type RemoteRepo,
@@ -177,5 +178,23 @@ describe("entriesForSource / matchesQuery", () => {
     expect(matchesQuery(entry!, "widget missing")).toBe(false);
     expect(matchesQuery(entry!, "")).toBe(true);
     expect(matchesQuery(entry!, undefined)).toBe(true);
+  });
+});
+
+describe("parseStoredListing", () => {
+  const listing = { scope: "github.com", pages: [{ etag: '"a"', repos: [github("me/app")] }] };
+
+  it("reads back what was stored", () => {
+    expect(parseStoredListing(JSON.stringify(listing), "github.com")).toEqual(listing);
+  });
+
+  it("ignores a listing made for another host or account", () => {
+    expect(parseStoredListing(JSON.stringify(listing), "https://gitlab.com|member")).toBeNull();
+  });
+
+  it("ignores unreadable payloads", () => {
+    expect(parseStoredListing("not json", "github.com")).toBeNull();
+    expect(parseStoredListing("null", "github.com")).toBeNull();
+    expect(parseStoredListing(JSON.stringify({ scope: "github.com", pages: [null] }), "github.com")).toBeNull();
   });
 });
