@@ -199,8 +199,9 @@ docker compose up -d --build       # http://localhost:4000
 ```
 
 The web app listens on **port 4000** (`GITLIB_PORT` to change it) and is published on `127.0.0.1` only, because it
-has **no login**. Set `GITLIB_BIND=0.0.0.0` to reach it over a trusted LAN, and keep it off the internet or behind
-an authenticating reverse proxy.
+has **no login**. On a server or homelab VM, set `GITLIB_BIND=0.0.0.0` in `.env` (then `docker compose up -d`) to
+reach it from other machines on a trusted LAN, and keep it off the internet or behind an authenticating reverse
+proxy. See [docs/runbook.md](docs/runbook.md#3-homelab-install) if the page still does not load.
 
 - Your repos are mounted read-only at `/home/node/git`, the default scan root for the container user. The host
   directory is `~/git` unless you set `GITLIB_REPOS` in `.env` (e.g. `GITLIB_REPOS=/Volumes/work/code`); run

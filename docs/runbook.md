@@ -170,8 +170,20 @@ docker compose ps                         # both "healthy"
 curl -sI http://localhost:4000 | head -1
 ```
 
-Open `http://<vm-ip>:4000` from another machine. If it does not load, check the VM's firewall allows TCP 4000
-from your LAN (`sudo ufw allow from 192.168.1.0/24 to any port 4000` on Ubuntu).
+Open `http://<vm-ip>:4000` from another machine. If it does not load:
+
+- **"Connection refused" while `curl localhost:4000` works on the VM.** `GITLIB_BIND` is still its default
+  `127.0.0.1`, so the port is only published on the VM itself. `docker compose ps` shows `127.0.0.1:4000->4000/tcp`
+  instead of `0.0.0.0:4000->4000/tcp`. Fix it and recreate the container (a restart is not enough):
+
+  ```bash
+  sed -i 's/^GITLIB_BIND=.*/GITLIB_BIND=0.0.0.0/' .env
+  docker compose up -d
+  ```
+
+- **Times out.** The VM's firewall is blocking TCP 4000. Allow it from your LAN
+  (`sudo ufw allow from 192.168.1.0/24 to any port 4000` on Ubuntu).
+- **Wrong address.** Check the VM's current IP with `ip -4 addr`; a DHCP lease can change.
 
 **6. Make it survive reboots.** Containers use `restart: unless-stopped` and Docker starts at boot, so nothing
 more is needed. Confirm once with `sudo reboot`, then `docker compose ps`.
