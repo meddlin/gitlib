@@ -125,7 +125,7 @@ export const pr = (options: NodeOptions = {}): DependabotPr => {
 export class FakeBackend implements DependabotBackend {
   readonly label = "fake";
   calls: { owner: string; repoNames: string[] }[] = [];
-  constructor(private readonly byOwner: Record<string, Partial<OwnerPulls> | Error>) {}
+  constructor(readonly byOwner: Record<string, Partial<OwnerPulls> | Error>) {}
 
   async fetchOwner(owner: string, repoNames: readonly string[]): Promise<OwnerPulls> {
     this.calls.push({ owner, repoNames: [...repoNames] });

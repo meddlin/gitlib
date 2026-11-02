@@ -1,10 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { buildChatSystemPrompt, OllamaBackend, type ChatBackend } from "./ai/index.js";
+import { buildChatSystemPrompt, ModelLane, OllamaBackend, type ChatBackend } from "./ai/index.js";
 import { loadConfig, type AppConfig, type Env } from "./config.js";
 import {
   checkDependabot,
   DependabotBusyError,
+  DependabotExplainer,
   DependabotScheduler,
   DependabotStore,
   DependabotUnavailableError,
@@ -106,6 +107,8 @@ export class GitLibApp {
   readonly dependabot: DependabotBackend | null;
   /** What the Dependabot checks found, kept in `gitlib.db`. */
   readonly dependabotStore: DependabotStore;
+  /** One model request at a time, chat ahead of background work; every caller of `chat` that is not a person goes through it. */
+  readonly modelLane = new ModelLane();
 
   constructor(
     readonly config: AppConfig,
@@ -294,6 +297,11 @@ export class GitLibApp {
   /** Validates and saves the schedule. Throws `DependabotScheduleError` for one that cannot be followed. */
   saveDependabotSchedule(input: { enabled?: unknown; days?: unknown; time?: unknown }): StoredDependabotSchedule {
     return this.planning.saveDependabotSchedule(normalizeSchedule(input), utcNow());
+  }
+
+  /** Writes the plain-language notes under Dependabot PRs that need a person; the caller starts it. */
+  createDependabotExplainer(): DependabotExplainer {
+    return new DependabotExplainer(this);
   }
 
   /** A scheduler over this application; the caller starts it (the web server does, at boot). */

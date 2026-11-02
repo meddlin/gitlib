@@ -3,6 +3,7 @@ import path from "node:path";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { GitLibError } from "../errors.js";
 import type { DependabotReport } from "./check.js";
+import type { StoredExplanation } from "./explain.js";
 import { BUCKETS, type Bucket, type ClassifiedPr } from "./types.js";
 
 // Loaded via getBuiltinModule for the same bundler reason as in ../store.ts.
@@ -39,6 +40,17 @@ const SCHEMA = `
     FOREIGN KEY (run_id) REFERENCES dependabot_runs(id) ON DELETE CASCADE
   );
   CREATE INDEX IF NOT EXISTS dependabot_findings_by_pr ON dependabot_findings (repo, number);
+
+  -- A model-written note about one pull request. \`fingerprint\` says what it was written from; \`repo\` is lowercased.
+  CREATE TABLE IF NOT EXISTS dependabot_explanations (
+    repo TEXT NOT NULL,
+    number INTEGER NOT NULL,
+    fingerprint TEXT NOT NULL,
+    model TEXT NOT NULL,
+    text TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (repo, number)
+  );
 
   -- At most one row: who is checking GitHub now, and when that claim lapses if they crashed.
   CREATE TABLE IF NOT EXISTS dependabot_lease (
@@ -185,6 +197,10 @@ export class DependabotStore {
         insert.run(runId, position, lowerRepo(classified.pr.repo), classified.pr.number, classified.bucket, observedAt, JSON.stringify(classified));
       });
 
+      // A note for a pull request that is no longer in the newest run is deleted: it has nothing to be shown beside.
+      db.prepare(
+        "DELETE FROM dependabot_explanations WHERE NOT EXISTS (SELECT 1 FROM dependabot_findings f WHERE f.run_id = ? AND f.repo = dependabot_explanations.repo AND f.number = dependabot_explanations.number)",
+      ).run(runId);
       db.prepare("DELETE FROM dependabot_runs WHERE id NOT IN (SELECT id FROM dependabot_runs ORDER BY id DESC LIMIT ?)").run(KEEP_RUNS);
       return this.readRun(db, runId)!;
     });
@@ -196,6 +212,34 @@ export class DependabotStore {
       const row = this.latestRunRow(db);
       return row ? this.readRun(db, row.id) : null;
     });
+  }
+
+  /** Saves the note for a pull request, replacing an older one. */
+  saveExplanation(note: StoredExplanation): void {
+    this.transaction(
+      (db) =>
+        void db
+          .prepare(
+            `INSERT INTO dependabot_explanations (repo, number, fingerprint, model, text, created_at) VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(repo, number) DO UPDATE SET fingerprint = excluded.fingerprint, model = excluded.model, text = excluded.text, created_at = excluded.created_at`,
+          )
+          .run(note.repo, note.number, note.fingerprint, note.model, note.text, note.createdAt),
+    );
+  }
+
+  listExplanations(): StoredExplanation[] {
+    return this.withConnection((db) =>
+      (
+        db.prepare("SELECT repo, number, fingerprint, model, text, created_at FROM dependabot_explanations ORDER BY repo, number").all() as unknown as {
+          repo: string;
+          number: number;
+          fingerprint: string;
+          model: string;
+          text: string;
+          created_at: string;
+        }[]
+      ).map((row) => ({ repo: row.repo, number: Number(row.number), fingerprint: row.fingerprint, model: row.model, text: row.text, createdAt: row.created_at })),
+    );
   }
 
   /** How many runs are kept; for tests and the status line. */

@@ -86,6 +86,17 @@ export async function handleChat(request: Request, app: GitLibApp = getApp()): P
           open = false;
         }
       };
+      // One model request at a time: this waits for the lane, and tells background work (the Dependabot notes) to step aside.
+      const ticket = await app.modelLane.acquire("chat", stop.signal);
+      if (!ticket) {
+        open = false;
+        try {
+          controller.close();
+        } catch {
+          // Already closed because the browser went away.
+        }
+        return;
+      }
       send({ type: "start", model: model!, droppedMessages: fitted.dropped, truncated: fitted.truncated });
       try {
         for await (const event of backend.chat({ model: model!, messages: fitted.messages, maxReplyTokens: MAX_REPLY_TOKENS, signal: stop.signal })) {
@@ -96,6 +107,7 @@ export async function handleChat(request: Request, app: GitLibApp = getApp()): P
         if (!isGitLibError(error)) console.error("Chat failed:", error);
         send({ type: "error", message: isGitLibError(error) ? error.message : "The chat failed unexpectedly. See the server log." });
       } finally {
+        ticket.release();
         if (open) {
           open = false;
           try {

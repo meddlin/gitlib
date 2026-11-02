@@ -143,6 +143,7 @@ function Dependabot() {
                   key={prKey(finding.pr)}
                   finding={finding}
                   checkedAt={report?.checkedAt ?? ""}
+                  note={view.notes[prKey(finding.pr)]}
                   busy={busy}
                   onSnooze={() => snooze(finding.pr)}
                   onDismiss={() => dismiss(finding.pr)}
@@ -166,7 +167,7 @@ function Dependabot() {
 
       <SchedulePanel schedule={view.schedule} saving={savingSchedule} onSave={saveSchedule} />
 
-      {report ? <CoverageNotes report={report} /> : null}
+      {report ? <CoverageNotes report={report} explainer={view.explainer} /> : null}
     </div>
   );
 }
@@ -187,7 +188,7 @@ function Banner({ tone, children }: { tone: "warning" | "error"; children: React
 }
 
 /** What the last check covered and what it could not, so an empty list is never mistaken for "all clear". */
-function CoverageNotes({ report }: { report: NonNullable<DependabotView["report"]> }) {
+function CoverageNotes({ report, explainer }: { report: NonNullable<DependabotView["report"]>; explainer: DependabotView["explainer"] }) {
   const unreachable = report.watched.filter((repo) => repo.status === "unreachable");
   const quiet = report.watched.filter((repo) => repo.status === "checked" && repo.openPrs === 0);
   const lines: React.ReactNode[] = [];
@@ -226,6 +227,10 @@ function CoverageNotes({ report }: { report: NonNullable<DependabotView["report"
       </>,
     );
   }
+  if (explainer.enabled && explainer.pending > 0 && !explainer.lastError) {
+    lines.push(<>The local model is writing notes for the pull requests that need a person ({explainer.pending} to go). Chat comes first.</>);
+  }
+  if (explainer.lastError) lines.push(<>Notes from the local model are paused: {explainer.lastError}</>);
   if (lines.length === 0) return null;
   return (
     <section aria-label="What was checked" className="flex flex-col gap-1.5 border-t pt-4 text-xs text-muted-foreground">

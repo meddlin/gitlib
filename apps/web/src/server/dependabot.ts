@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import type { Bucket, DependabotDismissal, RunTrigger, StoredFinding, StoredReport } from "@gitlib/core";
-import { attempt, buildBadge, buildView, ensureScheduler, runCheck } from "./dependabot.server";
+import { attempt, buildBadge, buildView, ensureBackground, runCheck } from "./dependabot.server";
 import { getApp } from "./gitlib.server";
 
 /** A finding the user has put aside, with how. */
@@ -21,6 +21,17 @@ export interface DependabotView {
   /** What the check covered and what it could not; null before the first check. */
   report: Omit<StoredReport, "items"> | null;
   counts: Record<Bucket, number>;
+  /** Model-written notes by `owner/repo#number`, for the pull requests in `items` that have a current one. */
+  notes: Record<string, { text: string; model: string; createdAt: string }>;
+  /** The writer of those notes. The verdicts never depend on it. */
+  explainer: {
+    /** A model server is configured (`ollama.enabled`). */
+    enabled: boolean;
+    active: boolean;
+    /** Pull requests that need a note and do not have a current one yet. */
+    pending: number;
+    lastError: string | null;
+  };
   /** When the web server checks on its own. */
   schedule: {
     enabled: boolean;
@@ -53,13 +64,13 @@ export interface DependabotActionResult {
 }
 
 export const getDependabot = createServerFn({ method: "GET" }).handler(async (): Promise<DependabotView> => {
-  ensureScheduler();
+  ensureBackground();
   return buildView();
 });
 
 /** Counts for the NavBar badge; a cheap read of the saved check. Every page asks, so it also starts the scheduler. */
 export const getDependabotBadge = createServerFn({ method: "GET" }).handler(async (): Promise<DependabotBadge> => {
-  ensureScheduler();
+  ensureBackground();
   return buildBadge();
 });
 

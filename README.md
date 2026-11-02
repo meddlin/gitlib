@@ -201,6 +201,17 @@ counts for the slot, and they all share the lock, so a host cron job running `gi
 schedule can coexist. The schedule only runs while the server is up, so on a laptop that sleeps use a host scheduler
 instead (see the research note's scheduling table) and leave this off.
 
+**Notes from the local model.** If Ollama is configured (see [Chat](#chat)), the web server also writes a short
+plain-language note under each PR that needs a person (*needs work* and *review first*; not *ready* or *waiting*):
+what the update is, what its release notes say about breaking changes, what to look at first. The model is shown the
+verdict's facts, the title, the failed check names and a markup-stripped, 4,000-character slice of the PR description
+(fetched when needed and never stored), with the rules fixed in code and the description marked as untrusted data;
+the reply is capped at 220 tokens. **The verdict never reads the note**, which is stored separately with the model's
+name and shown under a label saying so, through the same image-free renderer as chat. Notes are written one PR at a
+time on a single shared model lane, **behind chat**: sending a chat message stops the note being written, which is
+simply written again afterwards. A note is rewritten only when the facts it came from change, and deleted when its PR
+leaves the list. With Ollama off or unreachable nothing else changes; the page says why notes are paused.
+
 **Saved runs.** Each check is stored in `gitlib.db` (`dependabot_runs`, `dependabot_findings`; the newest 60 runs
 are kept) so the findings can be read offline and compared over time; they are derived from GitHub and can be fetched
 again. If one owner cannot be asked (network, rate limit), the last findings for its repositories are kept, marked

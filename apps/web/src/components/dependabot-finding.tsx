@@ -1,5 +1,6 @@
 import { ExternalLink } from "lucide-react";
 import type { ReactNode } from "react";
+import { MarkdownBody } from "#/components/markdown-body";
 import { RelativeTime } from "#/components/relative-time";
 import { Button } from "#/components/ui/button";
 import { ciLabel, codeSegments, prKey, safeHref } from "#/lib/dependabot";
@@ -78,12 +79,15 @@ function Title({ finding }: { finding: StoredFinding }) {
 export function FindingCard({
   finding,
   checkedAt,
+  note,
   busy,
   onSnooze,
   onDismiss,
 }: {
   finding: StoredFinding;
   checkedAt: string;
+  /** A note written by the local model, if there is a current one. */
+  note?: { text: string; model: string; createdAt: string };
   busy: boolean;
   onSnooze: () => void;
   onDismiss: () => void;
@@ -121,6 +125,15 @@ export function FindingCard({
             </li>
           ))}
         </ul>
+      ) : null}
+      {note ? (
+        <aside aria-label="Note written by a model" className="rounded-md bg-muted/50 p-2.5 text-sm">
+          {/* Written by a model from text third parties wrote, so it is drawn without images, and says it is not the verdict. */}
+          <MarkdownBody untrusted>{note.text}</MarkdownBody>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Note written by {note.model} <RelativeTime iso={note.createdAt} />. The verdict above comes from GitHub&apos;s data, not from this note.
+          </p>
+        </aside>
       ) : null}
     </li>
   );

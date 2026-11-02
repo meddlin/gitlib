@@ -93,6 +93,12 @@ export interface DependabotBackend {
    * see at all, so that an invisible private repository is not reported as having no PRs.
    */
   fetchOwner(owner: string, repoNames: readonly string[], signal?: AbortSignal): Promise<OwnerPulls>;
+  /**
+   * The text of one pull request's description, which quotes release notes written by whoever publishes the package.
+   * Fetched only to be shown to a model, never stored with the findings and never read by `classify`. A backend
+   * without it just leaves the explanation to the facts alone.
+   */
+  fetchPullBody?(repo: string, number: number, signal?: AbortSignal): Promise<string | null>;
 }
 
 /** The check cannot run at all: no token, a refused token, GitHub unreachable. The message is safe to show. */
