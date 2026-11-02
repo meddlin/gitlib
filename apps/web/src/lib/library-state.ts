@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import type { SortDir, SortKey } from "#/components/repo-table";
+import type { CatalogSource } from "#/lib/catalog";
 
 /** The Repositories table's filters and sort: the part of its URL worth restoring when you come back. */
 export interface LibraryTableState {
@@ -7,6 +8,8 @@ export interface LibraryTableState {
   tech?: string;
   /** Linked git worktrees are hidden unless this is set. */
   worktrees?: true;
+  /** Which source tab is open; absent means the default (Combined). */
+  source?: CatalogSource;
   sort?: SortKey;
   dir?: SortDir;
 }
@@ -31,7 +34,7 @@ function read(): LibraryTableState {
 const isEmpty = (state: LibraryTableState) => Object.values(state).every((value) => value === undefined);
 
 const sameState = (a: LibraryTableState, b: LibraryTableState) =>
-  a.q === b.q && a.tech === b.tech && a.worktrees === b.worktrees && a.sort === b.sort && a.dir === b.dir;
+  a.q === b.q && a.tech === b.tech && a.worktrees === b.worktrees && a.source === b.source && a.sort === b.sort && a.dir === b.dir;
 
 /** Remembers the table's state for this browser tab; session storage keeps it across reloads too. */
 export function saveLibraryState(next: LibraryTableState): void {

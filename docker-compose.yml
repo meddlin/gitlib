@@ -11,6 +11,8 @@ x-gitlib-env: &gitlib-env
   # Optional: hours between automatic refreshes of the GitHub community scores (blank = 24, 0 = off).
   GITLIB_COMMUNITY_REFRESH_HOURS: ${GITLIB_COMMUNITY_REFRESH_HOURS:-}
   # Optional: the contribution graph's "Local + GitHub & GitLab" mode.
+  # Optional: lists GitLab projects on the Repositories page (read_api scope; without it only public ones show).
+  GITLIB_GITLAB_TOKEN: ${GITLIB_GITLAB_TOKEN:-}
   GITLIB_GITLAB_USERNAME: ${GITLIB_GITLAB_USERNAME:-}
   GITLIB_GITLAB_URL: ${GITLIB_GITLAB_URL:-}
   GITLIB_MEILI_HOST: http://meilisearch:7700

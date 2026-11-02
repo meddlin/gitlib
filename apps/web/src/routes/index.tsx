@@ -1,6 +1,7 @@
 import { createFileRoute, useRouter, useRouterState } from "@tanstack/react-router";
 import { RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { CatalogTable } from "#/components/catalog-table";
 import { ContributionGraph, type ContributionSource } from "#/components/contribution-graph";
 import { RepoPreview } from "#/components/repo-preview";
 import {
@@ -15,9 +16,12 @@ import {
 } from "#/components/repo-table";
 import { SearchBar } from "#/components/search-bar";
 import { TechBadge } from "#/components/tech-badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
+import { CATALOG_SOURCES, entriesForSource, matchesQuery, type CatalogSource } from "#/lib/catalog";
 import { formatAgo } from "#/lib/format";
 import { saveLibraryState, type LibraryTableState } from "#/lib/library-state";
 import { cn } from "#/lib/utils";
+import { getCatalog, refreshCatalog, type CatalogView, type ProviderStatus } from "#/server/catalog";
 import { getCommunityScores, refreshCommunityScores, type CommunityScoresView } from "#/server/community";
 import { getContributions, type ContributionsView } from "#/server/contributions";
 import { getIssueCounts, type IssueCountsView } from "#/server/issues";
@@ -32,12 +36,23 @@ interface IndexSearch extends LibraryTableState {
 const SORT_KEYS: readonly SortKey[] = ["name", "description", "stack", "issues", "community", "scanned"];
 const SORT_DIRS: readonly SortDir[] = ["asc", "desc"];
 
+/** The tab shown when the URL names none. */
+const DEFAULT_SOURCE: CatalogSource = "combined";
+
+const SOURCE_LABELS: Record<CatalogSource, string> = {
+  combined: "Combined",
+  local: "Local",
+  github: "GitHub",
+  gitlab: "GitLab",
+};
+
 export const Route = createFileRoute("/")({
   validateSearch: (search: Record<string, unknown>): IndexSearch => ({
     q: typeof search.q === "string" && search.q ? search.q : undefined,
     tech: typeof search.tech === "string" && search.tech ? search.tech : undefined,
     repo: typeof search.repo === "string" && search.repo ? search.repo : undefined,
     worktrees: isTruthyParam(search.worktrees) ? true : undefined,
+    source: CATALOG_SOURCES.find((source) => source === search.source && source !== DEFAULT_SOURCE),
     sort: SORT_KEYS.find((key) => key === search.sort),
     dir: SORT_DIRS.find((dir) => dir === search.dir),
   }),
@@ -145,6 +160,49 @@ function useCommunityScores(refreshKey: unknown) {
   return { view, refresh, busy: requesting || refreshing };
 }
 
+const catalogFailed = (error: string) => error;
+
+/**
+ * Every repo across clones, GitHub and GitLab, fetched after the page renders since it asks both hosts. The
+ * server caches the hosts' listings, so refetching is cheap; `refresh` makes it ask them again.
+ */
+function useCatalog(refreshKey: unknown) {
+  const [view, setView] = useState<CatalogView>();
+  const [error, setError] = useState<string>();
+  const [requesting, setRequesting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getCatalog()
+      .then((next) => {
+        if (cancelled) return;
+        setView(next);
+        setError(undefined);
+      })
+      .catch((caught: unknown) => {
+        if (!cancelled) setError(catalogFailed(caught instanceof Error ? caught.message : "Something went wrong."));
+      });
+    return () => {
+      cancelled = true;
+    };
+    // `refreshKey` is the only real input; the server function is stable.
+  }, [refreshKey]);
+
+  const refresh = useCallback(async () => {
+    setRequesting(true);
+    try {
+      setView(await refreshCatalog());
+      setError(undefined);
+    } catch (caught) {
+      setError(catalogFailed(caught instanceof Error ? caught.message : "Something went wrong."));
+    } finally {
+      setRequesting(false);
+    }
+  }, []);
+
+  return { view, error, refresh, busy: requesting };
+}
+
 const CONTRIBUTION_SOURCE_KEY = "gitlib-contribution-source";
 
 function readSource(): ContributionSource {
@@ -186,7 +244,8 @@ function useContributions(refreshKey: unknown) {
 
 function RepoLibrary() {
   const { repos: allRepos, roots, found } = Route.useLoaderData();
-  const { q, tech, repo: selectedPath, worktrees: showWorktrees, sort: sortKey, dir: sortDir } = Route.useSearch();
+  const { q, tech, repo: selectedPath, worktrees: showWorktrees, sort: sortKey, dir: sortDir, source: sourceParam } = Route.useSearch();
+  const source = sourceParam ?? DEFAULT_SOURCE;
   const navigate = Route.useNavigate();
   const router = useRouter();
   const [scanning, setScanning] = useState(false);
@@ -195,6 +254,7 @@ function RepoLibrary() {
   const issueCountsResult = useBackgroundView(getIssueCounts, issueCountsFailed, allRepos);
   const issueCounts: IssueCounts = issueCountsResult?.counts;
   const community = useCommunityScores(allRepos);
+  const catalog = useCatalog(allRepos);
   const communityResult = community.view;
   const communityScores: CommunityScores = communityResult?.scores;
 
@@ -222,8 +282,8 @@ function RepoLibrary() {
 
   // Filters and sort live in the URL (and are remembered for links back here), so they survive navigating away.
   useEffect(
-    () => saveLibraryState({ q, tech, worktrees: showWorktrees, sort: sortKey, dir: sortDir }),
-    [q, tech, showWorktrees, sortKey, sortDir],
+    () => saveLibraryState({ q, tech, worktrees: showWorktrees, source: sourceParam, sort: sortKey, dir: sortDir }),
+    [q, tech, showWorktrees, sourceParam, sortKey, sortDir],
   );
 
   // Without a chosen column the rows keep search-relevance order (or name order when not searching).
@@ -276,6 +336,24 @@ function RepoLibrary() {
 
   const described = repos.filter((repo) => repo.description).length;
 
+  const reposByPath = useMemo(() => new Map(allRepos.map((repo) => [repo.relativePath, repo])), [allRepos]);
+  const catalogEntries = catalog.view?.entries;
+  const sourceCounts = useMemo(
+    () =>
+      Object.fromEntries(
+        CATALOG_SOURCES.map((key) => [key, catalogEntries ? entriesForSource(catalogEntries, key).length : undefined]),
+      ) as Record<CatalogSource, number | undefined>,
+    [catalogEntries],
+  );
+  const catalogRows = useMemo(
+    () => (catalogEntries ? entriesForSource(catalogEntries, source).filter((entry) => matchesQuery(entry, q)) : undefined),
+    [catalogEntries, source, q],
+  );
+  const setSource = (next: string) => {
+    const picked = CATALOG_SOURCES.find((candidate) => candidate === next);
+    if (picked) setSearch({ source: picked === DEFAULT_SOURCE ? undefined : picked, repo: undefined });
+  };
+
   const selected = useMemo(() => repos.find((repo) => repo.relativePath === selectedPath), [repos, selectedPath]);
   const closePreview = useCallback(() => setSearch({ repo: undefined }), [setSearch]);
 
@@ -317,146 +395,265 @@ function RepoLibrary() {
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div className="min-w-0">
             <h1 className="text-lg font-semibold tracking-tight">Repositories</h1>
-            <p className="text-sm text-muted-foreground">
-              {repos.length} {repos.length === 1 ? "repository" : "repositories"} · {described} described
-              {!showWorktrees && worktreeCount > 0 ? ` · ${worktreeCount} worktrees hidden` : ""}
-              {roots.length > 0 ? (
-                <>
-                  {" · "}
-                  <span className="font-mono text-xs break-all">{roots.join(", ")}</span>
-                </>
-              ) : null}
-            </p>
+            {source === "local" ? (
+              <p className="text-sm text-muted-foreground">
+                {repos.length} {repos.length === 1 ? "repository" : "repositories"} · {described} described
+                {!showWorktrees && worktreeCount > 0 ? ` · ${worktreeCount} worktrees hidden` : ""}
+                {roots.length > 0 ? (
+                  <>
+                    {" · "}
+                    <span className="font-mono text-xs break-all">{roots.join(", ")}</span>
+                  </>
+                ) : null}
+              </p>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {SOURCE_DESCRIPTIONS[source]}
+                {catalogRows ? ` · ${catalogRows.length} ${catalogRows.length === 1 ? "repository" : "repositories"}` : ""}
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={rescan}
-              disabled={scanning}
-              className="inline-flex h-8 items-center gap-1.5 border px-3 text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-            >
-              <RefreshCw className={cn("size-3.5", scanning && "animate-spin")} aria-hidden />
-              {scanning ? "Scanning…" : "Rescan"}
-            </button>
-            <button
-              type="button"
-              onClick={community.refresh}
-              disabled={community.busy}
-              title="Ask GitHub for every repo's community profile now. Scores are otherwise refreshed daily."
-              className="inline-flex h-8 items-center gap-1.5 border px-3 text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-            >
-              <RefreshCw className={cn("size-3.5", community.busy && "animate-spin")} aria-hidden />
-              {community.busy ? "Refreshing scores…" : "Refresh scores"}
-            </button>
+            {source === "local" ? (
+              <>
+              <button
+                type="button"
+                onClick={rescan}
+                disabled={scanning}
+                className="inline-flex h-8 items-center gap-1.5 border px-3 text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+              >
+                <RefreshCw className={cn("size-3.5", scanning && "animate-spin")} aria-hidden />
+                {scanning ? "Scanning…" : "Rescan"}
+              </button>
+              <button
+                type="button"
+                onClick={community.refresh}
+                disabled={community.busy}
+                title="Ask GitHub for every repo's community profile now. Scores are otherwise refreshed daily."
+                className="inline-flex h-8 items-center gap-1.5 border px-3 text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+              >
+                <RefreshCw className={cn("size-3.5", community.busy && "animate-spin")} aria-hidden />
+                {community.busy ? "Refreshing scores…" : "Refresh scores"}
+              </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={catalog.refresh}
+                disabled={catalog.busy}
+                title="Ask GitHub and GitLab for their repository lists again. They are otherwise cached for a few minutes."
+                className="inline-flex h-8 items-center gap-1.5 border px-3 text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+              >
+                <RefreshCw className={cn("size-3.5", catalog.busy && "animate-spin")} aria-hidden />
+                {catalog.busy ? "Refreshing…" : "Refresh"}
+              </button>
+            )}
           </div>
         </header>
 
-        <div className="flex flex-col gap-3">
-          {q && found ? (
-            <p className="text-sm text-muted-foreground" role="status">
-              {found.mode === "meilisearch" ? (
-                <>
-                  {visible.length} {visible.length === 1 ? "result" : "results"} for{" "}
-                  <span className="font-medium text-foreground">“{q}”</span>
-                </>
-              ) : found.notice ? (
-                <span className="text-amber-700 dark:text-amber-400">Showing basic matches only — {found.notice}</span>
+        <Tabs value={source} onValueChange={setSource} className="gap-5">
+          <TabsList aria-label="Repository sources">
+            {CATALOG_SOURCES.map((key) => {
+              const count = key === "local" ? repos.length : sourceCounts[key];
+              return (
+                <TabsTrigger key={key} value={key}>
+                  {SOURCE_LABELS[key]}
+                  <span className="text-xs font-normal text-muted-foreground tabular-nums" aria-label={count === undefined ? "loading" : `${count} repositories`}>
+                    {count ?? "…"}
+                  </span>
+                </TabsTrigger>
+              );
+            })}
+          </TabsList>
+          <TabsContent value={source} className="flex flex-col gap-5">
+            {source === "local" ? (
+              <>
+              <div className="flex flex-col gap-3">
+                {q && found ? (
+                  <p className="text-sm text-muted-foreground" role="status">
+                    {found.mode === "meilisearch" ? (
+                      <>
+                        {visible.length} {visible.length === 1 ? "result" : "results"} for{" "}
+                        <span className="font-medium text-foreground">“{q}”</span>
+                      </>
+                    ) : found.notice ? (
+                      <span className="text-amber-700 dark:text-amber-400">Showing basic matches only — {found.notice}</span>
+                    ) : (
+                      <>Showing basic matches (full-text search is turned off).</>
+                    )}
+                  </p>
+                ) : null}
+
+                {issueCountsResult && issueCountsResult.status !== "ok" ? (
+                  <p className="text-xs text-muted-foreground" role="status">
+                    {issueCountsResult.status === "no-token"
+                      ? "GitHub issue counts are off: set GITLIB_GITHUB_TOKEN (or GITHUB_TOKEN) to show and sort by them."
+                      : `Some GitHub issue counts couldn't be loaded: ${issueCountsResult.error}`}
+                  </p>
+                ) : null}
+
+                {communityResult && communityResult.status !== "ok" ? (
+                  <p className="text-xs text-muted-foreground" role="status">
+                    Some GitHub community scores couldn't be refreshed: {communityResult.error}
+                  </p>
+                ) : null}
+                {communityResult?.updatedAt ? (
+                  <p className="text-xs text-muted-foreground">
+                    Community scores last fetched from GitHub {formatAgo(communityResult.updatedAt)}.
+                  </p>
+                ) : null}
+
+                {worktreeCount > 0 ? (
+                  <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      className="size-3.5 accent-primary"
+                      checked={Boolean(showWorktrees)}
+                      onChange={(event) => setSearch({ worktrees: event.target.checked ? true : undefined })}
+                    />
+                    Show worktrees ({worktreeCount})
+                  </label>
+                ) : null}
+
+                {techCounts.length > 0 ? (
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1" aria-label="Filter by technology">
+                    {techCounts.map(([name, { category, count }]) => {
+                      const active = tech?.toLowerCase() === name.toLowerCase();
+                      return (
+                        <button
+                          key={name}
+                          type="button"
+                          onClick={() => toggleTech(name)}
+                          aria-pressed={active}
+                          className="outline-none hover:opacity-70 focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <TechBadge name={`${name} ${count}`} category={category} active={active} />
+                        </button>
+                      );
+                    })}
+                    {tech || q ? (
+                      <button
+                        type="button"
+                        onClick={() => setSearch({ q: undefined, tech: undefined, sort: undefined, dir: undefined })}
+                        className="inline-flex items-center gap-1 text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <X className="size-3" aria-hidden /> Clear filters
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+
+              {repos.length === 0 ? (
+                <EmptyState>
+                  No git repositories were found under <span className="font-mono">{roots.join(", ") || "any root"}</span>.
+                  Add scan roots to <span className="font-mono">~/.git-library/config.toml</span> and rescan. Running in
+                  Docker? Set <span className="font-mono">GITLIB_REPOS</span> in <span className="font-mono">.env</span> to
+                  the folder on your machine that holds your repos, then run{" "}
+                  <span className="font-mono">docker compose up -d</span>.
+                </EmptyState>
+              ) : visible.length === 0 ? (
+                <EmptyState>No repositories match your filters.</EmptyState>
               ) : (
-                <>Showing basic matches (full-text search is turned off).</>
+                <div className="flex items-start">
+                  <div className="min-w-0 flex-1">
+                    <RepoTable
+                      repos={visible}
+                      highlights={ranked ? highlights : undefined}
+                      sort={activeSort}
+                      onSort={toggleSort}
+                      activeTech={tech}
+                      onToggleTech={toggleTech}
+                      issueCounts={issueCounts}
+                      communityScores={communityScores}
+                      selectedPath={selected?.relativePath}
+                      onSelect={(repo) => setSearch({ repo: repo.relativePath })}
+                    />
+                  </div>
+                  <RepoPreview repo={selected} onClose={closePreview} />
+                </div>
               )}
-            </p>
-          ) : null}
-
-          {issueCountsResult && issueCountsResult.status !== "ok" ? (
-            <p className="text-xs text-muted-foreground" role="status">
-              {issueCountsResult.status === "no-token"
-                ? "GitHub issue counts are off: set GITLIB_GITHUB_TOKEN (or GITHUB_TOKEN) to show and sort by them."
-                : `Some GitHub issue counts couldn't be loaded: ${issueCountsResult.error}`}
-            </p>
-          ) : null}
-
-          {communityResult && communityResult.status !== "ok" ? (
-            <p className="text-xs text-muted-foreground" role="status">
-              Some GitHub community scores couldn't be refreshed: {communityResult.error}
-            </p>
-          ) : null}
-          {communityResult?.updatedAt ? (
-            <p className="text-xs text-muted-foreground">
-              Community scores last fetched from GitHub {formatAgo(communityResult.updatedAt)}.
-            </p>
-          ) : null}
-
-          {worktreeCount > 0 ? (
-            <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-              <input
-                type="checkbox"
-                className="size-3.5 accent-primary"
-                checked={Boolean(showWorktrees)}
-                onChange={(event) => setSearch({ worktrees: event.target.checked ? true : undefined })}
+              </>
+            ) : (
+              <SourceBody
+                source={source}
+                rows={catalogRows}
+                error={catalog.error}
+                github={catalog.view?.github}
+                gitlab={catalog.view?.gitlab}
+                reposByPath={reposByPath}
+                query={q}
               />
-              Show worktrees ({worktreeCount})
-            </label>
-          ) : null}
-
-          {techCounts.length > 0 ? (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1" aria-label="Filter by technology">
-              {techCounts.map(([name, { category, count }]) => {
-                const active = tech?.toLowerCase() === name.toLowerCase();
-                return (
-                  <button
-                    key={name}
-                    type="button"
-                    onClick={() => toggleTech(name)}
-                    aria-pressed={active}
-                    className="outline-none hover:opacity-70 focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <TechBadge name={`${name} ${count}`} category={category} active={active} />
-                  </button>
-                );
-              })}
-              {tech || q ? (
-                <button
-                  type="button"
-                  onClick={() => setSearch({ q: undefined, tech: undefined, sort: undefined, dir: undefined })}
-                  className="inline-flex items-center gap-1 text-xs text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <X className="size-3" aria-hidden /> Clear filters
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-
-        {repos.length === 0 ? (
-          <EmptyState>
-            No git repositories were found under <span className="font-mono">{roots.join(", ") || "any root"}</span>.
-            Add scan roots to <span className="font-mono">~/.git-library/config.toml</span> and rescan. Running in
-            Docker? Set <span className="font-mono">GITLIB_REPOS</span> in <span className="font-mono">.env</span> to
-            the folder on your machine that holds your repos, then run{" "}
-            <span className="font-mono">docker compose up -d</span>.
-          </EmptyState>
-        ) : visible.length === 0 ? (
-          <EmptyState>No repositories match your filters.</EmptyState>
-        ) : (
-          <div className="flex items-start">
-            <div className="min-w-0 flex-1">
-              <RepoTable
-                repos={visible}
-                highlights={ranked ? highlights : undefined}
-                sort={activeSort}
-                onSort={toggleSort}
-                activeTech={tech}
-                onToggleTech={toggleTech}
-                issueCounts={issueCounts}
-                communityScores={communityScores}
-                selectedPath={selected?.relativePath}
-                onSelect={(repo) => setSearch({ repo: repo.relativePath })}
-              />
-            </div>
-            <RepoPreview repo={selected} onClose={closePreview} />
-          </div>
-        )}
+            )}
+          </TabsContent>
+        </Tabs>
       </div>
+    </>
+  );
+}
+
+const SOURCE_DESCRIPTIONS: Record<Exclude<CatalogSource, "local">, string> = {
+  combined: "Clones, GitHub and GitLab in one list",
+  github: "Repositories your GitHub account can reach",
+  gitlab: "Projects your GitLab account is a member of",
+};
+
+function statusNotice(label: string, status: ProviderStatus | undefined): string | null {
+  if (!status || status.status === "ok") return null;
+  return status.status === "not-configured"
+    ? `${label} isn't included. ${status.message ?? ""}`.trim()
+    : `${label} couldn't be listed: ${status.message ?? "unknown error"}`;
+}
+
+/** The Combined, GitHub and GitLab tabs: one catalog table, plus what is missing when a host can't be listed. */
+function SourceBody({
+  source,
+  rows,
+  error,
+  github,
+  gitlab,
+  reposByPath,
+  query,
+}: {
+  source: Exclude<CatalogSource, "local">;
+  rows: ReturnType<typeof entriesForSource> | undefined;
+  error: string | undefined;
+  github: ProviderStatus | undefined;
+  gitlab: ProviderStatus | undefined;
+  reposByPath: ReadonlyMap<string, RepoView>;
+  query: string | undefined;
+}) {
+  if (error) return <EmptyState>Couldn't load repositories: {error}</EmptyState>;
+  if (!rows) return <EmptyState>Loading repositories…</EmptyState>;
+
+  // The combined tab notes which host it left out; a tab for one host explains itself when it is empty.
+  const notices =
+    source === "combined"
+      ? [statusNotice("GitHub", github), statusNotice("GitLab", gitlab)].filter(
+          (notice): notice is string => notice !== null,
+        )
+      : [];
+  const hostNotice =
+    source === "github" ? statusNotice("GitHub", github) : source === "gitlab" ? statusNotice("GitLab", gitlab) : null;
+
+  return (
+    <>
+      {notices.length > 0 ? (
+        <div className="flex flex-col gap-1">
+          {notices.map((notice) => (
+            <p key={notice} className="text-xs text-muted-foreground" role="status">
+              {notice}
+            </p>
+          ))}
+        </div>
+      ) : null}
+      {rows.length === 0 ? (
+        <EmptyState>
+          {query ? "No repositories match your search." : (hostNotice ?? "No repositories found.")}
+        </EmptyState>
+      ) : (
+        <CatalogTable entries={rows} reposByPath={reposByPath} github={github} gitlab={gitlab} />
+      )}
     </>
   );
 }

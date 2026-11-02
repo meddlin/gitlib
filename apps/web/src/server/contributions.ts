@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createServerFn } from "@tanstack/react-start";
 import { githubToken } from "./github.server";
+import { gitlabBase, gitlabUsername } from "./gitlab.server";
 import { loadAndIndexRepositories } from "./gitlib.server";
 
 const run = promisify(execFile);
@@ -67,9 +68,6 @@ async function computeLocal(): Promise<ContributionsView> {
   );
   return { days, total: seen.size, repoCount, notices: [] };
 }
-
-const gitlabUsername = (): string | undefined => process.env["GITLIB_GITLAB_USERNAME"] || undefined;
-const gitlabBase = (): string => (process.env["GITLIB_GITLAB_URL"] || "https://gitlab.com").replace(/\/+$/, "");
 
 interface Remote {
   days: Record<string, number>;

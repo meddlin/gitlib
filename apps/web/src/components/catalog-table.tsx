@@ -1,0 +1,162 @@
+import { Link } from "@tanstack/react-router";
+import { ExternalLink } from "lucide-react";
+import { TechBadge } from "#/components/tech-badge";
+import { formatAgo } from "#/lib/format";
+import type { CatalogEntry, RemoteLink } from "#/lib/catalog";
+import { cn } from "#/lib/utils";
+import type { ProviderStatus } from "#/server/catalog";
+import type { RepoView } from "#/server/repos";
+
+const chip = "inline-flex h-5 items-center gap-1 border px-1.5 text-xs whitespace-nowrap";
+
+function RemoteChip({ label, link, configured }: { label: string; link: RemoteLink | null; configured: boolean }) {
+  if (!link) {
+    // Only call a repo "missing" from a host gitlib could actually ask.
+    return configured ? (
+      <span className={cn(chip, "border-dashed text-muted-foreground/60")} aria-label={`Not on ${label}`}>
+        {label}
+        <span aria-hidden>—</span>
+      </span>
+    ) : null;
+  }
+  const flags = [link.isPrivate && "private", link.isFork && "fork", link.isArchived && "archived"].filter(Boolean);
+  return (
+    <a
+      href={link.url}
+      target="_blank"
+      rel="noreferrer"
+      title={`${link.fullName}${flags.length > 0 ? ` (${flags.join(", ")})` : ""}${link.listed ? "" : " — not in your account's list"}`}
+      className={cn(chip, "font-medium outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring", !link.listed && "text-muted-foreground")}
+    >
+      {label}
+      <ExternalLink className="size-3 opacity-60" aria-hidden />
+    </a>
+  );
+}
+
+function flagsOf(entry: CatalogEntry): string[] {
+  const links = [entry.github, entry.gitlab].filter((link): link is RemoteLink => link !== null);
+  return [
+    links.some((link) => link.isPrivate) && "private",
+    links.some((link) => link.isFork) && "fork",
+    links.some((link) => link.isArchived) && "archived",
+  ].filter((flag): flag is string => Boolean(flag));
+}
+
+/**
+ * Repositories from every source in one list: where each lives (clone, GitHub, GitLab) is a column, so the
+ * combined view and the single-source views are the same table over different slices of the catalog.
+ */
+export function CatalogTable({
+  entries,
+  reposByPath,
+  github,
+  gitlab,
+}: {
+  entries: CatalogEntry[];
+  /** Local repos by relativePath, for the stack detected in a clone. */
+  reposByPath: ReadonlyMap<string, RepoView>;
+  github: ProviderStatus | undefined;
+  gitlab: ProviderStatus | undefined;
+}) {
+  return (
+    <div className="overflow-x-auto border-y">
+      <table className="w-full min-w-176 table-fixed border-collapse text-sm" data-testid="catalog-table">
+        <thead className="border-b">
+          <tr className="h-9 text-left text-xs font-medium tracking-wide text-muted-foreground uppercase">
+            <th scope="col" className="w-[28%] px-3">Repository</th>
+            <th scope="col" className="w-[28%] px-3">Description</th>
+            <th scope="col" className="w-[24%] px-3">Where</th>
+            <th scope="col" className="w-[10%] px-3">Stack</th>
+            <th scope="col" className="w-[10%] px-3">Updated</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y">
+          {entries.map((entry) => {
+            const local = entry.locals[0];
+            const technologies = local ? (reposByPath.get(local)?.technologies ?? []) : [];
+            const external = entry.github?.url ?? entry.gitlab?.url;
+            const flags = flagsOf(entry);
+            return (
+              <tr key={entry.id} data-testid="catalog-row" className="align-top">
+                <td className="px-3 py-3">
+                  {local ? (
+                    <Link
+                      to="/repos/$"
+                      params={{ _splat: local }}
+                      className="block truncate font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {entry.name}
+                    </Link>
+                  ) : (
+                    <a
+                      href={external}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block truncate font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {entry.name}
+                    </a>
+                  )}
+                  <span className="block truncate font-mono text-xs text-muted-foreground" title={entry.fullName}>
+                    {entry.fullName}
+                  </span>
+                  {flags.length > 0 ? (
+                    <span className="block text-xs text-muted-foreground">{flags.join(" · ")}</span>
+                  ) : null}
+                </td>
+                <td className="px-3 py-3">
+                  {entry.description ? (
+                    <span className="leading-snug">{entry.description}</span>
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </td>
+                <td className="px-3 py-3">
+                  <div className="flex flex-wrap gap-1.5">
+                    {local ? (
+                      <Link
+                        to="/repos/$"
+                        params={{ _splat: local }}
+                        title={entry.locals.join("\n")}
+                        className={cn(chip, "font-medium outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring")}
+                      >
+                        {entry.locals.length > 1 ? `Local ×${entry.locals.length}` : "Local"}
+                      </Link>
+                    ) : (
+                      <span className={cn(chip, "border-dashed text-muted-foreground/60")} aria-label="Not cloned locally">
+                        Local
+                        <span aria-hidden>—</span>
+                      </span>
+                    )}
+                    <RemoteChip label="GitHub" link={entry.github} configured={github?.status === "ok"} />
+                    <RemoteChip label="GitLab" link={entry.gitlab} configured={gitlab?.status === "ok"} />
+                  </div>
+                </td>
+                <td className="px-3 py-3">
+                  {technologies.length > 0 ? (
+                    <div className="flex flex-wrap gap-x-3 gap-y-1">
+                      {technologies
+                        .filter((tech) => tech.category === "language" || tech.category === "framework")
+                        .slice(0, 3)
+                        .map((tech) => (
+                          <TechBadge key={tech.name} name={tech.name} category={tech.category} />
+                        ))}
+                    </div>
+                  ) : entry.language ? (
+                    <TechBadge name={entry.language} category="language" />
+                  ) : (
+                    <span className="text-muted-foreground">—</span>
+                  )}
+                </td>
+                <td className="px-3 py-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+                  {entry.updatedAt ? formatAgo(entry.updatedAt) : "—"}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}

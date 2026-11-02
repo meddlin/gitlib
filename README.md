@@ -155,6 +155,18 @@ npm run web          # dev server at http://localhost:4000
 npm run build -w @gitlib/web && npm run preview -w @gitlib/web   # production build
 ```
 
+- The **Repositories** page has four tabs over one list: **Combined** (the default), **Local**, **GitHub**
+  and **GitLab**. Combined joins each local clone with the GitHub and GitLab repos its remotes point at, so
+  one row shows where a project lives (clone, GitHub, GitLab) and which of those it is missing; clones of the
+  same remote collapse into one row. GitHub lists every repo the token's user owns, collaborates on or reaches
+  through an organization (`GITLIB_GITHUB_TOKEN`; the token needs read access to repositories). GitLab lists
+  the projects the user is a member of with `GITLIB_GITLAB_TOKEN` (a personal access token with `read_api`),
+  or only a user's public projects with just `GITLIB_GITLAB_USERNAME`; set `GITLIB_GITLAB_URL` for a
+  self-hosted instance. Both hosts' lists are cached for a few minutes; **Refresh** asks again. A host that
+  isn't configured or fails is noted on the page and the rest still works, and clones link to GitHub or
+  GitLab from their remotes either way. The **Local** tab is the full table (favorites, descriptions, issue
+  counts, community scores, preview pane); the other tabs list repos with links out, and clones open their
+  detail page. The tab is kept in the URL (`?source=`).
 - Each repo has a detail page (click its name) with Overview, **Issues** and **Pull requests** tabs; the
   last two list open GitHub items and say so in a banner. Public repos work as-is; set
   `GITLIB_GITHUB_TOKEN` (or `GITHUB_TOKEN`) for private repos and a higher rate limit. The web server
