@@ -66,3 +66,16 @@ export interface Project {
   createdAt: string;
   updatedAt: string;
 }
+
+/**
+ * A Dependabot pull request the user has put aside. With `snoozedUntil` it comes back at that time; without it,
+ * it stays hidden until the pull request goes away.
+ */
+export interface DependabotDismissal {
+  /** Lowercased `owner/repo`. */
+  repo: string;
+  number: number;
+  /** ISO-8601 time the snooze ends, or null for "until closed". */
+  snoozedUntil: string | null;
+  createdAt: string;
+}

@@ -32,6 +32,8 @@ import {
 
 export const VERSION = "0.1.0";
 
+const TRIGGER_NAMES = { cli: "the CLI", web: "the web page", schedule: "the schedule" } as const;
+
 export interface CliIo {
   /** Merged over `process.env`, so callers only need to pass overrides. */
   env?: Env;
@@ -62,7 +64,10 @@ type Invocation =
   | { name: "open-code"; repo: string }
   | { name: "open-remote"; repo: string }
   | { name: "notes-edit"; repo: string }
-  | { name: "dependabot-check"; json?: boolean }
+  | { name: "dependabot-check"; json?: boolean; save: boolean }
+  | { name: "dependabot-show"; json?: boolean }
+  | { name: "dependabot-dismiss"; pr: DependabotPrRef; until?: string }
+  | { name: "dependabot-restore"; pr: DependabotPrRef }
   | { name: "planning-backup"; destination?: string }
   | { name: "backup-create"; directory?: string; keep?: number }
   | { name: "backup-verify"; archive: string }
@@ -72,6 +77,18 @@ type BackupInvocation = Extract<Invocation, { name: `backup-${string}` }>;
 
 const isBackupInvocation = (invocation: Invocation): invocation is BackupInvocation =>
   invocation.name.startsWith("backup-");
+
+interface DependabotPrRef {
+  repo: string;
+  number: number;
+}
+
+/** `owner/repo#123`, the way the report prints a pull request. */
+function parsePrRef(value: string): DependabotPrRef {
+  const match = /^(?<repo>[^#\s]+\/[^#\s]+)#(?<number>\d+)$/.exec(value);
+  if (!match?.groups) throw new InvalidArgumentError("expected owner/repo#number, e.g. meddlin/gitlib#41");
+  return { repo: match.groups["repo"]!, number: Number(match.groups["number"]) };
+}
 
 function parsePositiveInt(value: string): number {
   const parsed = Number(value);
@@ -178,7 +195,25 @@ function buildProgram(
     .command("check")
     .description("Report which open Dependabot PRs on starred repositories can be merged and which need work")
     .option("--json", "machine-readable output")
-    .action((options: { json?: boolean }) => onInvoke({ name: "dependabot-check", json: options.json }));
+    .option("--no-save", "do not store the result as the newest run")
+    .action((options: { json?: boolean; save: boolean }) => onInvoke({ name: "dependabot-check", json: options.json, save: options.save }));
+  dependabot
+    .command("show")
+    .description("Show the newest stored Dependabot check without contacting GitHub")
+    .option("--json", "machine-readable output")
+    .action((options: { json?: boolean }) => onInvoke({ name: "dependabot-show", json: options.json }));
+
+  dependabot
+    .command("dismiss")
+    .description("Put a Dependabot PR aside so reports and the badge leave it out")
+    .argument("<pr>", "owner/repo#number, as printed in the report", parsePrRef)
+    .option("--until <date>", "bring it back on this date (e.g. 2026-12-01); default is until the PR closes")
+    .action((pr: DependabotPrRef, options: { until?: string }) => onInvoke({ name: "dependabot-dismiss", pr, until: options.until }));
+  dependabot
+    .command("restore")
+    .description("Bring a dismissed Dependabot PR back")
+    .argument("<pr>", "owner/repo#number", parsePrRef)
+    .action((pr: DependabotPrRef) => onInvoke({ name: "dependabot-restore", pr }));
 
   const planning = program.command("planning").description("Manage gitlib's own planning data (issues)");
   planning
@@ -356,10 +391,60 @@ async function execute(
       return 0;
     }
     case "dependabot-check": {
-      const report = await app.checkDependabot();
-      print(invocation.json ? renderJson(dependabotReportToDict(report)) : renderDependabotReport(report, color));
+      const now = new Date();
+      const dismissals = app.listDependabotDismissals();
+      // A stored check also takes the lock that keeps the web button and the schedule from running at the same time.
+      const stored = invocation.save ? await app.runDependabotCheck({ trigger: "cli", now }) : null;
+      const report = stored?.report ?? (await app.checkDependabot({ now }));
+      const run = stored ? { id: stored.id, trigger: stored.trigger } : null;
+      print(
+        invocation.json
+          ? renderJson(dependabotReportToDict(report, { run, dismissals, now }))
+          : renderDependabotReport(report, {
+              color,
+              dismissals,
+              now,
+              footer: stored ? [`Saved as run ${stored.id}; read it again with \`gitlib dependabot show\`.`] : [],
+            }),
+      );
       // A report that could not cover every owner is not a clean bill of health, so a scheduler can notice.
       return report.errors.length > 0 ? 1 : 0;
+    }
+    case "dependabot-show": {
+      const stored = app.latestDependabotRun();
+      if (!stored) {
+        printError("No Dependabot check has been saved yet. Run `gitlib dependabot check` first.");
+        return 1;
+      }
+      const now = new Date();
+      const dismissals = app.listDependabotDismissals();
+      const run = { id: stored.id, trigger: stored.trigger };
+      print(
+        invocation.json
+          ? renderJson(dependabotReportToDict(stored.report, { run, dismissals, now }))
+          : renderDependabotReport(stored.report, {
+              color,
+              dismissals,
+              now,
+              header: [`Stored run ${stored.id}, started by ${TRIGGER_NAMES[stored.trigger]}; GitHub was not contacted.`, ""],
+            }),
+      );
+      return 0;
+    }
+    case "dependabot-dismiss": {
+      const { repo, number } = invocation.pr;
+      const dismissal = app.dismissDependabotPr(repo, number, invocation.until ?? null);
+      print(
+        dismissal.snoozedUntil
+          ? `Put ${repo}#${number} aside until ${dismissal.snoozedUntil}.`
+          : `Put ${repo}#${number} aside until it closes. Bring it back with \`gitlib dependabot restore ${repo}#${number}\`.`,
+      );
+      return 0;
+    }
+    case "dependabot-restore": {
+      app.restoreDependabotPr(invocation.pr.repo, invocation.pr.number);
+      print(`${invocation.pr.repo}#${invocation.pr.number} is no longer put aside.`);
+      return 0;
     }
     case "planning-backup": {
       print(`Backed up the planning database to ${app.backupPlanning(invocation.destination)}.`);
