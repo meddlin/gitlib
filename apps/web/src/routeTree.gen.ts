@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as DependabotRouteImport } from './routes/dependabot'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ApiChatRouteImport } from './routes/api.chat'
 import { Route as PlanningIndexRouteImport } from './routes/planning.index'
@@ -22,6 +23,11 @@ import { Route as PlanningIssuesIdRouteImport } from './routes/planning.issues.$
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DependabotRoute = DependabotRouteImport.update({
+  id: '/dependabot',
+  path: '/dependabot',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
@@ -67,6 +73,7 @@ const PlanningIssuesIdRoute = PlanningIssuesIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/dependabot': typeof DependabotRoute
   '/settings': typeof SettingsRoute
   '/api/chat': typeof ApiChatRoute
   '/planning/board': typeof PlanningBoardRoute
@@ -78,6 +85,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/dependabot': typeof DependabotRoute
   '/settings': typeof SettingsRoute
   '/api/chat': typeof ApiChatRoute
   '/planning/board': typeof PlanningBoardRoute
@@ -90,6 +98,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/dependabot': typeof DependabotRoute
   '/settings': typeof SettingsRoute
   '/api/chat': typeof ApiChatRoute
   '/planning/board': typeof PlanningBoardRoute
@@ -103,6 +112,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/dependabot'
     | '/settings'
     | '/api/chat'
     | '/planning/board'
@@ -114,6 +124,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/dependabot'
     | '/settings'
     | '/api/chat'
     | '/planning/board'
@@ -125,6 +136,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/dependabot'
     | '/settings'
     | '/api/chat'
     | '/planning/board'
@@ -137,6 +149,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  DependabotRoute: typeof DependabotRoute
   SettingsRoute: typeof SettingsRoute
   ApiChatRoute: typeof ApiChatRoute
   PlanningBoardRoute: typeof PlanningBoardRoute
@@ -154,6 +167,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dependabot': {
+      id: '/dependabot'
+      path: '/dependabot'
+      fullPath: '/dependabot'
+      preLoaderRoute: typeof DependabotRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -217,6 +237,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  DependabotRoute: DependabotRoute,
   SettingsRoute: SettingsRoute,
   ApiChatRoute: ApiChatRoute,
   PlanningBoardRoute: PlanningBoardRoute,

@@ -22,6 +22,10 @@ The verdict never reads the PR body. Choices the plan left open:
   by default; `show`, `dismiss` and `restore` were added. Findings of an owner that could not be asked are carried
   forward from the previous run with their original time, which is the "partial failure per PR" of "Where the
   existing scheduler falls short", point 4.
+- Slice 3, the page (11 d): `/dependabot` with the buckets, reasons and suggested comments as text, snooze (a week)
+  and dismiss, a "Check now" button on the same lock, a coverage footer (not checked, skipped, quota) and the NavBar
+  badge (ready + review first + needs work, minus anything put aside). Text from GitHub (titles, check names) is
+  drawn as plain text, links are limited to https pages on github.com, and nothing from a PR body is shown.
 - Added to the plan: a lookup of which watched repositories the token can see, so a private repository the token
   cannot reach is reported as `NOT CHECKED` instead of looking like "no open PRs".
 - 11 (a) has **not** been run: the tests use fixtures shaped like the GraphQL response in "Verify with your own

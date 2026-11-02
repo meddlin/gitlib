@@ -182,6 +182,13 @@ PRs, plus one small lookup that tells which watched repositories your token cann
 few points of the 5,000 an hour; the report prints the actual cost. Anything it could not check is listed under
 `NOT CHECKED` or `INCOMPLETE` rather than left out, and the command exits with status 1 if a whole owner failed.
 
+**In the web app.** The **Dependabot** page (`/dependabot`) lists the newest saved check by bucket with each PR's
+reasons and suggested comments, **Snooze** (a week) and **Dismiss** (until it closes) buttons, a **Put aside** list
+with **Restore**, and a **Check now** button that takes the same lock as the CLI. It reads the database, never GitHub,
+until you press the button; if another check is running (the CLI) it says so and picks up the result. Without a token
+the page still shows the last saved check and explains what to set. The badge on the **Dependabot** link counts the
+PRs that need a person (ready, review first, needs work; not those waiting on checks) and refreshes every minute.
+
 **Saved runs.** Each check is stored in `gitlib.db` (`dependabot_runs`, `dependabot_findings`; the newest 60 runs
 are kept) so the findings can be read offline and compared over time; they are derived from GitHub and can be fetched
 again. If one owner cannot be asked (network, rate limit), the last findings for its repositories are kept, marked
@@ -274,6 +281,8 @@ npm run build -w @gitlib/web && npm run preview -w @gitlib/web   # production bu
   Each missing item on the Community tab has an **Add to planning** button that files a gitlib
   [planning](#planning) issue for it (stored in gitlib only); once filed, the row links to that issue.
 - The **Planning** page (`/planning`) holds gitlib's own issues; see [Planning](#planning).
+- The **Dependabot** page (`/dependabot`) shows the newest saved check of your starred repositories' Dependabot PRs,
+  with a **Check now** button and a count badge in the top bar; see [Dependabot watch](#dependabot-watch).
 - The **Ask** button opens a chat panel for questions about your repositories; see [Chat](#chat).
 - Lists every git repo found under your configured scan roots (scanned on first load; use
   **Rescan** after adding repos).

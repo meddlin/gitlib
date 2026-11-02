@@ -1,18 +1,22 @@
 import { Link } from "@tanstack/react-router";
-import { FolderKanban, GitBranch, ListTodo, MessageSquare, Settings } from "lucide-react";
+import { FolderKanban, GitBranch, GitPullRequest, ListTodo, MessageSquare, Settings } from "lucide-react";
+import { BUCKET_LABELS, BUCKET_ORDER } from "#/lib/dependabot";
 import { useLibraryState } from "#/lib/library-state";
+import { useDependabotBadge } from "#/lib/use-dependabot-badge";
 import { cn } from "#/lib/utils";
 
 const LINKS = [
   { to: "/", label: "Repositories", icon: GitBranch },
   { to: "/projects", label: "Projects", icon: FolderKanban },
   { to: "/planning", label: "Planning", icon: ListTodo },
+  { to: "/dependabot", label: "Dependabot", icon: GitPullRequest },
   { to: "/settings", label: "Settings", icon: Settings },
 ] as const;
 
 export function NavBar({ chatOpen, onToggleChat }: { chatOpen: boolean; onToggleChat: () => void }) {
   // Links back to Repositories bring the table's filters and sort with them.
   const library = useLibraryState();
+  const dependabot = useDependabotBadge();
   return (
     <nav aria-label="Main" className="sticky top-0 z-20 h-12 min-w-0 shrink-0 border-b bg-background/90 backdrop-blur">
       <div className="mx-auto flex h-full max-w-6xl items-center gap-6 px-4 sm:px-6">
@@ -33,9 +37,20 @@ export function NavBar({ chatOpen, onToggleChat }: { chatOpen: boolean; onToggle
                 )}
                 activeProps={{ className: "bg-accent text-accent-foreground font-medium", "aria-current": "page" }}
               >
-                {/* Four labelled links don't fit a phone's width with their icons. */}
+                {/* Five labelled links don't fit a phone's width with their icons. */}
                 <Icon className="size-3.5 max-sm:hidden" aria-hidden />
                 {label}
+                {to === "/dependabot" && dependabot && dependabot.actionable > 0 ? (
+                  <span
+                    className="rounded-full bg-primary px-1.5 text-[0.7rem] font-medium leading-5 text-primary-foreground"
+                    title={BUCKET_ORDER.filter((bucket) => dependabot.counts[bucket] > 0)
+                      .map((bucket) => `${dependabot.counts[bucket]} ${BUCKET_LABELS[bucket].toLowerCase()}`)
+                      .join(", ")}
+                  >
+                    <span className="sr-only">{dependabot.actionable} pull requests to look at: </span>
+                    {dependabot.actionable}
+                  </span>
+                ) : null}
               </Link>
             </li>
           ))}
