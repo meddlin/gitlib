@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- build ----
-FROM node:24-slim AS build
+FROM node:26-slim AS build
 WORKDIR /app
 
 # Install dependencies first so this layer is cached until a manifest changes.
@@ -20,7 +20,7 @@ RUN npm run build -w @gitlib/web
 RUN npm prune --omit=dev
 
 # ---- runtime ----
-FROM node:24-slim
+FROM node:26-slim
 ENV NODE_ENV=production \
     PORT=3000 \
     GITLIB_HOME=/data
