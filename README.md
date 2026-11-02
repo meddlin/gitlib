@@ -189,6 +189,18 @@ until you press the button; if another check is running (the CLI) it says so and
 the page still shows the last saved check and explains what to set. The badge on the **Dependabot** link counts the
 PRs that need a person (ready, review first, needs work; not those waiting on checks) and refreshes every minute.
 
+**Schedule.** The **Schedule** panel on the Dependabot page turns on automatic checks on the days and at the time
+you choose (server time; the page shows the zone, and in Docker it is UTC unless you set `TZ` in `.env`). The schedule is stored in `planning.db` because it is your choice,
+not derived data. It runs inside the web server, which starts it at boot (the production server calls
+`POST /api/dependabot/start` once it is listening; the dev server starts it with the first page), looks at the clock
+every minute and starts a check when the latest slot is newer than the last saved check. That is also the catch-up:
+a restart after a missed slot runs it at once, but turning the schedule on at 14:00 does not owe you 08:00. A check
+that could not ask some owner is retried every 30 minutes for six hours; one that threw (a rejected token, GitHub
+down) waits 30 minutes and shows its error under the panel. A check started any other way (the button, the CLI)
+counts for the slot, and they all share the lock, so a host cron job running `gitlib dependabot check` and the
+schedule can coexist. The schedule only runs while the server is up, so on a laptop that sleeps use a host scheduler
+instead (see the research note's scheduling table) and leave this off.
+
 **Saved runs.** Each check is stored in `gitlib.db` (`dependabot_runs`, `dependabot_findings`; the newest 60 runs
 are kept) so the findings can be read offline and compared over time; they are derived from GitHub and can be fetched
 again. If one owner cannot be asked (network, rate limit), the last findings for its repositories are kept, marked

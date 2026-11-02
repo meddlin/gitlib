@@ -18,6 +18,7 @@ import { Route as PlanningBoardRouteImport } from './routes/planning.board'
 import { Route as ProjectsIndexRouteImport } from './routes/projects.index'
 import { Route as ProjectsIdRouteImport } from './routes/projects.$id'
 import { Route as ReposSplatRouteImport } from './routes/repos.$'
+import { Route as ApiDependabotStartRouteImport } from './routes/api.dependabot.start'
 import { Route as PlanningIssuesIdRouteImport } from './routes/planning.issues.$id'
 
 const IndexRoute = IndexRouteImport.update({
@@ -65,6 +66,11 @@ const ReposSplatRoute = ReposSplatRouteImport.update({
   path: '/repos/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiDependabotStartRoute = ApiDependabotStartRouteImport.update({
+  id: '/api/dependabot/start',
+  path: '/api/dependabot/start',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PlanningIssuesIdRoute = PlanningIssuesIdRouteImport.update({
   id: '/planning/issues/$id',
   path: '/planning/issues/$id',
@@ -81,6 +87,7 @@ export interface FileRoutesByFullPath {
   '/repos/$': typeof ReposSplatRoute
   '/planning/': typeof PlanningIndexRoute
   '/projects/': typeof ProjectsIndexRoute
+  '/api/dependabot/start': typeof ApiDependabotStartRoute
   '/planning/issues/$id': typeof PlanningIssuesIdRoute
 }
 export interface FileRoutesByTo {
@@ -93,6 +100,7 @@ export interface FileRoutesByTo {
   '/repos/$': typeof ReposSplatRoute
   '/planning': typeof PlanningIndexRoute
   '/projects': typeof ProjectsIndexRoute
+  '/api/dependabot/start': typeof ApiDependabotStartRoute
   '/planning/issues/$id': typeof PlanningIssuesIdRoute
 }
 export interface FileRoutesById {
@@ -106,6 +114,7 @@ export interface FileRoutesById {
   '/repos/$': typeof ReposSplatRoute
   '/planning/': typeof PlanningIndexRoute
   '/projects/': typeof ProjectsIndexRoute
+  '/api/dependabot/start': typeof ApiDependabotStartRoute
   '/planning/issues/$id': typeof PlanningIssuesIdRoute
 }
 export interface FileRouteTypes {
@@ -120,6 +129,7 @@ export interface FileRouteTypes {
     | '/repos/$'
     | '/planning/'
     | '/projects/'
+    | '/api/dependabot/start'
     | '/planning/issues/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -132,6 +142,7 @@ export interface FileRouteTypes {
     | '/repos/$'
     | '/planning'
     | '/projects'
+    | '/api/dependabot/start'
     | '/planning/issues/$id'
   id:
     | '__root__'
@@ -144,6 +155,7 @@ export interface FileRouteTypes {
     | '/repos/$'
     | '/planning/'
     | '/projects/'
+    | '/api/dependabot/start'
     | '/planning/issues/$id'
   fileRoutesById: FileRoutesById
 }
@@ -157,6 +169,7 @@ export interface RootRouteChildren {
   ReposSplatRoute: typeof ReposSplatRoute
   PlanningIndexRoute: typeof PlanningIndexRoute
   ProjectsIndexRoute: typeof ProjectsIndexRoute
+  ApiDependabotStartRoute: typeof ApiDependabotStartRoute
   PlanningIssuesIdRoute: typeof PlanningIssuesIdRoute
 }
 
@@ -225,6 +238,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ReposSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/dependabot/start': {
+      id: '/api/dependabot/start'
+      path: '/api/dependabot/start'
+      fullPath: '/api/dependabot/start'
+      preLoaderRoute: typeof ApiDependabotStartRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/planning/issues/$id': {
       id: '/planning/issues/$id'
       path: '/planning/issues/$id'
@@ -245,6 +265,7 @@ const rootRouteChildren: RootRouteChildren = {
   ReposSplatRoute: ReposSplatRoute,
   PlanningIndexRoute: PlanningIndexRoute,
   ProjectsIndexRoute: ProjectsIndexRoute,
+  ApiDependabotStartRoute: ApiDependabotStartRoute,
   PlanningIssuesIdRoute: PlanningIssuesIdRoute,
 }
 export const routeTree = rootRouteImport

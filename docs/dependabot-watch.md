@@ -26,6 +26,13 @@ The verdict never reads the PR body. Choices the plan left open:
   and dismiss, a "Check now" button on the same lock, a coverage footer (not checked, skipped, quota) and the NavBar
   badge (ready + review first + needs work, minus anything put aside). Text from GitHub (titles, check names) is
   drawn as plain text, links are limited to https pages on github.com, and nothing from a PR body is shown.
+- Slice 4, the in-app schedule (chosen over a host-only schedule, which the Recommendation preferred): days and a
+  time of day in `planning.db` (migration 5), a pure calendar function (`previousSlot`/`nextSlot`/`isCheckDue`) and
+  a runner that ticks every minute inside the web server. It answers the weaknesses listed under "Where the existing
+  scheduler falls short": it starts at boot (the production server calls `POST /api/dependabot/start`), is
+  calendar-based, catches up from the stored runs instead of an in-memory timer, and takes the same lease as the CLI.
+  The weakness that remains is the one the note names for any in-process timer: it does not run while the server or
+  the machine is down. Host cron or a systemd timer calling `gitlib dependabot check` still works beside it.
 - Added to the plan: a lookup of which watched repositories the token can see, so a private repository the token
   cannot reach is reported as `NOT CHECKED` instead of looking like "no open PRs".
 - 11 (a) has **not** been run: the tests use fixtures shaped like the GraphQL response in "Verify with your own

@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import type { Bucket, DependabotDismissal, RunTrigger, StoredFinding, StoredReport } from "@gitlib/core";
-import { applyDismissal, buildBadge, buildView, runCheck } from "./dependabot.server";
+import { attempt, buildBadge, buildView, ensureScheduler, runCheck } from "./dependabot.server";
 import { getApp } from "./gitlib.server";
 
 /** A finding the user has put aside, with how. */
@@ -21,6 +21,22 @@ export interface DependabotView {
   /** What the check covered and what it could not; null before the first check. */
   report: Omit<StoredReport, "items"> | null;
   counts: Record<Bucket, number>;
+  /** When the web server checks on its own. */
+  schedule: {
+    enabled: boolean;
+    /** Weekdays, 0 (Sunday) to 6. */
+    days: number[];
+    /** `HH:MM` in the server's time zone. */
+    time: string;
+    /** The next slot (an ISO time), or null when the schedule is off. */
+    nextRunAt: string | null;
+    timeZone: string;
+    /** The scheduler is running in this server. */
+    active: boolean;
+    lastAttemptAt: string | null;
+    /** Why the last scheduled check failed, until one succeeds. */
+    lastError: string | null;
+  };
 }
 
 export interface DependabotBadge {
@@ -36,10 +52,16 @@ export interface DependabotActionResult {
   view: DependabotView;
 }
 
-export const getDependabot = createServerFn({ method: "GET" }).handler(async (): Promise<DependabotView> => buildView());
+export const getDependabot = createServerFn({ method: "GET" }).handler(async (): Promise<DependabotView> => {
+  ensureScheduler();
+  return buildView();
+});
 
-/** Counts for the NavBar badge; a cheap read of the saved check. */
-export const getDependabotBadge = createServerFn({ method: "GET" }).handler(async (): Promise<DependabotBadge> => buildBadge());
+/** Counts for the NavBar badge; a cheap read of the saved check. Every page asks, so it also starts the scheduler. */
+export const getDependabotBadge = createServerFn({ method: "GET" }).handler(async (): Promise<DependabotBadge> => {
+  ensureScheduler();
+  return buildBadge();
+});
 
 /** Asks GitHub now, saving the result. Takes the same lock as the CLI and the schedule, so it can say "busy". */
 export const checkDependabotNow = createServerFn({ method: "POST" }).handler(async (): Promise<DependabotActionResult> => {
@@ -62,13 +84,26 @@ const validatePr = (input: PrInput & { until?: string | null }) => {
 export const dismissDependabotPr = createServerFn({ method: "POST" })
   .validator(validatePr)
   .handler(async ({ data }): Promise<DependabotActionResult> => {
-    const error = applyDismissal(() => void getApp().dismissDependabotPr(data.repo, data.number, data.until ?? null));
+    const error = attempt(() => void getApp().dismissDependabotPr(data.repo, data.number, data.until ?? null));
     return { error, view: buildView() };
   });
 
 export const restoreDependabotPr = createServerFn({ method: "POST" })
   .validator(validatePr)
   .handler(async ({ data }): Promise<DependabotActionResult> => {
-    const error = applyDismissal(() => getApp().restoreDependabotPr(data.repo, data.number));
+    const error = attempt(() => getApp().restoreDependabotPr(data.repo, data.number));
+    return { error, view: buildView() };
+  });
+
+/** Turns the schedule on or off, or changes its days and time. The server's clock and zone decide when it fires. */
+export const saveDependabotSchedule = createServerFn({ method: "POST" })
+  .validator((input: { enabled: boolean; days: number[]; time: string }) => {
+    if (typeof input?.enabled !== "boolean" || !Array.isArray(input?.days) || typeof input?.time !== "string") {
+      throw new Error("Invalid schedule.");
+    }
+    return input;
+  })
+  .handler(async ({ data }): Promise<DependabotActionResult> => {
+    const error = attempt(() => void getApp().saveDependabotSchedule(data));
     return { error, view: buildView() };
   });

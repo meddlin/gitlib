@@ -3,5 +3,7 @@ export * from "./classify.js";
 export * from "./dismissals.js";
 export * from "./github-backend.js";
 export * from "./metadata.js";
+export * from "./schedule.js";
+export * from "./scheduler.js";
 export * from "./store.js";
 export * from "./types.js";

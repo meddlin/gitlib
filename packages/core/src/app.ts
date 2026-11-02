@@ -5,11 +5,13 @@ import { loadConfig, type AppConfig, type Env } from "./config.js";
 import {
   checkDependabot,
   DependabotBusyError,
+  DependabotScheduler,
   DependabotStore,
   DependabotUnavailableError,
   GitHubDependabotBackend,
   isValidOwner,
   isValidRepoName,
+  normalizeSchedule,
   resolveGitHubToken,
   type DependabotBackend,
   type DependabotReport,
@@ -23,6 +25,7 @@ import {
   LocalIssueNotFoundError,
   PlanningStore,
   type DependabotDismissal,
+  type StoredDependabotSchedule,
   normalizeIssueBody,
   normalizeIssueTitle,
   normalizeProjectName,
@@ -281,6 +284,21 @@ export class GitLibApp {
 
   listDependabotDismissals(): DependabotDismissal[] {
     return this.planning.listDependabotDismissals();
+  }
+
+  /** When the web server checks on its own; off until the user turns it on. */
+  getDependabotSchedule(): StoredDependabotSchedule {
+    return this.planning.getDependabotSchedule();
+  }
+
+  /** Validates and saves the schedule. Throws `DependabotScheduleError` for one that cannot be followed. */
+  saveDependabotSchedule(input: { enabled?: unknown; days?: unknown; time?: unknown }): StoredDependabotSchedule {
+    return this.planning.saveDependabotSchedule(normalizeSchedule(input), utcNow());
+  }
+
+  /** A scheduler over this application; the caller starts it (the web server does, at boot). */
+  createDependabotScheduler(): DependabotScheduler {
+    return new DependabotScheduler(this);
   }
 
   listRepositories(options: FilterOptions & { refresh?: boolean } = {}): RepoRecord[] {

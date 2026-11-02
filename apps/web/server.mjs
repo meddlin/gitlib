@@ -85,6 +85,13 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(port, host, () => console.log(`gitlib web listening on http://${host}:${port}`));
+server.listen(port, host, () => {
+  console.log(`gitlib web listening on http://${host}:${port}`);
+  // Starts the Dependabot schedule now instead of at the first page view, so a slot missed while the server was down is
+  // caught up and the next one is not missed because nobody opened the app. Best effort: the app works without it.
+  fetch(`http://127.0.0.1:${port}/api/dependabot/start`, { method: "POST" }).catch((error) =>
+    console.warn("Could not start the Dependabot schedule:", error.message),
+  );
+});
 
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => server.close(() => process.exit(0)));

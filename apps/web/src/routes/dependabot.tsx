@@ -2,9 +2,10 @@ import { createFileRoute } from "@tanstack/react-router";
 import { RefreshCw, TriangleAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import { DismissedRow, FindingCard, Prose } from "#/components/dependabot-finding";
+import { SchedulePanel } from "#/components/dependabot-schedule";
 import { RelativeTime } from "#/components/relative-time";
 import { Button } from "#/components/ui/button";
-import { BUCKET_HELP, BUCKET_LABELS, BUCKET_ORDER, BUCKET_TONES, TRIGGER_NAMES, holderName, prKey, snoozeUntil } from "#/lib/dependabot";
+import { BUCKET_HELP, BUCKET_LABELS, BUCKET_ORDER, BUCKET_TONES, TRIGGER_NAMES, describeSchedule, holderName, prKey, snoozeUntil } from "#/lib/dependabot";
 import { notifyDependabotChanged } from "#/lib/use-dependabot-badge";
 import { cn } from "#/lib/utils";
 import {
@@ -12,6 +13,7 @@ import {
   dismissDependabotPr,
   getDependabot,
   restoreDependabotPr,
+  saveDependabotSchedule,
   type DependabotActionResult,
   type DependabotView,
 } from "#/server/dependabot";
@@ -30,6 +32,7 @@ function Dependabot() {
   const [view, setView] = useState<DependabotView>(loaded);
   const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [savingSchedule, setSavingSchedule] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => setView(loaded), [loaded]);
@@ -69,6 +72,7 @@ function Dependabot() {
   const snooze = (pr: { repo: string; number: number }) => act(() => dismissDependabotPr({ data: { ...pr, until: snoozeUntil(7) } }), setBusy);
   const dismiss = (pr: { repo: string; number: number }) => act(() => dismissDependabotPr({ data: pr }), setBusy);
   const restore = (pr: { repo: string; number: number }) => act(() => restoreDependabotPr({ data: pr }), setBusy);
+  const saveSchedule = (next: { enabled: boolean; days: number[]; time: string }) => act(() => saveDependabotSchedule({ data: next }), setSavingSchedule);
 
   const { run, report } = view;
   const total = BUCKET_ORDER.reduce((sum, bucket) => sum + view.counts[bucket], 0);
@@ -99,7 +103,11 @@ function Dependabot() {
           </>
         ) : (
           "No check has run yet."
-        )}
+        )}{" "}
+        <a href="#schedule" className="underline-offset-2 hover:underline">
+          Schedule: {describeSchedule(view.schedule)}
+        </a>
+        .
       </p>
 
       {view.unavailableReason ? <Banner tone="warning">{view.unavailableReason}</Banner> : null}
@@ -155,6 +163,8 @@ function Dependabot() {
           </ul>
         </details>
       ) : null}
+
+      <SchedulePanel schedule={view.schedule} saving={savingSchedule} onSave={saveSchedule} />
 
       {report ? <CoverageNotes report={report} /> : null}
     </div>
