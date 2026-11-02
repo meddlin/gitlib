@@ -15,9 +15,10 @@ import {
 } from "#/components/repo-table";
 import { SearchBar } from "#/components/search-bar";
 import { TechBadge } from "#/components/tech-badge";
+import { formatAgo } from "#/lib/format";
 import { saveLibraryState, type LibraryTableState } from "#/lib/library-state";
 import { cn } from "#/lib/utils";
-import { getCommunityScores, type CommunityScoresView } from "#/server/community";
+import { getCommunityScores, refreshCommunityScores, type CommunityScoresView } from "#/server/community";
 import { getContributions, type ContributionsView } from "#/server/contributions";
 import { getIssueCounts, type IssueCountsView } from "#/server/issues";
 import { getRepos, rescanRepos, type RepoView } from "#/server/repos";
@@ -83,7 +84,66 @@ function useBackgroundView<T>(load: () => Promise<T>, onError: (message: string)
 }
 
 const issueCountsFailed = (error: string): IssueCountsView => ({ status: "error", counts: {}, error });
-const communityScoresFailed = (error: string): CommunityScoresView => ({ status: "error", scores: {}, error });
+const communityScoresFailed = (error: string): CommunityScoresView => ({
+  status: "error",
+  scores: {},
+  error,
+  updatedAt: null,
+  refreshing: false,
+});
+
+/** How often to look again while the server refreshes scores in the background. */
+const COMMUNITY_POLL_MS = 3_000;
+
+/**
+ * Community scores as stored in gitlib's database, plus a way to ask GitHub for fresh ones. The server also
+ * refreshes on its own when they are a day old; while it does, this keeps polling so the table fills in.
+ */
+function useCommunityScores(refreshKey: unknown) {
+  const [view, setView] = useState<CommunityScoresView>();
+  const [requesting, setRequesting] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getCommunityScores()
+      .then((next) => !cancelled && setView(next))
+      .catch((caught: unknown) => {
+        if (!cancelled) setView(communityScoresFailed(caught instanceof Error ? caught.message : "Something went wrong."));
+      });
+    return () => {
+      cancelled = true;
+    };
+    // `refreshKey` is the only real input; the server functions are stable.
+  }, [refreshKey]);
+
+  const refreshing = view?.refreshing === true;
+  useEffect(() => {
+    if (!refreshing) return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      getCommunityScores()
+        .then((next) => !cancelled && setView(next))
+        .catch(() => !cancelled && setView((prev) => prev && { ...prev, refreshing: false }));
+    }, COMMUNITY_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [view, refreshing]);
+
+  const refresh = useCallback(async () => {
+    setRequesting(true);
+    try {
+      setView(await refreshCommunityScores());
+    } catch (caught) {
+      setView(communityScoresFailed(caught instanceof Error ? caught.message : "Something went wrong."));
+    } finally {
+      setRequesting(false);
+    }
+  }, []);
+
+  return { view, refresh, busy: requesting || refreshing };
+}
 
 const CONTRIBUTION_SOURCE_KEY = "gitlib-contribution-source";
 
@@ -134,7 +194,8 @@ function RepoLibrary() {
   const contributions = useContributions(allRepos);
   const issueCountsResult = useBackgroundView(getIssueCounts, issueCountsFailed, allRepos);
   const issueCounts: IssueCounts = issueCountsResult?.counts;
-  const communityResult = useBackgroundView(getCommunityScores, communityScoresFailed, allRepos);
+  const community = useCommunityScores(allRepos);
+  const communityResult = community.view;
   const communityScores: CommunityScores = communityResult?.scores;
 
   const searching = useRouterState({ select: (state) => state.isLoading });
@@ -277,6 +338,16 @@ function RepoLibrary() {
               <RefreshCw className={cn("size-3.5", scanning && "animate-spin")} aria-hidden />
               {scanning ? "Scanning…" : "Rescan"}
             </button>
+            <button
+              type="button"
+              onClick={community.refresh}
+              disabled={community.busy}
+              title="Ask GitHub for every repo's community profile now. Scores are otherwise refreshed daily."
+              className="inline-flex h-8 items-center gap-1.5 border px-3 text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+            >
+              <RefreshCw className={cn("size-3.5", community.busy && "animate-spin")} aria-hidden />
+              {community.busy ? "Refreshing scores…" : "Refresh scores"}
+            </button>
           </div>
         </header>
 
@@ -306,7 +377,12 @@ function RepoLibrary() {
 
           {communityResult && communityResult.status !== "ok" ? (
             <p className="text-xs text-muted-foreground" role="status">
-              Some GitHub community scores couldn't be loaded: {communityResult.error}
+              Some GitHub community scores couldn't be refreshed: {communityResult.error}
+            </p>
+          ) : null}
+          {communityResult?.updatedAt ? (
+            <p className="text-xs text-muted-foreground">
+              Community scores last fetched from GitHub {formatAgo(communityResult.updatedAt)}.
             </p>
           ) : null}
 

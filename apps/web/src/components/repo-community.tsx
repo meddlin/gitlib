@@ -1,12 +1,13 @@
 import { Link } from "@tanstack/react-router";
-import { Check, ListPlus, X } from "lucide-react";
+import { Check, ListPlus, RefreshCw, X } from "lucide-react";
 import { useState } from "react";
 import { PROVIDERS, ProviderBanner } from "#/components/provider-banner";
 import { Button } from "#/components/ui/button";
 import { TONE_CLASSES, missingItems, planningIssueDraft, scoreTone, type CommunityItem } from "#/lib/community";
+import { formatAgo } from "#/lib/format";
 import { cn } from "#/lib/utils";
 import { useServerData } from "#/lib/use-server-data";
-import { getCommunityProfile, type CommunityView } from "#/server/community";
+import { getCommunityProfile, refreshCommunityProfile, type CommunityView } from "#/server/community";
 import { createLocalIssue, getRepoLocalIssues, type LocalIssueView } from "#/server/planning";
 
 const loadCommunity = (relativePath: string) => getCommunityProfile({ data: { relativePath } });
@@ -15,6 +16,7 @@ const communityFailed = (error: string): CommunityView => ({
   slug: null,
   communityUrl: null,
   profile: null,
+  fetchedAt: null,
   error,
 });
 
@@ -117,13 +119,28 @@ function Item({ item, action }: { item: CommunityItem; action?: React.ReactNode 
 
 export function RepoCommunity({ relativePath, canPlan }: { relativePath: string; canPlan: boolean }) {
   const loaded = useServerData(relativePath, loadCommunity, communityFailed);
+  // A profile fetched from GitHub on request; it replaces the stored one the tab opened with.
+  const [fresh, setFresh] = useState<{ path: string; view: CommunityView } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const existing = useServerData(relativePath, loadPlanned, () => []);
   // Issues filed from this tab; the server copy above was read when the tab opened.
   const [filed, setFiled] = useState<{ path: string; issues: LocalIssueView[] }>({ path: relativePath, issues: [] });
 
   if (loaded.status === "loading") return <p className="text-sm text-muted-foreground">Loading community profile…</p>;
 
-  const view = loaded.value;
+  const view = fresh?.path === relativePath ? fresh.view : loaded.value;
+
+  async function refresh() {
+    setRefreshing(true);
+    try {
+      setFresh({ path: relativePath, view: await refreshCommunityProfile({ data: { relativePath } }) });
+    } catch (caught) {
+      setFresh({ path: relativePath, view: communityFailed(caught instanceof Error ? caught.message : "Could not refresh the profile.") });
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
   const provider = view.provider ? PROVIDERS[view.provider] : null;
   if (!view.provider || !provider || !view.slug || !view.communityUrl) {
     return view.error ? (
@@ -138,13 +155,27 @@ export function RepoCommunity({ relativePath, canPlan }: { relativePath: string;
   }
 
   const banner = <ProviderBanner provider={view.provider} noun="Community profile" slug={view.slug} url={view.communityUrl} />;
+  const refreshButton = (
+    <Button
+      type="button"
+      variant="outline"
+      size="xs"
+      onClick={refresh}
+      disabled={refreshing}
+      title="Ask GitHub for this repository's community profile now"
+    >
+      <RefreshCw className={cn(refreshing && "animate-spin")} aria-hidden />
+      {refreshing ? "Refreshing…" : "Refresh"}
+    </Button>
+  );
   if (!view.profile) {
     return (
       <section aria-label={`Community profile from ${provider.label}`}>
         {banner}
-        <p role="alert" className="text-sm text-destructive">
+        <p role="alert" className="mb-3 text-sm text-destructive">
           {view.error ?? "Could not load the community profile."}
         </p>
+        {refreshButton}
       </section>
     );
   }
@@ -159,6 +190,18 @@ export function RepoCommunity({ relativePath, canPlan }: { relativePath: string;
   return (
     <section aria-label={`Community profile from ${provider.label}`}>
       {banner}
+
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">
+          {view.fetchedAt ? `Last fetched from GitHub ${formatAgo(view.fetchedAt)}.` : "Stored by gitlib."}
+        </p>
+        {refreshButton}
+      </div>
+      {view.error ? (
+        <p role="alert" className="mb-3 text-xs text-destructive">
+          Could not refresh from GitHub, showing the last stored profile: {view.error}
+        </p>
+      ) : null}
 
       <div className="flex items-end gap-4 border-b pb-4">
         <p className={cn("text-4xl font-semibold tabular-nums", tone.text)} data-testid="community-score">

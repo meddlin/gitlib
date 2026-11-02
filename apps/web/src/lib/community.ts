@@ -82,6 +82,63 @@ function fileEntry(entry: Record<string, unknown> | null): { present: boolean; u
   return { present: entry !== null, url: entry ? githubUrl(entry["html_url"]) : null };
 }
 
+export const DEFAULT_REFRESH_HOURS = 24;
+
+/**
+ * How old a stored profile may get before it is fetched again, from `GITLIB_COMMUNITY_REFRESH_HOURS`
+ * (decimals are fine). Unset, blank or unusable means a day; `0` turns automatic refreshing off, leaving
+ * only the buttons, in which case this returns null.
+ */
+export function refreshIntervalMs(setting: string | undefined): number | null {
+  const hours = setting?.trim() ? Number(setting) : DEFAULT_REFRESH_HOURS;
+  if (!Number.isFinite(hours) || hours < 0) return DEFAULT_REFRESH_HOURS * 3_600_000;
+  return hours === 0 ? null : hours * 3_600_000;
+}
+
+/** Whether a profile fetched at `fetchedAt` (an ISO timestamp, or undefined if never fetched) is due again. */
+export function isStale(fetchedAt: string | undefined, now: number, intervalMs: number): boolean {
+  if (fetchedAt === undefined) return true;
+  const fetched = Date.parse(fetchedAt);
+  return !Number.isFinite(fetched) || now - fetched >= intervalMs;
+}
+
+/**
+ * What goes into the database: just the facts GitHub reported. Labels and hints are not stored, so wording
+ * changes in `COMMUNITY_ITEMS` apply to profiles saved earlier.
+ */
+export function serializeProfile(profile: CommunityProfile): string {
+  return JSON.stringify({
+    score: profile.score,
+    items: profile.items.map(({ id, present, url }) => ({ id, present, url })),
+  });
+}
+
+/**
+ * Reads back what `serializeProfile` wrote. Returns null for anything unusable, including a profile saved
+ * before a checklist item existed, so the caller fetches a fresh one instead of showing a partial checklist.
+ */
+export function parseStoredProfile(payload: string): CommunityProfile | null {
+  let raw: unknown;
+  try {
+    raw = JSON.parse(payload);
+  } catch {
+    return null;
+  }
+  if (!isRecord(raw) || typeof raw["score"] !== "number" || !Number.isFinite(raw["score"]) || !Array.isArray(raw["items"])) {
+    return null;
+  }
+  const saved = new Map<unknown, Record<string, unknown>>();
+  for (const entry of raw["items"]) if (isRecord(entry)) saved.set(entry["id"], entry);
+
+  const items: CommunityItem[] = [];
+  for (const item of COMMUNITY_ITEMS) {
+    const entry = saved.get(item.id);
+    if (!entry || typeof entry["present"] !== "boolean") return null;
+    items.push({ ...item, present: entry["present"], url: githubUrl(entry["url"]) });
+  }
+  return { score: Math.min(100, Math.max(0, Math.round(raw["score"]))), items };
+}
+
 /** The planning issue that would fix a missing item, for a repo that GitHub scores at `score`. */
 export function planningIssueDraft(
   item: Pick<CommunityItem, "task" | "label" | "hint">,

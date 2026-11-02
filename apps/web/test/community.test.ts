@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { COMMUNITY_ITEMS, missingItems, parseCommunityProfile, planningIssueDraft, scoreTone } from "../src/lib/community";
+import {
+  COMMUNITY_ITEMS,
+  isStale,
+  missingItems,
+  parseCommunityProfile,
+  parseStoredProfile,
+  planningIssueDraft,
+  refreshIntervalMs,
+  scoreTone,
+  serializeProfile,
+} from "../src/lib/community";
+import { formatAgo } from "../src/lib/format";
 
 /** Shaped like a real response from `GET /repos/meddlin/gitlib/community/profile`. */
 const sparse = {
@@ -126,5 +137,83 @@ describe("planningIssueDraft", () => {
     expect(draft.body).toContain("28%");
     expect(draft.body).toContain("https://github.com/meddlin/gitlib/community");
     expect(draft.body).toContain(license.hint);
+  });
+});
+
+describe("stored profiles", () => {
+  it("round-trips through the database payload", () => {
+    const profile = parseCommunityProfile(sparse);
+    expect(parseStoredProfile(serializeProfile(profile))).toEqual(profile);
+  });
+
+  it("keeps only what GitHub reported, so labels and hints can change later", () => {
+    const stored = JSON.parse(serializeProfile(parseCommunityProfile(sparse)));
+    expect(Object.keys(stored.items[0]).sort()).toEqual(["id", "present", "url"]);
+    expect(JSON.stringify(stored)).not.toContain("hint");
+  });
+
+  it("rejects payloads it can't trust", () => {
+    expect(parseStoredProfile("not json")).toBeNull();
+    expect(parseStoredProfile("null")).toBeNull();
+    expect(parseStoredProfile(JSON.stringify({ score: "28", items: [] }))).toBeNull();
+    // Saved before a checklist item existed: better to fetch again than to show a partial checklist.
+    const partial = JSON.parse(serializeProfile(parseCommunityProfile(sparse)));
+    partial.items.pop();
+    expect(parseStoredProfile(JSON.stringify(partial))).toBeNull();
+  });
+
+  it("never yields a link outside github.com, even from a tampered row", () => {
+    const tampered = JSON.parse(serializeProfile(parseCommunityProfile(sparse)));
+    tampered.items[1].url = "javascript:alert(1)";
+    expect(parseStoredProfile(JSON.stringify(tampered))?.items[1]?.url).toBeNull();
+  });
+});
+
+describe("refreshIntervalMs", () => {
+  const HOUR = 3_600_000;
+
+  it("defaults to a day", () => {
+    expect(refreshIntervalMs(undefined)).toBe(24 * HOUR);
+    expect(refreshIntervalMs("")).toBe(24 * HOUR);
+    expect(refreshIntervalMs("  ")).toBe(24 * HOUR);
+  });
+
+  it("takes hours, decimals included", () => {
+    expect(refreshIntervalMs("6")).toBe(6 * HOUR);
+    expect(refreshIntervalMs("0.5")).toBe(HOUR / 2);
+  });
+
+  it("treats 0 as off and nonsense as the default", () => {
+    expect(refreshIntervalMs("0")).toBeNull();
+    expect(refreshIntervalMs("soon")).toBe(24 * HOUR);
+    expect(refreshIntervalMs("-3")).toBe(24 * HOUR);
+  });
+});
+
+describe("isStale", () => {
+  const now = Date.parse("2026-11-02T12:00:00+00:00");
+  const DAY = 24 * 3_600_000;
+
+  it("is due when never fetched or unreadable", () => {
+    expect(isStale(undefined, now, DAY)).toBe(true);
+    expect(isStale("yesterday-ish", now, DAY)).toBe(true);
+  });
+
+  it("is due once the interval has passed", () => {
+    expect(isStale("2026-11-02T00:00:00+00:00", now, DAY)).toBe(false);
+    expect(isStale("2026-11-01T12:00:00+00:00", now, DAY)).toBe(true);
+    expect(isStale("2026-10-20T00:00:00+00:00", now, DAY)).toBe(true);
+  });
+});
+
+describe("formatAgo", () => {
+  const now = Date.parse("2026-11-02T12:00:00+00:00");
+
+  it("reads at a glance", () => {
+    expect(formatAgo("2026-11-02T11:59:40+00:00", now)).toBe("just now");
+    expect(formatAgo("2026-11-02T11:15:00+00:00", now)).toBe("45 min ago");
+    expect(formatAgo("2026-11-02T07:00:00+00:00", now)).toBe("5 h ago");
+    expect(formatAgo("2026-10-30T12:00:00+00:00", now)).toBe("3 days ago");
+    expect(formatAgo("garbage", now)).toBe("");
   });
 });

@@ -276,6 +276,41 @@ describe("application", () => {
     expect(saved.hasNotes).toBe(true);
     expect(createApplication(fx.env()).getRepository("alpha").notes).toBe("hello");
   });
+
+  it("persists GitHub community profiles by case-insensitive slug", () => {
+    fx.writeConfig();
+    const app = createApplication(fx.env());
+    expect(app.store.getCommunityProfile("Meddlin/GitLib")).toBeNull();
+    expect(app.store.listCommunityProfiles()).toEqual([]);
+
+    app.store.saveCommunityProfile("Meddlin/GitLib", '{"score":28}', "2026-11-01T00:00:00+00:00");
+    app.store.saveCommunityProfile("other/repo", '{"score":90}', "2026-11-01T01:00:00+00:00");
+    // A later fetch replaces the earlier one, whatever the slug's casing.
+    app.store.saveCommunityProfile("meddlin/gitlib", '{"score":43}', "2026-11-02T00:00:00+00:00");
+
+    const reopened = createApplication(fx.env());
+    expect(reopened.store.getCommunityProfile("MEDDLIN/gitlib")).toEqual({
+      slug: "meddlin/gitlib",
+      payload: '{"score":43}',
+      fetchedAt: "2026-11-02T00:00:00+00:00",
+    });
+    expect(reopened.store.listCommunityProfiles().map((profile) => profile.slug)).toEqual(["meddlin/gitlib", "other/repo"]);
+  });
+
+  it("adds the community table to a database created before it existed", () => {
+    fx.writeConfig();
+    const first = createApplication(fx.env());
+    first.store.saveCommunityProfile("a/b", "{}", "2026-11-01T00:00:00+00:00");
+    const { DatabaseSync } = process.getBuiltinModule("node:sqlite");
+    const db = new DatabaseSync(first.store.dbPath);
+    db.exec("DROP TABLE github_community_profiles");
+    db.close();
+
+    const upgraded = createApplication(fx.env());
+    expect(upgraded.store.listCommunityProfiles()).toEqual([]);
+    upgraded.store.saveCommunityProfile("a/b", "{}", "2026-11-02T00:00:00+00:00");
+    expect(upgraded.store.getCommunityProfile("a/b")?.fetchedAt).toBe("2026-11-02T00:00:00+00:00");
+  });
 });
 
 describe("technologyCategory", () => {
