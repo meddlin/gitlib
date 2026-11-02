@@ -505,3 +505,21 @@ describe("setOllamaConnection", () => {
     expect(() => pinned.setOllamaConnection({ mode: "local" })).toThrow(/GITLIB_OLLAMA_HOST/);
   });
 });
+
+describe("setCloneDirectory", () => {
+  it("defaults to ~/git, saves a directory inside a root and survives a restart", () => {
+    const env = fx.env();
+    const app = createApplication(env);
+    expect(app.config.cloneDir).toMatch(/git$/);
+    const inside = `${app.config.roots[0]}/clones`;
+    expect(app.setCloneDirectory(inside)).toBe(inside);
+    expect(loadConfig(env).cloneDir).toBe(inside);
+  });
+
+  it("rejects a directory outside every root, a relative path and an empty one", () => {
+    const app = createApplication(fx.env());
+    expect(() => app.setCloneDirectory("/definitely/not/a/root")).toThrow(/scanned root/);
+    expect(() => app.setCloneDirectory("relative/dir")).toThrow(/absolute/);
+    expect(() => app.setCloneDirectory("  ")).toThrow();
+  });
+});
