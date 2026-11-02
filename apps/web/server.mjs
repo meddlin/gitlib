@@ -55,12 +55,19 @@ const server = http.createServer(async (req, res) => {
 
     const url = new URL(req.url, `http://${req.headers.host ?? "localhost"}`);
     const hasBody = req.method !== "GET" && req.method !== "HEAD";
+    // Tells handlers (request.signal) when the browser went away before the reply finished, so a closed chat
+    // panel stops the model instead of leaving it generating for nobody.
+    const disconnected = new AbortController();
+    res.on("close", () => {
+      if (!res.writableFinished) disconnected.abort();
+    });
     const response = await app.fetch(
       new Request(url, {
         method: req.method,
         headers: req.headers,
         body: hasBody ? Readable.toWeb(req) : undefined,
         duplex: "half",
+        signal: disconnected.signal,
       }),
     );
 

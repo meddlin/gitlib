@@ -19,6 +19,10 @@ x-gitlib-env: &gitlib-env
   GITLIB_GITLAB_URL: ${GITLIB_GITLAB_URL:-}
   GITLIB_MEILI_HOST: http://meilisearch:7700
   GITLIB_MEILI_API_KEY: ${GITLIB_MEILI_API_KEY:-}
+  # Optional: the Ollama server behind the Ask panel (blank = http://127.0.0.1:11434, which is this container).
+  GITLIB_OLLAMA_HOST: ${GITLIB_OLLAMA_HOST:-}
+  GITLIB_OLLAMA_MODEL: ${GITLIB_OLLAMA_MODEL:-}
+  GITLIB_OLLAMA_NUM_CTX: ${GITLIB_OLLAMA_NUM_CTX:-}
 
 x-gitlib: &gitlib
   build: .

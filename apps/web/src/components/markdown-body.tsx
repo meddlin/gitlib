@@ -22,11 +22,26 @@ const MARKDOWN_COMPONENTS: Components = {
     ) : null,
 };
 
-/** Renders Markdown from a README or an issue body. */
-export function MarkdownBody({ children }: { children: string }) {
+// Text written by a model is shaped by whatever it was shown, including a hostile README, so it never loads an
+// image (the browser would fetch the address, which can carry the conversation out) and shows where a link goes.
+const UNTRUSTED_COMPONENTS: Components = {
+  ...MARKDOWN_COMPONENTS,
+  a: ({ href, children }) =>
+    isRemote(href) ? (
+      <a href={href} title={href} target="_blank" rel="noopener noreferrer nofollow">
+        {children}
+      </a>
+    ) : (
+      <span>{children}</span>
+    ),
+  img: ({ alt }) => (alt ? <span className="text-muted-foreground">[image: {alt}]</span> : null),
+};
+
+/** Renders Markdown from a README or an issue body; `untrusted` is for text a model wrote. */
+export function MarkdownBody({ children, untrusted = false }: { children: string; untrusted?: boolean }) {
   return (
     <div className="markdown">
-      <Markdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS} skipHtml>
+      <Markdown remarkPlugins={[remarkGfm]} components={untrusted ? UNTRUSTED_COMPONENTS : MARKDOWN_COMPONENTS} skipHtml>
         {children}
       </Markdown>
     </div>
