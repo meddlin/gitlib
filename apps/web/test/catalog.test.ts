@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  cloneFolderName,
+  cloneUrlOf,
   entriesForSource,
   matchesQuery,
   mergeCatalog,
@@ -196,5 +198,18 @@ describe("parseStoredListing", () => {
     expect(parseStoredListing("not json", "github.com")).toBeNull();
     expect(parseStoredListing("null", "github.com")).toBeNull();
     expect(parseStoredListing(JSON.stringify({ scope: "github.com", pages: [null] }), "github.com")).toBeNull();
+  });
+});
+
+describe("clone helpers", () => {
+  it("builds the clone URL from a landing page", () => {
+    expect(cloneUrlOf("https://github.com/me/app")).toBe("https://github.com/me/app.git");
+    expect(cloneUrlOf("https://gitlab.com/g/sub/app/")).toBe("https://gitlab.com/g/sub/app.git");
+  });
+
+  it("names the clone folder after the repo and refuses path tricks", () => {
+    expect(cloneFolderName("g/sub/app")).toBe("app");
+    expect(cloneFolderName("..")).toBeNull();
+    expect(cloneFolderName("")).toBeNull();
   });
 });

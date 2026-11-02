@@ -253,3 +253,26 @@ export function matchesQuery(entry: CatalogEntry, query: string | undefined): bo
   const haystack = `${entry.name} ${entry.fullName} ${entry.description}`.toLowerCase();
   return words.every((word) => haystack.includes(word));
 }
+
+/** The entry for a repo that only a hosting service has: listed (or named) by `provider`, with no local clone. */
+export function findRemoteOnly(
+  entries: readonly CatalogEntry[],
+  provider: RemoteProvider,
+  fullName: string,
+): CatalogEntry | null {
+  const target = fullName.toLowerCase();
+  return (
+    entries.find((entry) => entry.locals.length === 0 && entry[provider]?.fullName.toLowerCase() === target) ?? null
+  );
+}
+
+/** The HTTPS URL `git clone` takes for a repo's landing page. */
+export function cloneUrlOf(landingPageUrl: string): string {
+  return landingPageUrl.replace(/\/+$/, "").replace(/\.git$/i, "") + ".git";
+}
+
+/** The folder a clone gets: the repo's own name, which is the last segment of its full name. */
+export function cloneFolderName(fullName: string): string | null {
+  const name = fullName.split("/").filter(Boolean).at(-1)?.replace(/\.git$/i, "");
+  return name && name !== "." && name !== ".." && !/[\\:\0]/.test(name) ? name : null;
+}

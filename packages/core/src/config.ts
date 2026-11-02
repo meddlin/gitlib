@@ -4,6 +4,7 @@ import path from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { GitLibError } from "./errors.js";
 import { expandUser, resolvePath } from "./fsutil.js";
+import { defaultCloneDirectory, readCloneDirectory } from "./clone-directory.js";
 import { hostFor, readOllamaConnection } from "./ollama-connection.js";
 
 export const DEFAULT_ROOTS = ["~/git"] as const;
@@ -73,6 +74,8 @@ export interface AppConfig {
   /** gitlib's own planning data; kept apart from `dbPath` because it cannot be rebuilt by rescanning. */
   planningDbPath: string;
   roots: string[];
+  /** Where "Clone locally" puts repositories; chosen on the Settings page, `~/git` until then. */
+  cloneDir: string;
   vscodeCommand: string[];
   ignoreDirs: ReadonlySet<string>;
   search: SearchConfig;
@@ -234,6 +237,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
     dbPath,
     planningDbPath,
     roots: rootsRaw.map((item) => normalizeRoot(item, configPath)),
+    cloneDir: readCloneDirectory(appHome) ?? defaultCloneDirectory(),
     vscodeCommand: vscodeCommandRaw,
     ignoreDirs: new Set(ignoreDirsRaw),
     search: loadSearchConfig(data["search"], env, configPath),

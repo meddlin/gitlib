@@ -79,7 +79,11 @@ export function CatalogTable({
           {entries.map((entry) => {
             const local = entry.locals[0];
             const technologies = local ? (reposByPath.get(local)?.technologies ?? []) : [];
-            const external = entry.github?.url ?? entry.gitlab?.url;
+            const remote = entry.github
+              ? ({ provider: "github", link: entry.github } as const)
+              : entry.gitlab
+                ? ({ provider: "gitlab", link: entry.gitlab } as const)
+                : null;
             const flags = flagsOf(entry);
             return (
               <tr key={entry.id} data-testid="catalog-row" className="align-top">
@@ -92,15 +96,16 @@ export function CatalogTable({
                     >
                       {entry.name}
                     </Link>
-                  ) : (
-                    <a
-                      href={external}
-                      target="_blank"
-                      rel="noreferrer"
+                  ) : remote ? (
+                    <Link
+                      to="/remotes/$provider/$"
+                      params={{ provider: remote.provider, _splat: remote.link.fullName }}
                       className="block truncate font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
                     >
                       {entry.name}
-                    </a>
+                    </Link>
+                  ) : (
+                    <span className="block truncate font-medium">{entry.name}</span>
                   )}
                   <span className="block truncate font-mono text-xs text-muted-foreground" title={entry.fullName}>
                     {entry.fullName}

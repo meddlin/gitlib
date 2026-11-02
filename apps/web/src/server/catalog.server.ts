@@ -1,5 +1,12 @@
+import { execFile } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { promisify } from "node:util";
 import { classifyProvider, loadGitRemotes, selectPreferredRemote, utcNow } from "@gitlib/core";
 import {
+  cloneFolderName,
+  cloneUrlOf,
+  findRemoteOnly,
   mergeCatalog,
   parseLandingPage,
   parseStoredListing,
@@ -224,4 +231,45 @@ export async function refreshAllListings(): Promise<CatalogView> {
   cachedClones = undefined;
   await Promise.all(PROVIDERS.filter(isConfigured).map((provider) => startCheck(provider, true)));
   return buildCatalog();
+}
+
+export interface CloneResult {
+  /** relativePath of the new clone, for linking to its detail page. */
+  relativePath: string;
+}
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * Clones a repo that only a host has into the clone directory from Settings, named after the repo. The URL comes from the
+ * catalog, never from the caller, and git never prompts (a private repo needs a credential helper or SSH-free
+ * token setup already in place), so a failure comes back as a message instead of a hung request.
+ */
+export async function cloneRemoteRepo(provider: RemoteProvider, fullName: string): Promise<CloneResult> {
+  const entry = findRemoteOnly((await buildCatalog()).entries, provider, fullName);
+  const link = entry?.[provider];
+  if (!entry || !link) throw new Error("That repository is not on a host gitlib lists, or it is already cloned.");
+
+  const root = getApp().config.cloneDir;
+  const folder = cloneFolderName(link.fullName);
+  if (!folder) throw new Error("Could not work out a folder name for that repository.");
+  fs.mkdirSync(root, { recursive: true });
+  const destination = path.join(root, folder);
+  if (fs.existsSync(destination)) throw new Error(`${destination} already exists.`);
+
+  try {
+    await execFileAsync("git", ["clone", "--", cloneUrlOf(link.url), destination], {
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+      timeout: 10 * 60_000,
+    });
+  } catch (caught) {
+    const stderr = (caught as { stderr?: unknown }).stderr;
+    const detail = typeof stderr === "string" && stderr.trim() ? stderr.trim() : caught instanceof Error ? caught.message : "";
+    throw new Error(`git clone failed: ${detail}`);
+  }
+
+  cachedClones = undefined;
+  const repo = (await loadAndIndexRepositories(true)).find((candidate) => path.resolve(candidate.absolutePath) === path.resolve(destination));
+  if (!repo) throw new Error(`Cloned to ${destination}, but it is not under a scanned root.`);
+  return { relativePath: repo.relativePath };
 }

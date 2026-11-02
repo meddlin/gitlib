@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { buildChatSystemPrompt, ModelLane, OllamaBackend, type ChatBackend } from "./ai/index.js";
 import { DEFAULT_OLLAMA_HOST, loadConfig, type AppConfig, type Env, type OllamaConnectionMode } from "./config.js";
+import { normalizeCloneDirectory, writeCloneDirectory } from "./clone-directory.js";
 import {
   hostFor,
   normalizeOllamaHost,
@@ -153,6 +154,14 @@ export class GitLibApp {
     ollama.host = hostFor(connection);
     ollama.mode = ollama.host === DEFAULT_OLLAMA_HOST ? "local" : "server";
     if (!this.chatInjected && ollama.enabled) this.chatBackend = new OllamaBackend(ollama);
+  }
+
+  /** Remembers where "Clone locally" puts repositories; takes effect at once. Throws if it is outside every root. */
+  setCloneDirectory(input: string): string {
+    const directory = normalizeCloneDirectory(input, this.config.roots);
+    writeCloneDirectory(this.config.appHome, directory);
+    this.config.cloneDir = directory;
+    return directory;
   }
 
   refresh(): RepoRecord[] {
