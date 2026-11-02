@@ -131,7 +131,9 @@ gitlib planning backup                    # ~/.git-library/backups/planning-<tim
 gitlib planning backup /path/to/copy.db   # refuses to overwrite an existing file
 ```
 
-In Docker, `planning.db` sits in the `gitlib-data` volume with the rest of gitlib's data.
+`gitlib backup` covers the planning database together with everything else; see
+[Backup and restore](#backup-and-restore). In Docker, `planning.db` sits in the `gitlib-data` volume with the
+rest of gitlib's data.
 
 ## Web App
 
@@ -139,7 +141,7 @@ In Docker, `planning.db` sits in the `gitlib-data` volume with the rest of gitli
 `~/.git-library` data as the CLI (via `@gitlib/core`, on the server only):
 
 ```bash
-npm run web          # dev server at http://localhost:3000
+npm run web          # dev server at http://localhost:4000
 npm run build -w @gitlib/web && npm run preview -w @gitlib/web   # production build
 ```
 
@@ -173,83 +175,37 @@ npm run build -w @gitlib/web && npm run preview -w @gitlib/web   # production bu
 
 ## Run with Docker
 
-The web app ships with a `Dockerfile` and `docker-compose.yml`, so you can host it on a VM
-(for example on a Proxmox server). The container runs the production build of `apps/web`
-with a small Node server (`apps/web/server.mjs`) on port 3000.
-
-### 1. Prepare the VM
-
-Any Linux VM with Docker Engine and the Compose plugin works (e.g. Debian/Ubuntu on Proxmox):
+`docker-compose.yml` runs the production build of the web app plus Meilisearch for search. The same file
+works on a Mac with Docker Desktop and on a homelab VM; only `.env` differs.
 
 ```bash
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker "$USER"   # log out and back in afterwards
+cp .env.example .env               # set GITLIB_REPOS to the directory holding your git repos
+docker compose up -d --build       # http://localhost:4000
 ```
 
-### 2. Get the code and your repositories onto the VM
+The web app listens on **port 4000** (`GITLIB_PORT` to change it) and is published on `127.0.0.1` only, because it
+has **no login**. Set `GITLIB_BIND=0.0.0.0` to reach it over a trusted LAN, and keep it off the internet or behind
+an authenticating reverse proxy.
+
+- Your repos are mounted read-only at `/home/node/git`, the default scan root for the container user.
+- Config, notes, descriptions and planning data live in the `gitlib-data` volume (`GITLIB_HOME=/data`); the
+  search index lives in `meili-data` and is rebuilt automatically, so it is not backed up.
+- `docker compose down` keeps your data; `docker compose down -v` **deletes it**.
+- The `gitlib` CLI is in the image: `docker compose exec web gitlib scan`.
+
+### Backup and restore
 
 ```bash
-git clone <this-repo-url> gitlib && cd gitlib
+scripts/backup.sh                           # -> backups/gitlib-backup-<timestamp>.tar.gz, safe while running
+scripts/restore.sh backups/gitlib-backup-<timestamp>.tar.gz
 ```
 
-Gitlib only discovers repositories it can see on disk, so put the repos you want to browse in a
-single directory on the VM (clone them, `rsync` them from your workstation, or mount an NFS/SMB
-share from your NAS). Their remotes and detected technologies are read from the checkouts.
-
-### 3. Start it
-
-```bash
-GITLIB_REPOS=/srv/git docker compose up -d --build
-```
-
-Open `http://<vm-ip>:3000`. Instead of passing variables inline you can put them in a `.env`
-file next to `docker-compose.yml`:
-
-| Variable        | Default   | Meaning                                                    |
-| --------------- | --------- | ---------------------------------------------------------- |
-| `GITLIB_REPOS`  | `./repos` | Host directory with your git repos (mounted read-only)     |
-| `GITLIB_PORT`   | `3000`    | Host port the web app is published on                      |
-| `TZ`            | `UTC`     | Container time zone                                        |
-
-How it is wired up:
-
-- Your repos are mounted read-only at `/home/node/git` inside the container, which is the
-  default scan root (`~/git`) for the container user, so no config changes are needed. Use
-  **Rescan** in the UI after adding repos.
-- Config (`config.toml`) and the SQLite database (repo descriptions) live in the named volume
-  `gitlib-data`, mounted at `/data` (`GITLIB_HOME`). They survive restarts and rebuilds.
-  `docker compose down` keeps the volume; `docker compose down -v` deletes it.
-
-### Day-to-day
-
-```bash
-docker compose logs -f web          # follow logs
-docker compose ps                   # status (includes a health check)
-docker compose restart web
-git pull && docker compose up -d --build   # update to the latest version
-```
-
-Back up the data volume with:
-
-```bash
-docker run --rm -v gitlib_gitlib-data:/data -v "$PWD":/backup busybox \
-  tar czf /backup/gitlib-data.tgz -C /data .
-```
-
-(The volume is prefixed with the Compose project name, which defaults to the directory name;
-check `docker volume ls` if yours differs.)
-
-### Security note
-
-The web app has **no authentication**. Do not expose port 3000 to the internet. Keep it on your
-LAN/VPN, or put a reverse proxy with authentication in front of it (Caddy, Nginx Proxy Manager,
-Traefik, Authelia, …) and bind the port to localhost by changing the `ports` entry in
-`docker-compose.yml` to `"127.0.0.1:3000:3000"`. Anyone who can reach the app can read and change
-your planning issues as well as repo descriptions. The framework refuses cross-site browser requests to
-the app's server functions, but that is not a login.
-
-The CLI, TUI and VS Code / browser launchers are desktop features and are not part of the
-container.
+A backup holds `config.toml`, `gitlib.db` (notes, descriptions, favorites) and `planning.db`, with checksums.
+Archives are verified when written and again before a restore, and a restore first saves what it replaces.
+Restoring a local backup into the homelab instance is the intended way to promote data between them. The full
+procedure, scheduling, off-site copies, disaster recovery and troubleshooting are in
+**[`docs/runbook.md`](docs/runbook.md)**, which is also the install and setup guide for a local machine and a
+homelab VM.
 
 ## Current CLI Commands
 
@@ -264,6 +220,9 @@ gitlib open remote <repo>
 gitlib tui
 gitlib notes edit <repo>
 gitlib planning backup [path]
+gitlib backup create [dir] [--keep N]
+gitlib backup verify <archive>
+gitlib backup restore <archive> [--yes]
 ```
 
 Command summary:
@@ -280,6 +239,12 @@ Command summary:
 - `gitlib tui` launches the interactive terminal UI.
 - `gitlib notes edit <repo>` opens your configured editor to update repo notes.
 - `gitlib planning backup [path]` snapshots the planning database (see [Planning](#planning)).
+- `gitlib backup create [dir]` writes a verified archive of everything gitlib stores that cannot be rebuilt
+  (config, notes, descriptions, favorites, planning) to `dir` (default `$GITLIB_BACKUP_DIR`, else
+  `<gitlib home>/backups`); `--keep N` prunes older archives.
+- `gitlib backup verify <archive>` checks checksums, SQLite integrity and schema version without restoring.
+- `gitlib backup restore <archive>` describes the archive; add `--yes` to replace the current data (the old data
+  is saved first). Stop the web app before restoring. See [Backup and restore](#backup-and-restore).
 
 ## TUI Mode
 

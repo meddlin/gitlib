@@ -9,7 +9,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const clientDir = path.join(root, "dist", "client");
-const port = Number(process.env.PORT ?? 3000);
+const port = Number(process.env.PORT ?? 4000);
 const host = process.env.HOST ?? "0.0.0.0";
 
 const { default: app } = await import(pathToFileURL(path.join(root, "dist", "server", "server.js")).href);

@@ -1,7 +1,16 @@
+import path from "node:path";
 import {
   GitLibError,
   SearchUnavailableError,
+  backupFileName,
   createApplication,
+  createBackup,
+  getAppHome,
+  getBackupDir,
+  pruneBackups,
+  restoreBackup,
+  verifyBackup,
+  type BackupManifest,
   type Env,
   type GitLibApp,
   type SearchBackend,
@@ -41,7 +50,15 @@ type Invocation =
   | { name: "open-code"; repo: string }
   | { name: "open-remote"; repo: string }
   | { name: "notes-edit"; repo: string }
-  | { name: "planning-backup"; destination?: string };
+  | { name: "planning-backup"; destination?: string }
+  | { name: "backup-create"; directory?: string; keep?: number }
+  | { name: "backup-verify"; archive: string }
+  | { name: "backup-restore"; archive: string; yes?: boolean };
+
+type BackupInvocation = Extract<Invocation, { name: `backup-${string}` }>;
+
+const isBackupInvocation = (invocation: Invocation): invocation is BackupInvocation =>
+  invocation.name.startsWith("backup-");
 
 function parsePositiveInt(value: string): number {
   const parsed = Number(value);
@@ -150,11 +167,88 @@ function buildProgram(
     .argument("[path]", "file to write (default: <gitlib home>/backups/planning-<timestamp>.db)")
     .action((destination: string | undefined) => onInvoke({ name: "planning-backup", destination }));
 
+  const backup = program.command("backup").description("Back up and restore all gitlib data (config, notes, planning)");
+  backup
+    .command("create")
+    .description("Write a verified .tar.gz of config.toml, gitlib.db and planning.db")
+    .argument("[dir]", "directory to write into (default: $GITLIB_BACKUP_DIR, else <gitlib home>/backups)")
+    .option("--keep <n>", "afterwards delete all but the newest <n> backups in that directory", parsePositiveInt)
+    .action((directory: string | undefined, options: { keep?: number }) =>
+      onInvoke({ name: "backup-create", directory, keep: options.keep }),
+    );
+  backup
+    .command("verify")
+    .description("Check an archive's checksums, SQLite integrity and schema version without restoring it")
+    .argument("<archive>")
+    .action((archive: string) => onInvoke({ name: "backup-verify", archive }));
+  backup
+    .command("restore")
+    .description("Replace this gitlib's data with an archive (stop the web app first)")
+    .argument("<archive>")
+    .option("--yes", "actually restore; without it the archive is only verified and described")
+    .action((archive: string, options: { yes?: boolean }) =>
+      onInvoke({ name: "backup-restore", archive, yes: options.yes }),
+    );
+
   return program;
 }
 
+function describeManifest(manifest: BackupManifest): string[] {
+  const counts = Object.entries(manifest.summary).map(([key, value]) => `${value} ${key}`);
+  return [
+    `  created   ${manifest.createdAt} on ${manifest.hostname}${manifest.createdBy ? ` (${manifest.createdBy})` : ""}`,
+    `  files     ${manifest.files.map((file) => file.name).join(", ")}`,
+    ...(counts.length > 0 ? [`  contents  ${counts.join(", ")}`] : []),
+  ];
+}
+
+const formatBytes = (bytes: number): string => (bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KiB`);
+
+/** These work on the data files directly, so they must not go through `createApplication` (it creates them). */
+function runBackupCommand(
+  invocation: BackupInvocation,
+  env: Env,
+  print: (text: string) => void,
+): number {
+  const appHome = getAppHome(env);
+  switch (invocation.name) {
+    case "backup-create": {
+      const directory = path.resolve(invocation.directory ?? getBackupDir(env));
+      const result = createBackup(appHome, path.join(directory, backupFileName()), { createdBy: `gitlib ${VERSION}` });
+      print(`Backed up ${appHome} to ${result.path} (${formatBytes(result.bytes)}).`);
+      for (const line of describeManifest(result.manifest)) print(line);
+      if (invocation.keep !== undefined) {
+        const removed = pruneBackups(directory, invocation.keep);
+        if (removed.length > 0) print(`Removed ${removed.length} older backup${removed.length === 1 ? "" : "s"} (keeping ${invocation.keep}).`);
+      }
+      return 0;
+    }
+    case "backup-verify": {
+      const manifest = verifyBackup(invocation.archive);
+      print(`${invocation.archive} is a valid backup.`);
+      for (const line of describeManifest(manifest)) print(line);
+      return 0;
+    }
+    case "backup-restore": {
+      const manifest = verifyBackup(invocation.archive);
+      if (!invocation.yes) {
+        print(`${invocation.archive} is a valid backup:`);
+        for (const line of describeManifest(manifest)) print(line);
+        print(`\nRestoring would replace the data in ${appHome}. Stop the web app, then re-run with --yes.`);
+        return 1;
+      }
+      const result = restoreBackup(invocation.archive, appHome, { safetyDir: getBackupDir(env) });
+      print(`Restored ${result.restored.join(", ")} into ${appHome}.`);
+      for (const line of describeManifest(result.manifest)) print(line);
+      print(result.safetyBackup ? `The previous data was saved to ${result.safetyBackup}.` : "There was no existing data to save.");
+      print("The search index is derived data: restart the web app (or run `gitlib reindex`) to rebuild it.");
+      return 0;
+    }
+  }
+}
+
 async function execute(
-  invocation: Invocation,
+  invocation: Exclude<Invocation, BackupInvocation>,
   app: GitLibApp,
   env: Env,
   print: (text: string) => void,
@@ -278,6 +372,7 @@ export async function main(argv: readonly string[], io: CliIo = {}): Promise<num
   const env: Env = { ...process.env, ...io.env };
 
   try {
+    if (isBackupInvocation(invocation)) return runBackupCommand(invocation, env, print);
     const app = createApplication(env, io.system, io.searchBackend);
     const color = Boolean((stdout as { isTTY?: boolean }).isTTY) && !env["NO_COLOR"];
     return await execute(invocation, app, env, print, printError, color);
