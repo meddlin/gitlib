@@ -1,7 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { buildChatSystemPrompt, ModelLane, OllamaBackend, type ChatBackend } from "./ai/index.js";
-import { loadConfig, type AppConfig, type Env } from "./config.js";
+import { DEFAULT_OLLAMA_HOST, loadConfig, type AppConfig, type Env, type OllamaConnectionMode } from "./config.js";
+import {
+  hostFor,
+  normalizeOllamaHost,
+  OllamaConnectionError,
+  writeOllamaConnection,
+  type OllamaConnection,
+} from "./ollama-connection.js";
 import {
   checkDependabot,
   DependabotBusyError,
@@ -102,7 +109,12 @@ const DEPENDABOT_LEASE_MS = 15 * 60_000;
 export class GitLibApp {
   readonly search: RepoSearch;
   /** The language-model server behind the chat panel; null when `ollama.enabled = false`. */
-  readonly chat: ChatBackend | null;
+  get chat(): ChatBackend | null {
+    return this.chatBackend;
+  }
+  private chatBackend: ChatBackend | null;
+  /** True when a backend was handed in (tests), so changing the connection never replaces it. */
+  private readonly chatInjected: boolean;
   /** Where Dependabot pull requests come from; null when no GitHub token is set. */
   readonly dependabot: DependabotBackend | null;
   /** What the Dependabot checks found, kept in `gitlib.db`. */
@@ -120,9 +132,27 @@ export class GitLibApp {
     dependabotBackend: DependabotBackend | null = null,
   ) {
     this.search = new RepoSearch(config.search, searchBackend);
-    this.chat = chatBackend !== undefined ? chatBackend : config.ollama.enabled ? new OllamaBackend(config.ollama) : null;
+    this.chatInjected = chatBackend !== undefined;
+    this.chatBackend = chatBackend !== undefined ? chatBackend : config.ollama.enabled ? new OllamaBackend(config.ollama) : null;
     this.dependabot = dependabotBackend;
     this.dependabotStore = new DependabotStore(config.dbPath);
+  }
+
+  /**
+   * Points the chat panel (and the Dependabot notes) at Ollama on this machine or on another one, and remembers the
+   * choice in the app home. Takes effect at once; throws if GITLIB_OLLAMA_HOST pins the host.
+   */
+  setOllamaConnection(input: { mode: OllamaConnectionMode; host?: string | null }): void {
+    const ollama = this.config.ollama;
+    if (ollama.hostFromEnv) {
+      throw new OllamaConnectionError("GITLIB_OLLAMA_HOST is set, so the server can only be changed there.");
+    }
+    const connection: OllamaConnection =
+      input.mode === "local" ? { mode: "local", host: null } : { mode: "server", host: normalizeOllamaHost(input.host ?? "") };
+    writeOllamaConnection(this.config.appHome, connection);
+    ollama.host = hostFor(connection);
+    ollama.mode = ollama.host === DEFAULT_OLLAMA_HOST ? "local" : "server";
+    if (!this.chatInjected && ollama.enabled) this.chatBackend = new OllamaBackend(ollama);
   }
 
   refresh(): RepoRecord[] {

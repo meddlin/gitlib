@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Check } from "lucide-react";
+import { OllamaSettings } from "#/components/ollama-settings";
 import { cn } from "#/lib/utils";
 import { OPTIONAL_REPO_TABS, useRepoTabs } from "#/lib/repo-tabs";
 import { THEMES, useTheme, type ThemeId } from "#/lib/themes";
@@ -62,6 +63,8 @@ function Settings() {
           ))}
         </ul>
       </section>
+
+      <OllamaSettings />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import path from "node:path";
 import { parse as parseToml } from "smol-toml";
 import { GitLibError } from "./errors.js";
 import { expandUser, resolvePath } from "./fsutil.js";
+import { hostFor, readOllamaConnection } from "./ollama-connection.js";
 
 export const DEFAULT_ROOTS = ["~/git"] as const;
 export const DEFAULT_VSCODE_COMMAND = ["code", "--new-window"] as const;
@@ -31,6 +32,9 @@ export const DEFAULT_OLLAMA_NUM_CTX = 8192;
 export const MIN_OLLAMA_NUM_CTX = 512;
 export const MAX_OLLAMA_NUM_CTX = 262_144;
 
+/** "local" is Ollama on this machine; "server" is one at another address. */
+export type OllamaConnectionMode = "local" | "server";
+
 export class ConfigError extends GitLibError {}
 
 export type Env = Readonly<Record<string, string | undefined>>;
@@ -49,6 +53,10 @@ export interface OllamaConfig {
   /** When false, Ollama is never contacted and the chat panel says it is turned off. */
   enabled: boolean;
   host: string;
+  /** "local" when `host` is this machine's own Ollama, "server" otherwise. */
+  mode: OllamaConnectionMode;
+  /** True when GITLIB_OLLAMA_HOST sets the host, which the Settings page cannot override. */
+  hostFromEnv: boolean;
   /** Model used when the client does not pick one; null means the first model the server lists. */
   model: string | null;
   /**
@@ -140,7 +148,7 @@ function loadSearchConfig(raw: unknown, env: Env, configPath: string): SearchCon
   return { enabled, host, apiKey: apiKey || null, indexName };
 }
 
-function loadOllamaConfig(raw: unknown, env: Env, configPath: string): OllamaConfig {
+function loadOllamaConfig(raw: unknown, env: Env, configPath: string, appHome: string): OllamaConfig {
   if (raw !== undefined && (typeof raw !== "object" || raw === null || Array.isArray(raw))) {
     throw new ConfigError(`Config key 'ollama' must be a table in ${configPath}`);
   }
@@ -161,7 +169,12 @@ function loadOllamaConfig(raw: unknown, env: Env, configPath: string): OllamaCon
   }
 
   // The host is not checked here: a typo in it should break the chat panel, not every command.
-  const host = (env["GITLIB_OLLAMA_HOST"] || string("host") || DEFAULT_OLLAMA_HOST).trim().replace(/\/+$/, "");
+  // Precedence: the environment, then what the Settings page saved, then config.toml.
+  const hostFromEnv = Boolean(env["GITLIB_OLLAMA_HOST"]?.trim());
+  const saved = hostFromEnv ? null : readOllamaConnection(appHome);
+  const host = (
+    env["GITLIB_OLLAMA_HOST"] || (saved ? hostFor(saved) : string("host")) || DEFAULT_OLLAMA_HOST
+  ).trim().replace(/\/+$/, "");
   const model = (env["GITLIB_OLLAMA_MODEL"] || string("model") || "").trim();
 
   const fromEnv = env["GITLIB_OLLAMA_NUM_CTX"]?.trim();
@@ -178,7 +191,7 @@ function loadOllamaConfig(raw: unknown, env: Env, configPath: string): OllamaCon
     );
   }
 
-  return { enabled, host, model: model || null, numCtx };
+  return { enabled, host, mode: host === DEFAULT_OLLAMA_HOST ? "local" : "server", hostFromEnv, model: model || null, numCtx };
 }
 
 export function loadConfig(env: Env = process.env): AppConfig {
@@ -224,6 +237,6 @@ export function loadConfig(env: Env = process.env): AppConfig {
     vscodeCommand: vscodeCommandRaw,
     ignoreDirs: new Set(ignoreDirsRaw),
     search: loadSearchConfig(data["search"], env, configPath),
-    ollama: loadOllamaConfig(data["ollama"], env, configPath),
+    ollama: loadOllamaConfig(data["ollama"], env, configPath, appHome),
   };
 }

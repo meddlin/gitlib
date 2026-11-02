@@ -6,6 +6,10 @@ export interface ChatStatus {
   /** False when the config turns chat off; nothing else is filled in then. */
   enabled: boolean;
   host: string;
+  /** "local" is Ollama on this machine, "server" one at another address. */
+  mode: "local" | "server";
+  /** True when GITLIB_OLLAMA_HOST pins the host, so the Settings page cannot change it. */
+  hostFromEnv: boolean;
   numCtx: number;
   reachable: boolean;
   /** Installed models, sorted. */
@@ -19,8 +23,8 @@ export interface ChatStatus {
 /** Whether the model server answers and what it has installed; asked each time the chat panel opens. */
 export const getChatStatus = createServerFn({ method: "GET" }).handler(async (): Promise<ChatStatus> => {
   const app = getApp();
-  const { host, model, numCtx } = app.config.ollama;
-  const base = { host, numCtx, models: [], defaultModel: null };
+  const { host, model, numCtx, mode, hostFromEnv } = app.config.ollama;
+  const base = { host, mode, hostFromEnv, numCtx, models: [], defaultModel: null };
   if (!app.chat) return { ...base, enabled: false, reachable: false, error: null };
 
   try {
@@ -38,3 +42,24 @@ export const getChatStatus = createServerFn({ method: "GET" }).handler(async ():
     throw error;
   }
 });
+
+export interface OllamaConnectionInput {
+  mode: "local" | "server";
+  host?: string;
+}
+
+/** Saves where the chat panel finds Ollama; the result is the fresh status so Settings can show whether it answers. */
+export const saveOllamaConnection = createServerFn({ method: "POST" })
+  .validator((input: OllamaConnectionInput): OllamaConnectionInput => {
+    if (!input || (input.mode !== "local" && input.mode !== "server")) throw new Error("Choose local or server.");
+    return { mode: input.mode, host: typeof input.host === "string" ? input.host : undefined };
+  })
+  .handler(async ({ data }): Promise<{ ok: true } | { ok: false; error: string }> => {
+    try {
+      getApp().setOllamaConnection(data);
+      return { ok: true };
+    } catch (error) {
+      if (isGitLibError(error)) return { ok: false, error: error.message };
+      throw error;
+    }
+  });
