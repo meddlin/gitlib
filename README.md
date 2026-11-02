@@ -179,7 +179,7 @@ npm run build -w @gitlib/web && npm run preview -w @gitlib/web   # production bu
 works on a Mac with Docker Desktop and on a homelab VM; only `.env` differs.
 
 ```bash
-cp .env.example .env               # set GITLIB_REPOS to the directory holding your git repos
+cp .env.example .env               # optional: set GITLIB_REPOS if your repos are not in ~/git
 docker compose up -d --build       # http://localhost:4000
 ```
 
@@ -187,7 +187,9 @@ The web app listens on **port 4000** (`GITLIB_PORT` to change it) and is publish
 has **no login**. Set `GITLIB_BIND=0.0.0.0` to reach it over a trusted LAN, and keep it off the internet or behind
 an authenticating reverse proxy.
 
-- Your repos are mounted read-only at `/home/node/git`, the default scan root for the container user.
+- Your repos are mounted read-only at `/home/node/git`, the default scan root for the container user. The host
+  directory is `~/git` unless you set `GITLIB_REPOS` in `.env` (e.g. `GITLIB_REPOS=/Volumes/work/code`); run
+  `docker compose up -d` afterwards and press **Rescan**.
 - Config, notes, descriptions and planning data live in the `gitlib-data` volume (`GITLIB_HOME=/data`); the
   search index lives in `meili-data` and is rebuilt automatically, so it is not backed up.
 - `docker compose down` keeps your data; `docker compose down -v` **deletes it**.
