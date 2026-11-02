@@ -10,3 +10,4 @@ coverage/
 .nitro/
 .output/
 repos/
+backups/

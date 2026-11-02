@@ -200,6 +200,78 @@ describe("planning backup", () => {
   });
 });
 
+describe("backup", () => {
+  const backupsIn = (dir: string) => fs.readdirSync(dir).filter((name) => name.startsWith("gitlib-backup-"));
+
+  async function seededBackup(): Promise<string> {
+    fx.writeConfig();
+    fx.makeRepo("garden", { "package.json": "{}" });
+    expect((await fx.runCli(["scan"])).code).toBe(0);
+    createApplication(fx.env()).createProject("Homelab");
+    const dir = path.join(fx.base, "backups");
+    const created = await fx.runCli(["backup", "create", dir]);
+    expect(created.code, created.stderr).toBe(0);
+    return path.join(dir, backupsIn(dir)[0]!);
+  }
+
+  it("creates an archive, describes what is in it, and verifies it", async () => {
+    const archive = await seededBackup();
+
+    const verified = await fx.runCli(["backup", "verify", archive]);
+    expect(verified.code, verified.stderr).toBe(0);
+    expect(verified.stdout).toContain("is a valid backup");
+    expect(verified.stdout).toContain("1 projects");
+  });
+
+  it("defaults to <gitlib home>/backups and prunes with --keep", async () => {
+    fx.writeConfig();
+    await fx.runCli(["scan"]);
+    const dir = path.join(fx.appHome, "backups");
+    fs.mkdirSync(dir);
+    for (const stamp of ["20200101T000000Z", "20200102T000000Z"]) fs.writeFileSync(path.join(dir, `gitlib-backup-${stamp}.tar.gz`), "old");
+
+    const result = await fx.runCli(["backup", "create", "--keep", "2"]);
+
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout).toContain("Removed 1 older backup");
+    expect(backupsIn(dir)).toHaveLength(2);
+    expect(backupsIn(dir)).not.toContain("gitlib-backup-20200101T000000Z.tar.gz");
+  });
+
+  it("restore without --yes only describes the archive and changes nothing", async () => {
+    const archive = await seededBackup();
+    createApplication(fx.env()).createProject("Added later");
+
+    const result = await fx.runCli(["backup", "restore", archive]);
+
+    expect(result.code).toBe(1);
+    expect(result.stdout).toContain("re-run with --yes");
+    expect(createApplication(fx.env()).listProjects()).toHaveLength(2);
+  });
+
+  it("restores into a fresh home with --yes", async () => {
+    const archive = await seededBackup();
+    const other = path.join(fx.base, "prod-home");
+
+    const result = await fx.runCli(["backup", "restore", archive, "--yes"], { env: { GITLIB_HOME: other } });
+
+    expect(result.code, result.stderr).toBe(0);
+    expect(result.stdout).toContain("There was no existing data to save.");
+    expect(createApplication({ GITLIB_HOME: other }).listProjects().map((p) => p.name)).toEqual(["Homelab"]);
+  });
+
+  it("reports a clear error for a bad archive or an empty home", async () => {
+    const bad = path.join(fx.base, "bad.tar.gz");
+    fs.writeFileSync(bad, "nope");
+    const verify = await fx.runCli(["backup", "verify", bad]);
+    expect(verify.code).toBe(1);
+
+    const empty = await fx.runCli(["backup", "create"], { env: { GITLIB_HOME: path.join(fx.base, "nothing") } });
+    expect(empty.code).toBe(1);
+    expect(empty.stderr).toContain("Nothing to back up");
+  });
+});
+
 describe("argument parsing", () => {
   it("shows help and succeeds", async () => {
     const result = await fx.runCli(["--help"]);

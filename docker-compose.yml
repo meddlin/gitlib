@@ -1,20 +1,82 @@
+# The same file runs on your Mac (Docker Desktop) and on the homelab VM. Everything that differs between
+# the two is a variable in .env (copy .env.example); see docs/runbook.md.
+
+# Pinned so the volume names (gitlib_gitlib-data, ...) are the same on every machine and checkout directory.
+name: gitlib
+
+x-gitlib-env: &gitlib-env
+  TZ: ${TZ:-UTC}
+  # Optional: lets the Issues tab read private repos and avoids GitHub's low anonymous rate limit.
+  GITLIB_GITHUB_TOKEN: ${GITLIB_GITHUB_TOKEN:-}
+  # Optional: the contribution graph's "Local + GitHub & GitLab" mode.
+  GITLIB_GITLAB_USERNAME: ${GITLIB_GITLAB_USERNAME:-}
+  GITLIB_GITLAB_URL: ${GITLIB_GITLAB_URL:-}
+  GITLIB_MEILI_HOST: http://meilisearch:7700
+  GITLIB_MEILI_API_KEY: ${GITLIB_MEILI_API_KEY:-}
+
+x-gitlib: &gitlib
+  build: .
+  image: gitlib-web:latest
+  environment: *gitlib-env
+  volumes:
+    # Directory containing the git repositories you want to browse (mounted read-only).
+    - ${GITLIB_REPOS:-./repos}:/home/node/git:ro
+    # Config (config.toml) and the SQLite databases (notes, descriptions, planning); persists across rebuilds.
+    - gitlib-data:/data
+
 services:
   web:
-    build: .
-    image: gitlib-web:latest
+    <<: *gitlib
     container_name: gitlib-web
     restart: unless-stopped
     ports:
-      - "${GITLIB_PORT:-3000}:3000"
+      # Loopback by default: the app has no login. Set GITLIB_BIND=0.0.0.0 on the homelab VM to reach it over the LAN.
+      - "${GITLIB_BIND:-127.0.0.1}:${GITLIB_PORT:-4000}:4000"
+    depends_on:
+      meilisearch:
+        condition: service_healthy
+
+  # Full-text search. Its index is derived from the scan, so it is not part of backups: a fresh volume is
+  # rebuilt the first time the web app loads (or with `gitlib reindex`).
+  meilisearch:
+    image: getmeili/meilisearch:v1.56.0
+    container_name: gitlib-meilisearch
+    restart: unless-stopped
     environment:
-      TZ: ${TZ:-UTC}
-      # Optional: lets the Issues tab read private repos and avoids GitHub's low anonymous rate limit.
-      GITLIB_GITHUB_TOKEN: ${GITLIB_GITHUB_TOKEN:-}
+      # "development" needs no key; use MEILI_ENV=production with GITLIB_MEILI_API_KEY (16+ chars) on the homelab.
+      MEILI_ENV: ${MEILI_ENV:-development}
+      MEILI_MASTER_KEY: ${GITLIB_MEILI_API_KEY:-}
+      MEILI_NO_ANALYTICS: "true"
     volumes:
-      # Directory containing the git repositories you want to browse (mounted read-only).
+      - meili-data:/meili_data
+    ports:
+      # Loopback only, and not 7700, so it cannot collide with another project's Meilisearch. Only needed for
+      # `npm run web` outside Docker (set GITLIB_MEILI_HOST=http://127.0.0.1:7711) or for poking at the API.
+      - "127.0.0.1:${GITLIB_MEILI_PORT:-7711}:7700"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:7700/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 5s
+
+  # One-off CLI in the same image, for backup and restore (see scripts/backup.sh and scripts/restore.sh):
+  #   docker compose run --rm gitlib backup create
+  gitlib:
+    <<: *gitlib
+    profiles: [tools]
+    entrypoint: ["gitlib"]
+    restart: "no"
+    environment:
+      <<: *gitlib-env
+      # Backups and the pre-restore safety copy go to the host-visible /backups mount, not into the data volume.
+      GITLIB_BACKUP_DIR: /backups
+    volumes:
       - ${GITLIB_REPOS:-./repos}:/home/node/git:ro
-      # Config (config.toml) and the SQLite database (descriptions); persists across rebuilds.
       - gitlib-data:/data
+      # Where backup archives are written. A bind mount, so they land on the host (or an NFS share) in plain sight.
+      - ${GITLIB_BACKUPS:-./backups}:/backups
 
 volumes:
   gitlib-data:
+  meili-data:
