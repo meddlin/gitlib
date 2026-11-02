@@ -748,7 +748,8 @@ but **not against a real model**, so model quality, tool use and how much fits i
 | 5. A streaming route | `POST /api/chat`, NDJSON; `server.mjs` aborts the request when the browser disconnects; history is cut to fit before sending | none |
 | 6. A non-modal panel | `ui/sheet.tsx` over Radix Dialog with `modal={false}`, mounted in the root layout; from 1,024 px the page makes room for it | none |
 | 7. Safety defaults | Read-only; the system prompt is built only on the server (a `system` turn from the browser is refused); replies render without images | none |
-| 8. Ollama server settings, 9. one lane | Not built (server-side settings are the owner's; the lane belongs with the first scheduled job) | |
+| 8. Ollama server settings | Not built (server-side settings are the owner's) | |
+| 9. One lane | `ModelLane` (`packages/core/src/ai/lane.ts`): one model request at a time, a chat goes ahead of waiting background work and stops a running one, which the Dependabot notes (`docs/dependabot-watch.md`) use as the first background job. It is per process: a second process is not seen | Chat holds the lane for the whole reply; the lane forces itself free if a stopped background task does not let go within 10 s |
 
 Found while building, none caused by this feature:
 

@@ -33,6 +33,15 @@ The verdict never reads the PR body. Choices the plan left open:
   calendar-based, catches up from the stored runs instead of an in-memory timer, and takes the same lease as the CLI.
   The weakness that remains is the one the note names for any in-process timer: it does not run while the server or
   the machine is down. Host cron or a systemd timer calling `gitlib dependabot check` still works beside it.
+- Slice 5, the prose layer (item 8): notes for needs-work and review-first PRs only, from the verdict's facts, the title
+  and a markup-stripped 4,000-character slice of the description fetched on demand (never stored, never read by
+  `classify`), with the rules in code and the description in a block marked as data whose closing tags the text cannot
+  forge. Reply capped at 220 tokens, output cleaned (reasoning blocks, control characters, images) and shown through the
+  image-free renderer under a label that the verdict did not come from it. Notes live in `dependabot_explanations`
+  (`gitlib.db`) with the model name and a fingerprint of what they were written from. They run on `ModelLane`, one at a
+  time, behind chat (the chat route takes the lane; a note in progress is dropped and redone). Not built: the end of a
+  CI log (needs Actions: read), and a lane shared across processes. Not measured: time per note on the 3080 Ti, and no
+  real model has been run, only a fake behind the same interface.
 - Added to the plan: a lookup of which watched repositories the token can see, so a private repository the token
   cannot reach is reported as `NOT CHECKED` instead of looking like "no open PRs".
 - 11 (a) has **not** been run: the tests use fixtures shaped like the GraphQL response in "Verify with your own

@@ -610,6 +610,26 @@ describe("GitHubDependabotBackend", () => {
     await expect(backendFor(new Response("<html>", { status: 200 })).backend.fetchOwner("meddlin", [])).rejects.toThrow("not JSON");
   });
 
+  it("fetches one pull request's description on demand, and only for a real pull request", async () => {
+    const { backend, sent } = backendFor(
+      json({ data: { repository: { pullRequest: { body: "Bumps undici.\n\nRelease notes..." } } } }),
+      json({ data: { repository: { pullRequest: null } } }),
+      json({ data: { repository: { pullRequest: { body: null } } } }),
+    );
+
+    expect(await backend.fetchPullBody("meddlin/gitlib", 41)).toBe("Bumps undici.\n\nRelease notes...");
+    expect(sent[0]!.body.variables).toEqual({ owner: "meddlin", name: "gitlib", number: 41 });
+    expect(sent[0]!.headers["authorization"]).toBe(`Bearer ${TOKEN}`);
+    expect(await backend.fetchPullBody("meddlin/gitlib", 999)).toBeNull();
+    expect(await backend.fetchPullBody("meddlin/gitlib", 5)).toBeNull();
+
+    for (const bad of ["gitlib", "a/b/c", 'x") { y } (z/w']) {
+      await expect(backend.fetchPullBody(bad, 1)).rejects.toThrow(DependabotUnavailableError);
+    }
+    await expect(backend.fetchPullBody("meddlin/gitlib", 1.5)).rejects.toThrow(DependabotUnavailableError);
+    expect(sent).toHaveLength(3); // nothing was sent for the bad ones
+  });
+
   it("lets a caller's abort through unchanged", async () => {
     const controller = new AbortController();
     controller.abort();

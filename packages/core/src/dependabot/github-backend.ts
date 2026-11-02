@@ -341,6 +341,23 @@ export class GitHubDependabotBackend implements DependabotBackend {
     };
   }
 
+  async fetchPullBody(repo: string, number: number, signal?: AbortSignal): Promise<string | null> {
+    const [owner, name, ...rest] = repo.split("/");
+    if (!owner || !name || rest.length > 0 || !isValidOwner(owner) || !isValidRepoName(name) || !Number.isInteger(number)) {
+      throw new DependabotUnavailableError(`"${repo}#${number}" is not a pull request.`);
+    }
+    const { data } = requireData(
+      await this.post(
+        "query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { body } } }",
+        { owner, name, number },
+        signal,
+      ),
+    );
+    const repository = data["repository"];
+    const pullRequest = isRecord(repository) ? repository["pullRequest"] : null;
+    return isRecord(pullRequest) ? asString(pullRequest["body"]) : null;
+  }
+
   private async post(query: string, variables: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
     const timeout = AbortSignal.timeout(this.timeoutMs);
     let response: Response;

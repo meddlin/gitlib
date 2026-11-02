@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MAX_REPLY_TOKENS, createApplication, type ChatBackend, type ChatEvent, type ChatRequest, type GitLibApp } from "@gitlib/core";
+import { LlmUnavailableError, MAX_REPLY_TOKENS, createApplication, type ChatBackend, type ChatEvent, type ChatRequest, type GitLibApp } from "@gitlib/core";
 import { MAX_BODY_BYTES, readStreamEvents, type ChatStreamEvent } from "../src/lib/chat-protocol";
 import { handleChat } from "../src/server/chat.server";
 
@@ -263,5 +263,62 @@ describe("POST /api/chat", () => {
       await reader.cancel();
       await wasStopped;
     });
+  });
+});
+
+describe("the model lane", () => {
+  it("goes ahead of background model work and tells it to stop", async () => {
+    const app = makeApp();
+    const background = (await app.modelLane.acquire("batch"))!;
+
+    const response = await handleChat(post({ messages: [ask()] }), app);
+    const reading = events(response);
+    expect(background.signal.aborted).toBe(true);
+    expect(fake.calls).toHaveLength(0); // waiting for the lane, not talking to the model
+
+    background.release();
+    expect((await reading).map((event) => event.type)).toEqual(["start", "delta", "delta", "done"]);
+    expect(app.modelLane.busy).toBe(false);
+  });
+
+  it("serves two conversations one after the other", async () => {
+    const app = makeApp();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    fake.script = async function* () {
+      await gate;
+      yield { type: "delta", text: "ok" };
+      yield { type: "done", promptTokens: 1, replyTokens: 1, doneReason: "stop" };
+    };
+
+    const first = events(await handleChat(post({ messages: [ask("one")] }), app));
+    await vi.waitFor(() => expect(fake.calls).toHaveLength(1));
+    const second = events(await handleChat(post({ messages: [ask("two")] }), app));
+    await Promise.resolve();
+    expect(fake.calls).toHaveLength(1);
+
+    release();
+    await first;
+    await second;
+    expect(fake.calls).toHaveLength(2);
+    expect(app.modelLane.busy).toBe(false);
+  });
+
+  it("gives the lane back when the reply fails, and when the browser leaves while queued", async () => {
+    const app = makeApp();
+    fake.script = async function* () {
+      throw new LlmUnavailableError("Ollama is down");
+    };
+    const failed = await events(await handleChat(post({ messages: [ask()] }), app));
+    expect(failed.at(-1)).toEqual({ type: "error", message: "Ollama is down" });
+    expect(app.modelLane.busy).toBe(false);
+
+    const holder = (await app.modelLane.acquire("chat"))!;
+    const gone = new AbortController();
+    const queued = events(await handleChat(post({ messages: [ask()] }, { signal: gone.signal }), app));
+    gone.abort();
+    expect(await queued).toEqual([]);
+    holder.release();
+    expect(app.modelLane.busy).toBe(false);
   });
 });

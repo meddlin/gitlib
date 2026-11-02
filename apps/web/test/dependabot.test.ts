@@ -5,15 +5,19 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   DependabotUnavailableError,
+  LlmUnavailableError,
   createApplication,
   parsePullRequest,
+  type ChatBackend,
+  type ChatEvent,
+  type ChatRequest,
   type DependabotBackend,
   type DependabotPr,
   type GitLibApp,
   type OwnerPulls,
 } from "@gitlib/core";
 import { BUCKET_ORDER, ciLabel, codeSegments, describeSchedule, holderName, prKey, safeHref, snoozeUntil } from "../src/lib/dependabot";
-import { attempt, buildBadge, buildView, ensureScheduler, runCheck } from "../src/server/dependabot.server";
+import { attempt, buildBadge, buildView, ensureBackground, runCheck, stopBackground } from "../src/server/dependabot.server";
 
 // --- lib/dependabot.ts -------------------------------------------------------------------------------------------
 
@@ -102,7 +106,7 @@ function pr(overrides: Partial<DependabotPr> = {}): DependabotPr {
 class FakeBackend implements DependabotBackend {
   readonly label = "fake";
   calls = 0;
-  constructor(private readonly answer: Partial<OwnerPulls> | Error) {}
+  constructor(public answer: Partial<OwnerPulls> | Error) {}
   async fetchOwner(owner: string): Promise<OwnerPulls> {
     this.calls += 1;
     if (this.answer instanceof Error) throw this.answer;
@@ -117,7 +121,7 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(base, { recursive: true, force: true }));
 
 /** An app over a starred clone of meddlin/gitlib, with the given GitHub behind it (null = no token). */
-function makeApp(backend: DependabotBackend | null): GitLibApp {
+function makeApp(backend: DependabotBackend | null, chat: ChatBackend | null = null): GitLibApp {
   const home = path.join(base, "home");
   const clone = path.join(base, "git", "gitlib");
   if (!fs.existsSync(clone)) {
@@ -127,7 +131,7 @@ function makeApp(backend: DependabotBackend | null): GitLibApp {
     fs.mkdirSync(home);
     fs.writeFileSync(path.join(home, "config.toml"), `roots = ["${path.join(base, "git")}"]\n\n[search]\nenabled = false\n`);
   }
-  const app = createApplication({ GITLIB_HOME: home }, undefined, null, null, backend);
+  const app = createApplication({ GITLIB_HOME: home }, undefined, null, chat, backend);
   app.refresh();
   app.saveRepositoryFavorite("gitlib", true);
   return app;
@@ -272,17 +276,97 @@ describe("the schedule on the page", () => {
     }
   });
 
-  it("starts one scheduler per server, however often it is asked", () => {
-    const shared = globalThis as { __gitlibDependabot?: { scheduler?: { stop(): void; started: boolean } } };
-    delete shared.__gitlibDependabot;
+  it("starts one scheduler and one note writer per server, however often it is asked", () => {
+    stopBackground();
     try {
       const app = makeApp(null);
-      const first = ensureScheduler(app);
-      expect(first.started).toBe(true);
-      expect(ensureScheduler(app)).toBe(first);
+      const first = ensureBackground(app);
+      expect(first.scheduler.started).toBe(true);
+      expect(first.explainer.started).toBe(true);
+      const again = ensureBackground(app);
+      expect(again.scheduler).toBe(first.scheduler);
+      expect(again.explainer).toBe(first.explainer);
     } finally {
-      shared.__gitlibDependabot?.scheduler?.stop();
-      delete shared.__gitlibDependabot;
+      stopBackground();
     }
+  });
+});
+
+class FakeChat implements ChatBackend {
+  readonly label = "fake-ollama";
+  numCtx = 8192;
+  failWith: Error | null = null;
+  async listModels() {
+    return ["qwen3:8b"];
+  }
+  async *chat(request: ChatRequest): AsyncGenerator<ChatEvent> {
+    if (this.failWith) throw this.failWith;
+    void request;
+    yield { type: "delta", text: "Behind the base branch; a rebase should fix it." };
+    yield { type: "done", promptTokens: 1, replyTokens: 1, doneReason: "stop" };
+  }
+}
+
+describe("notes on the page", () => {
+  const behind = (number: number, extra: Partial<DependabotPr> = {}) => pr({ number, mergeStateStatus: "BEHIND", ...extra });
+
+  it("shows a current note beside its pull request, and counts what is still to write", async () => {
+    const backend = new FakeBackend({ prs: [pr({ number: 1 }), behind(2)] });
+    const app = makeApp(backend, new FakeChat());
+    await runCheck(app);
+
+    expect(buildView(new Date(), app).explainer).toEqual({ enabled: true, active: false, pending: 1, lastError: null });
+    expect(buildView(new Date(), app).notes).toEqual({});
+
+    const explainer = app.createDependabotExplainer();
+    await explainer.drain(new Date());
+    const view = buildView(new Date(), app, null, explainer);
+    expect(view.notes).toEqual({ "meddlin/gitlib#2": { text: "Behind the base branch; a rebase should fix it.", model: "qwen3:8b", createdAt: expect.any(String) } });
+    expect(view.explainer.pending).toBe(0);
+    // The ready PR has no note, and the verdicts are exactly what the check found.
+    expect(view.items.map((item) => [item.pr.number, item.bucket])).toEqual([
+      [1, "ready"],
+      [2, "needs-work"],
+    ]);
+  });
+
+  it("hides a note whose facts have changed until it has been written again", async () => {
+    const backend = new FakeBackend({ prs: [behind(2)] });
+    const app = makeApp(backend, new FakeChat());
+    await runCheck(app);
+    await app.createDependabotExplainer().drain(new Date());
+    expect(Object.keys(buildView(new Date(), app).notes)).toEqual(["meddlin/gitlib#2"]);
+
+    backend.answer = { prs: [pr({ number: 2, mergeable: "CONFLICTING" })] };
+    await runCheck(app);
+    const view = buildView(new Date(), app);
+    expect(view.notes).toEqual({});
+    expect(view.explainer.pending).toBe(1);
+  });
+
+  it("does not show notes of pull requests that were put aside", async () => {
+    const app = makeApp(new FakeBackend({ prs: [behind(2)] }), new FakeChat());
+    await runCheck(app);
+    await app.createDependabotExplainer().drain(new Date());
+    app.dismissDependabotPr("meddlin/gitlib", 2);
+    const view = buildView(new Date(), app);
+    expect(view.notes).toEqual({});
+    expect(view.explainer.pending).toBe(0);
+  });
+
+  it("has nothing to write and nothing pending without a model server", async () => {
+    const app = makeApp(new FakeBackend({ prs: [behind(2)] }));
+    await runCheck(app);
+    expect(buildView(new Date(), app).explainer).toEqual({ enabled: false, active: false, pending: 0, lastError: null });
+  });
+
+  it("says why the notes are paused when the model server fails", async () => {
+    const chat = new FakeChat();
+    chat.failWith = new LlmUnavailableError("Cannot reach Ollama at fake-ollama: ECONNREFUSED");
+    const app = makeApp(new FakeBackend({ prs: [behind(2)] }), chat);
+    await runCheck(app);
+    const explainer = app.createDependabotExplainer();
+    await explainer.drain(new Date());
+    expect(buildView(new Date(), app, null, explainer).explainer).toMatchObject({ pending: 1, lastError: "Cannot reach Ollama at fake-ollama: ECONNREFUSED" });
   });
 });

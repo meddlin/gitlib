@@ -1,6 +1,7 @@
 export * from "./check.js";
 export * from "./classify.js";
 export * from "./dismissals.js";
+export * from "./explain.js";
 export * from "./github-backend.js";
 export * from "./metadata.js";
 export * from "./schedule.js";
