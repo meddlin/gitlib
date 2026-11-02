@@ -4,6 +4,7 @@ import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { GitLibError } from "../errors.js";
 import { MIGRATIONS, migrate, schemaVersion, type Migration } from "./migrations.js";
 import type {
+  DependabotDismissal,
   IssueStatus,
   LocalIssue,
   LocalIssueChanges,
@@ -287,6 +288,40 @@ export class PlanningStore {
       if (Number(changes) > 0) db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(now, id);
       return this.requireProject(db, id);
     });
+  }
+
+  /** Puts a Dependabot PR aside (or changes how long). `repo` is `owner/repo`, in any case. */
+  dismissDependabotPr(repo: string, number: number, snoozedUntil: string | null, now: string): DependabotDismissal {
+    const entry: DependabotDismissal = { repo: repo.toLowerCase(), number, snoozedUntil, createdAt: now };
+    this.transaction(
+      (db) =>
+        void db
+          .prepare(
+            `INSERT INTO dependabot_dismissals (repo, number, snoozed_until, created_at) VALUES (?, ?, ?, ?)
+             ON CONFLICT(repo, number) DO UPDATE SET snoozed_until = excluded.snoozed_until, created_at = excluded.created_at`,
+          )
+          .run(entry.repo, number, snoozedUntil, now),
+    );
+    return entry;
+  }
+
+  /** Brings a dismissed Dependabot PR back. Does nothing if it was not dismissed. */
+  restoreDependabotPr(repo: string, number: number): void {
+    this.transaction((db) => void db.prepare("DELETE FROM dependabot_dismissals WHERE repo = ? AND number = ?").run(repo.toLowerCase(), number));
+  }
+
+  /** Every dismissal, including snoozes that have ended; callers compare `snoozedUntil` with the time. */
+  listDependabotDismissals(): DependabotDismissal[] {
+    return this.withConnection((db) =>
+      (
+        db.prepare("SELECT repo, number, snoozed_until, created_at FROM dependabot_dismissals ORDER BY repo, number").all() as unknown as {
+          repo: string;
+          number: number;
+          snoozed_until: string | null;
+          created_at: string;
+        }[]
+      ).map((row) => ({ repo: row.repo, number: Number(row.number), snoozedUntil: row.snoozed_until, createdAt: row.created_at })),
+    );
   }
 
   /**

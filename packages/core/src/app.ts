@@ -4,11 +4,17 @@ import { buildChatSystemPrompt, OllamaBackend, type ChatBackend } from "./ai/ind
 import { loadConfig, type AppConfig, type Env } from "./config.js";
 import {
   checkDependabot,
+  DependabotBusyError,
+  DependabotStore,
   DependabotUnavailableError,
   GitHubDependabotBackend,
+  isValidOwner,
+  isValidRepoName,
   resolveGitHubToken,
   type DependabotBackend,
   type DependabotReport,
+  type RunTrigger,
+  type StoredRun,
 } from "./dependabot/index.js";
 import { discoverRepos } from "./discovery.js";
 import { GitLibError } from "./errors.js";
@@ -16,6 +22,7 @@ import type { DiscoveredRepo, RemoteTarget, RepoDetails, RepoRecord } from "./mo
 import {
   LocalIssueNotFoundError,
   PlanningStore,
+  type DependabotDismissal,
   normalizeIssueBody,
   normalizeIssueTitle,
   normalizeProjectName,
@@ -85,12 +92,17 @@ export interface SearchOptions extends Omit<FilterOptions, "search"> {
 
 export const DEFAULT_SEARCH_LIMIT = 200;
 
+/** A Dependabot check is a few requests per owner; this is far longer than one takes, and bounds a crashed holder. */
+const DEPENDABOT_LEASE_MS = 15 * 60_000;
+
 export class GitLibApp {
   readonly search: RepoSearch;
   /** The language-model server behind the chat panel; null when `ollama.enabled = false`. */
   readonly chat: ChatBackend | null;
   /** Where Dependabot pull requests come from; null when no GitHub token is set. */
   readonly dependabot: DependabotBackend | null;
+  /** What the Dependabot checks found, kept in `gitlib.db`. */
+  readonly dependabotStore: DependabotStore;
 
   constructor(
     readonly config: AppConfig,
@@ -104,6 +116,7 @@ export class GitLibApp {
     this.search = new RepoSearch(config.search, searchBackend);
     this.chat = chatBackend !== undefined ? chatBackend : config.ollama.enabled ? new OllamaBackend(config.ollama) : null;
     this.dependabot = dependabotBackend;
+    this.dependabotStore = new DependabotStore(config.dbPath);
   }
 
   refresh(): RepoRecord[] {
@@ -219,6 +232,55 @@ export class GitLibApp {
       );
     }
     return checkDependabot({ repositories: this.loadRepositories(), backend: this.dependabot, system: this.system, ...options });
+  }
+
+  /**
+   * Like `checkDependabot`, but takes the lock that keeps two checks (CLI, web button, schedule) from running at
+   * once and saves the result as the newest run. Throws `DependabotBusyError` when another check holds the lock.
+   */
+  async runDependabotCheck(options: { trigger: RunTrigger; signal?: AbortSignal; now?: Date }): Promise<StoredRun> {
+    const startedAt = options.now ?? new Date();
+    const holder = `${options.trigger}:${process.pid}`;
+    const lease = this.dependabotStore.acquireLease(holder, startedAt, DEPENDABOT_LEASE_MS);
+    if (!lease.acquired) {
+      throw new DependabotBusyError(
+        `A Dependabot check is already running (started ${lease.heldBy.takenAt} by ${lease.heldBy.holder.split(":")[0]}).`,
+      );
+    }
+    try {
+      const report = await this.checkDependabot({ signal: options.signal, now: startedAt });
+      return this.dependabotStore.saveRun(report, {
+        trigger: options.trigger,
+        startedAt: startedAt.toISOString(),
+        finishedAt: new Date().toISOString(),
+      });
+    } finally {
+      this.dependabotStore.releaseLease(holder);
+    }
+  }
+
+  /** The newest saved Dependabot check, or null if none has run. */
+  latestDependabotRun(): StoredRun | null {
+    return this.dependabotStore.latestRun();
+  }
+
+  /** Puts a Dependabot PR aside until `until` (an ISO time), or until it closes when `until` is null. */
+  dismissDependabotPr(repo: string, number: number, until: string | null = null): DependabotDismissal {
+    const [owner, name, ...rest] = repo.split("/");
+    if (!owner || !name || rest.length > 0 || !isValidOwner(owner) || !isValidRepoName(name)) {
+      throw new GitLibError(`"${repo}" is not a GitHub repository (expected owner/repo).`);
+    }
+    if (!Number.isInteger(number) || number < 1) throw new GitLibError(`"${number}" is not a pull request number.`);
+    if (until !== null && Number.isNaN(Date.parse(until))) throw new GitLibError(`"${until}" is not a date.`);
+    return this.planning.dismissDependabotPr(repo, number, until === null ? null : new Date(until).toISOString(), utcNow());
+  }
+
+  restoreDependabotPr(repo: string, number: number): void {
+    this.planning.restoreDependabotPr(repo, number);
+  }
+
+  listDependabotDismissals(): DependabotDismissal[] {
+    return this.planning.listDependabotDismissals();
   }
 
   listRepositories(options: FilterOptions & { refresh?: boolean } = {}): RepoRecord[] {

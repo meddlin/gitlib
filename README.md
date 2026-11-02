@@ -155,15 +155,18 @@ reasonable start; check with `ollama ps` on that machine that the model is fully
 `gitlib dependabot check` reports which open [Dependabot](https://docs.github.com/code-security/dependabot) pull
 requests on your **starred** repositories can be merged and which need work. "Starred" is the Star toggle in gitlib
 (`repo_favorites`), not GitHub stars, and only favorites with a github.com remote can be watched; the report says
-how many were skipped and why. It is report-only: nothing is written to GitHub or to gitlib's database, no model is
-involved, and the verdict comes only from fields GitHub returns (never from the PR text, which quotes third-party
-release notes). The research and the reasoning behind it are in
-[`docs/dependabot-watch.md`](docs/dependabot-watch.md).
+how many were skipped and why. Nothing is ever written to GitHub, and the verdict comes only from fields GitHub
+returns (never from the PR text, which quotes third-party release notes). The research and the reasoning behind it
+are in [`docs/dependabot-watch.md`](docs/dependabot-watch.md).
 
 ```bash
 export GITLIB_GITHUB_TOKEN=...      # or GITHUB_TOKEN; GitHub's GraphQL API does not answer without one
-gitlib dependabot check             # grouped by bucket, with reasons and suggested actions
+gitlib dependabot check             # asks GitHub, saves the result, prints it grouped by bucket
 gitlib dependabot check --json      # the same, machine-readable
+gitlib dependabot check --no-save   # print only; nothing is stored and no lock is taken
+gitlib dependabot show [--json]     # the newest saved check, without contacting GitHub
+gitlib dependabot dismiss meddlin/gitlib#41 [--until 2026-12-01]   # put a PR aside
+gitlib dependabot restore meddlin/gitlib#41
 ```
 
 | Bucket | Meaning |
@@ -179,11 +182,20 @@ PRs, plus one small lookup that tells which watched repositories your token cann
 few points of the 5,000 an hour; the report prints the actual cost. Anything it could not check is listed under
 `NOT CHECKED` or `INCOMPLETE` rather than left out, and the command exits with status 1 if a whole owner failed.
 
+**Saved runs.** Each check is stored in `gitlib.db` (`dependabot_runs`, `dependabot_findings`; the newest 60 runs
+are kept) so the findings can be read offline and compared over time; they are derived from GitHub and can be fetched
+again. If one owner cannot be asked (network, rate limit), the last findings for its repositories are kept, marked
+`last seen <time>`, and the run is flagged `NOT CHECKED`, so a blip does not empty the list. A lock row in the same
+database stops two checks (this command, the web page, a schedule) from running at once; it lapses after 15 minutes
+if the holder crashed. **Putting a PR aside** is your decision, not derived data, so it is stored in `planning.db`
+(and covered by `gitlib backup`): `dismiss` hides it until it closes or until the date you give, and reports leave it
+out while counting it under `Put aside`.
+
 **CI unknown.** A PR whose check results GitHub did not return is shown as `CI unknown` with the reason, filed under
 *Review first*, and never as ready. GitHub's token guide lists the Checks API among the things fine-grained tokens
 cannot do, and whether GraphQL `statusCheckRollup` works with one is undocumented, so with a fine-grained token you
 may see `CI unknown` on every PR. [`docs/dependabot-watch.md`](docs/dependabot-watch.md#verify-with-your-own-token)
-has the commands that settle it. Still to come: storing findings, a web page, a schedule and notifications.
+has the commands that settle it.
 
 ## Planning
 
@@ -324,7 +336,10 @@ gitlib open code <repo>
 gitlib open remote <repo>
 gitlib tui
 gitlib notes edit <repo>
-gitlib dependabot check [--json]
+gitlib dependabot check [--json] [--no-save]
+gitlib dependabot show [--json]
+gitlib dependabot dismiss <owner/repo#number> [--until DATE]
+gitlib dependabot restore <owner/repo#number>
 gitlib planning backup [path]
 gitlib backup create [dir] [--keep N]
 gitlib backup verify <archive>
@@ -344,8 +359,8 @@ Command summary:
 - `gitlib open remote <repo>` opens the preferred configured remote in your browser.
 - `gitlib tui` launches the interactive terminal UI.
 - `gitlib notes edit <repo>` opens your configured editor to update repo notes.
-- `gitlib dependabot check [--json]` reports which Dependabot PRs on starred repositories can be merged (see
-  [Dependabot watch](#dependabot-watch)).
+- `gitlib dependabot check|show|dismiss|restore` reports which Dependabot PRs on starred repositories can be merged,
+  shows the last saved report, and puts PRs aside (see [Dependabot watch](#dependabot-watch)).
 - `gitlib planning backup [path]` snapshots the planning database (see [Planning](#planning)).
 - `gitlib backup create [dir]` writes a verified archive of everything gitlib stores that cannot be rebuilt
   (config, notes, descriptions, favorites, planning) to `dir` (default `$GITLIB_BACKUP_DIR`, else

@@ -67,6 +67,21 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX local_issues_by_project ON local_issues (project_id);
     `,
   },
+  {
+    version: 4,
+    name: "dependabot dismissals",
+    sql: `
+      -- A Dependabot PR the user has put aside. The findings themselves are derived from GitHub and live in
+      -- gitlib.db; this is the user's decision, which cannot be derived. repo is the lowercased owner/repo.
+      CREATE TABLE dependabot_dismissals (
+        repo TEXT NOT NULL,
+        number INTEGER NOT NULL,
+        snoozed_until TEXT,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (repo, number)
+      );
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

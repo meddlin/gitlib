@@ -4,7 +4,7 @@ Status: **research, with a proposed plan** (2026-11-02). Nothing is decided. The
 record what the primary sources say; "Fit with gitlib" is read from this repository's code and "Recommendation" is the
 author's proposal, so neither is sourced the way the rest is.
 
-**Built so far** (2026-11-02): the report-only slice, Recommendation items 1, 2, 4 and 11 (b) and (c) without storage:
+**Built so far** (2026-11-02): slice 1, the report, Recommendation items 1, 2, 4 and 11 (b) and (c):
 `gitlib dependabot check [--json]` (README, "Dependabot watch"), backed by `packages/core/src/dependabot/` (a pure
 `classify`, a GraphQL fetch behind a `DependabotBackend` interface with a fake in the tests, and `checkDependabot`).
 The verdict never reads the PR body. Choices the plan left open:
@@ -15,8 +15,13 @@ The verdict never reads the PR body. Choices the plan left open:
   that is required, a `security` label, extra commits, a major or unstated update type, or an unrecognised value from
   GitHub are review first.
 - Not built: the "Maintainer changes" phrase and Dependabot-alert matching (both need the body or the alerts API;
-  the `security` label stands in), `isRequired` per check, the retry of `UNKNOWN` mergeability, storage (item 7),
-  the web page and badge (11 d), the lease and schedule (items 5 and 6), and the LLM prose layer (item 8).
+  the `security` label stands in), `isRequired` per check, and the retry of `UNKNOWN` mergeability.
+- Slice 2, storage (item 7 and the lease of item 6): `dependabot_runs` and `dependabot_findings` in `gitlib.db`
+  (newest 60 runs), a one-row lease table taken under `BEGIN IMMEDIATE` with a 5 s busy timeout and a 15 minute expiry,
+  and dismiss/snooze in `planning.db` (migration 4, since it is the user's decision). `gitlib dependabot check` saves
+  by default; `show`, `dismiss` and `restore` were added. Findings of an owner that could not be asked are carried
+  forward from the previous run with their original time, which is the "partial failure per PR" of "Where the
+  existing scheduler falls short", point 4.
 - Added to the plan: a lookup of which watched repositories the token can see, so a private repository the token
   cannot reach is reported as `NOT CHECKED` instead of looking like "no open PRs".
 - 11 (a) has **not** been run: the tests use fixtures shaped like the GraphQL response in "Verify with your own

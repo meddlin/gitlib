@@ -1,9 +1,11 @@
 import {
   BUCKETS,
   renderSegments,
+  splitDismissed,
   type Bucket,
   type CiState,
   type ClassifiedPr,
+  type DependabotDismissal,
   type DependabotReport,
   type RepoRecord,
   type SearchField,
@@ -135,8 +137,24 @@ function ciLabel(ci: CiState): string {
   }
 }
 
-function renderPullRequest({ pr, reasons, actions }: ClassifiedPr): string[] {
+/** A report as `check` produces it, or as the store gives it back (then each PR says when GitHub was last asked). */
+export type ReportLike = Omit<DependabotReport, "items"> & { items: (ClassifiedPr & { observedAt?: string })[] };
+
+export interface DependabotRenderOptions {
+  color?: boolean;
+  /** PRs the user put aside are left out of the buckets and counted instead. */
+  dismissals?: readonly DependabotDismissal[];
+  now?: Date;
+  /** Lines printed before the report, e.g. which stored run this is. */
+  header?: string[];
+  /** Lines printed after it. */
+  footer?: string[];
+}
+
+function renderPullRequest({ pr, reasons, actions, observedAt }: ClassifiedPr & { observedAt?: string }, checkedAt: string): string[] {
   const facts = [pr.ecosystem, pr.updateType === "unknown" ? "update type unknown" : `${pr.updateType} update`, ciLabel(pr.ci)];
+  // A finding carried over from an earlier check says so, because GitHub could not be asked this time.
+  if (observedAt && observedAt !== checkedAt) facts.push(`last seen ${observedAt}`);
   return [
     `  ${pr.repo}#${pr.number}  ${pr.title}`,
     `    ${facts.filter(Boolean).join(" | ")}`,
@@ -148,28 +166,32 @@ function renderPullRequest({ pr, reasons, actions }: ClassifiedPr): string[] {
 
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
 
-/** The text report of `dependabot check`: PRs grouped by bucket, then everything that was not or could not be checked. */
-export function renderDependabotReport(report: DependabotReport, color = false): string {
-  const bold = (text: string) => (color ? `\u001b[1m${text}\u001b[22m` : text);
-  const lines: string[] = [];
+/** The text report of `dependabot check` and `dependabot show`: PRs grouped by bucket, then everything not checked. */
+export function renderDependabotReport(report: ReportLike, options: DependabotRenderOptions = {}): string {
+  const bold = (text: string) => (options.color ? `\u001b[1m${text}\u001b[22m` : text);
+  const { active: items, dismissed } = splitDismissed(report.items, options.dismissals ?? [], options.now ?? new Date());
+  const lines: string[] = [...(options.header ?? [])];
   const checked = report.watched.filter((repo) => repo.status === "checked");
 
-  const counts = BUCKETS.map((bucket) => `${report.items.filter((item) => item.bucket === bucket).length} ${BUCKET_TITLES[bucket].toLowerCase()}`);
+  const counts = BUCKETS.map((bucket) => `${items.filter((item) => item.bucket === bucket).length} ${BUCKET_TITLES[bucket].toLowerCase()}`);
   lines.push(
     `Dependabot pull requests on ${plural(report.watched.length, "starred repository", "starred repositories")} (checked ${report.checkedAt})`,
   );
-  lines.push(report.items.length > 0 ? counts.join(", ") : "No open Dependabot pull requests.");
+  lines.push(items.length > 0 ? counts.join(", ") : "No open Dependabot pull requests.");
 
   for (const bucket of BUCKETS) {
-    const items = report.items.filter((item) => item.bucket === bucket);
-    if (items.length === 0) continue;
-    lines.push("", bold(`${BUCKET_TITLES[bucket].toUpperCase()} (${items.length})`));
-    for (const item of items) lines.push(...renderPullRequest(item));
+    const inBucket = items.filter((item) => item.bucket === bucket);
+    if (inBucket.length === 0) continue;
+    lines.push("", bold(`${BUCKET_TITLES[bucket].toUpperCase()} (${inBucket.length})`));
+    for (const item of inBucket) lines.push(...renderPullRequest(item, report.checkedAt));
   }
 
   const quiet = checked.filter((repo) => repo.openPrs === 0).map((repo) => repo.slug);
   const notes: string[] = [];
   if (quiet.length > 0 && report.items.length > 0) notes.push(`No open Dependabot pull requests: ${quiet.join(", ")}.`);
+  if (dismissed.length > 0) {
+    notes.push(`Put aside (${dismissed.length}): ${dismissed.map(({ pr }) => `${pr.repo}#${pr.number}`).join(", ")}.`);
+  }
   if (report.watched.length === 0) {
     notes.push("No starred repository has a GitHub remote, so there is nothing to check. Star repositories in the web app, then run `gitlib scan`.");
   }
@@ -192,37 +214,52 @@ export function renderDependabotReport(report: DependabotReport, color = false):
     notes.push(`GitHub quota: this check cost ${report.rateLimit.cost}, ${report.rateLimit.remaining} left until ${report.rateLimit.resetAt}.`);
   }
   if (notes.length > 0) lines.push("", ...notes);
+  if (options.footer?.length) lines.push("", ...options.footer);
   return lines.join("\n");
 }
 
-/** The stable, snake_case JSON shape emitted by `dependabot check --json`. */
-export function dependabotReportToDict(report: DependabotReport): Record<string, unknown> {
+/** The stable, snake_case JSON shape emitted by `dependabot check --json` and `dependabot show --json`. */
+export function dependabotReportToDict(
+  report: ReportLike,
+  options: { run?: { id: number; trigger: string } | null; dismissals?: readonly DependabotDismissal[]; now?: Date } = {},
+): Record<string, unknown> {
+  const { active, dismissed } = splitDismissed(report.items, options.dismissals ?? [], options.now ?? new Date());
+  const entries = [
+    ...active.map((item) => ({ item, dismissal: null })),
+    ...dismissed.map(({ dismissal, ...item }) => ({ item, dismissal })),
+  ];
   return {
+    run: options.run ?? null,
     checked_at: report.checkedAt,
-    summary: Object.fromEntries(BUCKETS.map((bucket) => [bucket, report.items.filter((item) => item.bucket === bucket).length])),
-    pull_requests: report.items.map(({ pr, bucket, reasons, actions }) => ({
-      repo: pr.repo,
-      number: pr.number,
-      title: pr.title,
-      url: pr.url,
-      bucket,
-      reasons,
-      actions,
-      update_type: pr.updateType,
-      ecosystem: pr.ecosystem,
-      dependencies: pr.dependencies,
-      branch: pr.headRefName,
-      author: pr.author,
-      is_draft: pr.isDraft,
-      mergeable: pr.mergeable,
-      merge_state_status: pr.mergeStateStatus,
-      review_decision: pr.reviewDecision,
-      labels: pr.labels,
-      commit_count: pr.commitCount,
-      ci: pr.ci,
-      created_at: pr.createdAt,
-      updated_at: pr.updatedAt,
-    })),
+    summary: Object.fromEntries(BUCKETS.map((bucket) => [bucket, active.filter((item) => item.bucket === bucket).length])),
+    pull_requests: entries.map(({ item, dismissal }) => {
+      const { pr, bucket, reasons, actions } = item;
+      return {
+        repo: pr.repo,
+        number: pr.number,
+        title: pr.title,
+        url: pr.url,
+        bucket,
+        reasons,
+        actions,
+        update_type: pr.updateType,
+        ecosystem: pr.ecosystem,
+        dependencies: pr.dependencies,
+        branch: pr.headRefName,
+        author: pr.author,
+        is_draft: pr.isDraft,
+        mergeable: pr.mergeable,
+        merge_state_status: pr.mergeStateStatus,
+        review_decision: pr.reviewDecision,
+        labels: pr.labels,
+        commit_count: pr.commitCount,
+        ci: pr.ci,
+        created_at: pr.createdAt,
+        updated_at: pr.updatedAt,
+        observed_at: item.observedAt ?? report.checkedAt,
+        dismissed: dismissal ? { snoozed_until: dismissal.snoozedUntil, created_at: dismissal.createdAt } : null,
+      };
+    }),
     repositories: report.watched.map((repo) => ({
       repo: repo.slug,
       status: repo.status,
