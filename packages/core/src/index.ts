@@ -6,6 +6,7 @@ export * from "./dependabot/index.js";
 export * from "./discovery.js";
 export * from "./errors.js";
 export * from "./models.js";
+export * from "./ollama-connection.js";
 export * from "./planning/index.js";
 export * from "./remotes.js";
 export * from "./scanner.js";

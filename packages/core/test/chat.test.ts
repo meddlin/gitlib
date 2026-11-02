@@ -48,6 +48,8 @@ describe("ollama config", () => {
     expect(loadConfig(fx.env()).ollama).toEqual({
       enabled: true,
       host: "http://127.0.0.1:11434",
+      mode: "local",
+      hostFromEnv: false,
       model: null,
       numCtx: 8192,
     });
@@ -60,6 +62,8 @@ describe("ollama config", () => {
     expect(loadConfig(fx.env()).ollama).toEqual({
       enabled: false,
       host: "http://gpu-box:11434",
+      mode: "server",
+      hostFromEnv: false,
       model: "qwen3:8b",
       numCtx: 4096,
     });
@@ -475,5 +479,29 @@ describe("OllamaBackend", () => {
       })(),
     ).rejects.toThrow(/sent nothing for 1 second\./);
     expect(seen).toEqual([{ type: "delta", text: "then silence" }]);
+  });
+});
+
+describe("setOllamaConnection", () => {
+  const envFor = () => fx.env();
+
+  it("saves a server address, applies it at once and survives a restart", () => {
+    const app = createApplication(envFor());
+    expect(app.config.ollama.mode).toBe("local");
+    app.setOllamaConnection({ mode: "server", host: "192.168.1.164:11434/" });
+    expect(app.config.ollama.host).toBe("http://192.168.1.164:11434");
+    expect(app.chat?.label).toBe("http://192.168.1.164:11434");
+    expect(loadConfig(envFor()).ollama).toMatchObject({ host: "http://192.168.1.164:11434", mode: "server" });
+
+    app.setOllamaConnection({ mode: "local" });
+    expect(loadConfig(envFor()).ollama).toMatchObject({ host: "http://127.0.0.1:11434", mode: "local" });
+  });
+
+  it("rejects a bad address and leaves GITLIB_OLLAMA_HOST in charge", () => {
+    const app = createApplication(envFor());
+    expect(() => app.setOllamaConnection({ mode: "server", host: "ftp://x" })).toThrow();
+    expect(() => app.setOllamaConnection({ mode: "server", host: "" })).toThrow();
+    const pinned = createApplication({ ...envFor(), GITLIB_OLLAMA_HOST: "http://10.0.0.1:11434" });
+    expect(() => pinned.setOllamaConnection({ mode: "local" })).toThrow(/GITLIB_OLLAMA_HOST/);
   });
 });
