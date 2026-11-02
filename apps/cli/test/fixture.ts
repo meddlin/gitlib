@@ -6,6 +6,7 @@ import {
   DEFAULT_IGNORE_DIRS,
   runCommand,
   type CommandResult,
+  type DependabotBackend,
   type SearchBackend,
   type SystemDeps,
 } from "@gitlib/core";
@@ -88,7 +89,12 @@ export class Fixture {
 
   async runCli(
     args: string[],
-    options: { env?: Record<string, string>; system?: SystemDeps; searchBackend?: SearchBackend | null } = {},
+    options: {
+      env?: Record<string, string>;
+      system?: SystemDeps;
+      searchBackend?: SearchBackend | null;
+      dependabotBackend?: DependabotBackend | null;
+    } = {},
   ): Promise<{ code: number; stdout: string; stderr: string }> {
     let stdout = "";
     let stderr = "";
@@ -98,6 +104,7 @@ export class Fixture {
       stderr: { write: (chunk) => void (stderr += chunk) },
       ...(options.system ? { system: options.system } : {}),
       ...(options.searchBackend !== undefined ? { searchBackend: options.searchBackend } : {}),
+      ...(options.dependabotBackend !== undefined ? { dependabotBackend: options.dependabotBackend } : {}),
     });
     return { code, stdout, stderr };
   }

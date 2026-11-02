@@ -4,6 +4,25 @@ Status: **research, with a proposed plan** (2026-11-02). Nothing is decided. The
 record what the primary sources say; "Fit with gitlib" is read from this repository's code and "Recommendation" is the
 author's proposal, so neither is sourced the way the rest is.
 
+**Built so far** (2026-11-02): the report-only slice, Recommendation items 1, 2, 4 and 11 (b) and (c) without storage:
+`gitlib dependabot check [--json]` (README, "Dependabot watch"), backed by `packages/core/src/dependabot/` (a pure
+`classify`, a GraphQL fetch behind a `DependabotBackend` interface with a fake in the tests, and `checkDependabot`).
+The verdict never reads the PR body. Choices the plan left open:
+
+- A PR whose `statusCheckRollup` is missing or refused is **review first** with "CI unknown" and the reason, never
+  ready (the Checks question in section 6 is still open, and an empty rollup is also what a repository without CI
+  looks like). Failing or `UNSTABLE` is needs work; pending, a draft and `UNKNOWN` mergeability are waiting; a review
+  that is required, a `security` label, extra commits, a major or unstated update type, or an unrecognised value from
+  GitHub are review first.
+- Not built: the "Maintainer changes" phrase and Dependabot-alert matching (both need the body or the alerts API;
+  the `security` label stands in), `isRequired` per check, the retry of `UNKNOWN` mergeability, storage (item 7),
+  the web page and badge (11 d), the lease and schedule (items 5 and 6), and the LLM prose layer (item 8).
+- Added to the plan: a lookup of which watched repositories the token can see, so a private repository the token
+  cannot reach is reported as `NOT CHECKED` instead of looking like "no open PRs".
+- 11 (a) has **not** been run: the tests use fixtures shaped like the GraphQL response in "Verify with your own
+  token" command 5, written from the docs rather than captured from a real response. The first real run may show
+  differences (for example how a bot's `author.login` is spelled, which the code does not depend on).
+
 ## Context
 
 The goal is to make it easier to stay current with Dependabot pull requests across many repositories, using a

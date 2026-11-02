@@ -2,6 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { buildChatSystemPrompt, OllamaBackend, type ChatBackend } from "./ai/index.js";
 import { loadConfig, type AppConfig, type Env } from "./config.js";
+import {
+  checkDependabot,
+  DependabotUnavailableError,
+  GitHubDependabotBackend,
+  resolveGitHubToken,
+  type DependabotBackend,
+  type DependabotReport,
+} from "./dependabot/index.js";
 import { discoverRepos } from "./discovery.js";
 import { GitLibError } from "./errors.js";
 import type { DiscoveredRepo, RemoteTarget, RepoDetails, RepoRecord } from "./models.js";
@@ -19,7 +27,7 @@ import {
   type LocalIssueQuery,
   type LocalIssueState,
 } from "./planning/index.js";
-import { parseGitRemotes, selectPreferredRemote } from "./remotes.js";
+import { loadGitRemotes, selectPreferredRemote } from "./remotes.js";
 import { scanRepo } from "./scanner.js";
 import { RepoSearch, SearchUnavailableError, type SearchBackend, type SearchHit, type SearchResult } from "./search/index.js";
 import { Store } from "./store.js";
@@ -51,26 +59,6 @@ export function buildNestedRepoMap(repositories: readonly DiscoveredRepo[]): Map
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
-export function loadGitRemotes(
-  repoPath: string,
-  system: SystemDeps = defaultSystemDeps,
-): { remotes: RemoteTarget[]; error: string | null } {
-  let result;
-  try {
-    result = system.runCommand(["git", "-C", repoPath, "remote", "-v"]);
-  } catch (error) {
-    return { remotes: [], error: errorMessage(error) };
-  }
-
-  if (result.status !== 0) {
-    const message =
-      result.stderr.trim() || result.stdout.trim() || `git exited with status ${result.status}`;
-    return { remotes: [], error: message };
-  }
-
-  return { remotes: parseGitRemotes(result.stdout), error: null };
-}
-
 export function loadRepoReadme(repoPath: string): { markdown: string | null; error: string | null } {
   const readmePath = path.join(repoPath, "README.md");
   if (!fs.existsSync(readmePath)) return { markdown: null, error: null };
@@ -101,6 +89,8 @@ export class GitLibApp {
   readonly search: RepoSearch;
   /** The language-model server behind the chat panel; null when `ollama.enabled = false`. */
   readonly chat: ChatBackend | null;
+  /** Where Dependabot pull requests come from; null when no GitHub token is set. */
+  readonly dependabot: DependabotBackend | null;
 
   constructor(
     readonly config: AppConfig,
@@ -109,9 +99,11 @@ export class GitLibApp {
     searchBackend?: SearchBackend | null,
     readonly planning: PlanningStore = new PlanningStore(config.planningDbPath),
     chatBackend?: ChatBackend | null,
+    dependabotBackend: DependabotBackend | null = null,
   ) {
     this.search = new RepoSearch(config.search, searchBackend);
     this.chat = chatBackend !== undefined ? chatBackend : config.ollama.enabled ? new OllamaBackend(config.ollama) : null;
+    this.dependabot = dependabotBackend;
   }
 
   refresh(): RepoRecord[] {
@@ -214,6 +206,19 @@ export class GitLibApp {
   chatSystemPrompt(repoSelector?: string | null): string {
     const repo = repoSelector ? this.store.resolveRepository(repoSelector) : null;
     return buildChatSystemPrompt({ repositories: this.loadRepositories(), repo });
+  }
+
+  /**
+   * Asks GitHub for the open Dependabot pull requests of every favorite repository and sorts them into buckets.
+   * Report only: nothing is written to GitHub or to gitlib's data. Throws `DependabotUnavailableError` without a token.
+   */
+  async checkDependabot(options: { signal?: AbortSignal; now?: Date } = {}): Promise<DependabotReport> {
+    if (!this.dependabot) {
+      throw new DependabotUnavailableError(
+        "Checking Dependabot pull requests needs a GitHub token: set GITLIB_GITHUB_TOKEN or GITHUB_TOKEN.",
+      );
+    }
+    return checkDependabot({ repositories: this.loadRepositories(), backend: this.dependabot, system: this.system, ...options });
   }
 
   listRepositories(options: FilterOptions & { refresh?: boolean } = {}): RepoRecord[] {
@@ -398,8 +403,11 @@ export function createApplication(
   system: SystemDeps = defaultSystemDeps,
   searchBackend?: SearchBackend | null,
   chatBackend?: ChatBackend | null,
+  dependabotBackend?: DependabotBackend | null,
 ): GitLibApp {
   const config = loadConfig(env);
   const store = new Store(config.dbPath);
-  return new GitLibApp(config, store, system, searchBackend, undefined, chatBackend);
+  const token = resolveGitHubToken(env);
+  const dependabot = dependabotBackend !== undefined ? dependabotBackend : token ? new GitHubDependabotBackend(token) : null;
+  return new GitLibApp(config, store, system, searchBackend, undefined, chatBackend, dependabot);
 }

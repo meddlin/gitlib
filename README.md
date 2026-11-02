@@ -150,6 +150,41 @@ Ollama with `OLLAMA_HOST=0.0.0.0:11434` so it listens beyond loopback. Ollama ha
 has none either, so keep both off the internet. On a 12 GB graphics card an 8B-class model with `num_ctx = 8192` is a
 reasonable start; check with `ollama ps` on that machine that the model is fully on the GPU.
 
+## Dependabot watch
+
+`gitlib dependabot check` reports which open [Dependabot](https://docs.github.com/code-security/dependabot) pull
+requests on your **starred** repositories can be merged and which need work. "Starred" is the Star toggle in gitlib
+(`repo_favorites`), not GitHub stars, and only favorites with a github.com remote can be watched; the report says
+how many were skipped and why. It is report-only: nothing is written to GitHub or to gitlib's database, no model is
+involved, and the verdict comes only from fields GitHub returns (never from the PR text, which quotes third-party
+release notes). The research and the reasoning behind it are in
+[`docs/dependabot-watch.md`](docs/dependabot-watch.md).
+
+```bash
+export GITLIB_GITHUB_TOKEN=...      # or GITHUB_TOKEN; GitHub's GraphQL API does not answer without one
+gitlib dependabot check             # grouped by bucket, with reasons and suggested actions
+gitlib dependabot check --json      # the same, machine-readable
+```
+
+| Bucket | Meaning |
+| --- | --- |
+| **Ready** | Not a draft, mergeable, up to date, checks passing, no review blocking it, a patch or minor update. Merge it from its page. |
+| **Review first** | Nothing is broken, but look first: a major bump, an update type the commit message does not state, a `security` label, a review that is required, extra commits on the branch, or **CI unknown** (below). |
+| **Needs work** | Merge conflicts, behind the base branch, changes requested, or failing checks. Suggests `@dependabot rebase` or `@dependabot recreate` where they apply. |
+| **Waiting** | Checks still running, a draft, or GitHub still calculating mergeability (`UNKNOWN`, which is transient; run the check again). |
+
+The report only ever *suggests* comments for you to post; `@dependabot merge` and its siblings stopped working on
+2026-01-27 and are never suggested. It asks GitHub once per owner (one GraphQL search for the owner's open Dependabot
+PRs, plus one small lookup that tells which watched repositories your token cannot see at all), so a check costs a
+few points of the 5,000 an hour; the report prints the actual cost. Anything it could not check is listed under
+`NOT CHECKED` or `INCOMPLETE` rather than left out, and the command exits with status 1 if a whole owner failed.
+
+**CI unknown.** A PR whose check results GitHub did not return is shown as `CI unknown` with the reason, filed under
+*Review first*, and never as ready. GitHub's token guide lists the Checks API among the things fine-grained tokens
+cannot do, and whether GraphQL `statusCheckRollup` works with one is undocumented, so with a fine-grained token you
+may see `CI unknown` on every PR. [`docs/dependabot-watch.md`](docs/dependabot-watch.md#verify-with-your-own-token)
+has the commands that settle it. Still to come: storing findings, a web page, a schedule and notifications.
+
 ## Planning
 
 The web app's **Planning** page (`/planning`) is a place to file and track work against any
@@ -289,6 +324,7 @@ gitlib open code <repo>
 gitlib open remote <repo>
 gitlib tui
 gitlib notes edit <repo>
+gitlib dependabot check [--json]
 gitlib planning backup [path]
 gitlib backup create [dir] [--keep N]
 gitlib backup verify <archive>
@@ -308,6 +344,8 @@ Command summary:
 - `gitlib open remote <repo>` opens the preferred configured remote in your browser.
 - `gitlib tui` launches the interactive terminal UI.
 - `gitlib notes edit <repo>` opens your configured editor to update repo notes.
+- `gitlib dependabot check [--json]` reports which Dependabot PRs on starred repositories can be merged (see
+  [Dependabot watch](#dependabot-watch)).
 - `gitlib planning backup [path]` snapshots the planning database (see [Planning](#planning)).
 - `gitlib backup create [dir]` writes a verified archive of everything gitlib stores that cannot be rebuilt
   (config, notes, descriptions, favorites, planning) to `dir` (default `$GITLIB_BACKUP_DIR`, else

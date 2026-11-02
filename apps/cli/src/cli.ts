@@ -11,6 +11,7 @@ import {
   restoreBackup,
   verifyBackup,
   type BackupManifest,
+  type DependabotBackend,
   type Env,
   type GitLibApp,
   type SearchBackend,
@@ -18,7 +19,16 @@ import {
 } from "@gitlib/core";
 import { Command, CommanderError, InvalidArgumentError } from "commander";
 import { editNotes } from "./notes.js";
-import { renderDetail, renderJson, renderSearchResults, renderTable, repoToDict, searchResultToDict } from "./render.js";
+import {
+  dependabotReportToDict,
+  renderDependabotReport,
+  renderDetail,
+  renderJson,
+  renderSearchResults,
+  renderTable,
+  repoToDict,
+  searchResultToDict,
+} from "./render.js";
 
 export const VERSION = "0.1.0";
 
@@ -30,6 +40,8 @@ export interface CliIo {
   system?: SystemDeps;
   /** Replaces the Meilisearch backend; tests use this to avoid a real server. */
   searchBackend?: SearchBackend | null;
+  /** Replaces the GitHub backend of `dependabot check`; tests use this to avoid the network. */
+  dependabotBackend?: DependabotBackend | null;
 }
 
 type Invocation =
@@ -50,6 +62,7 @@ type Invocation =
   | { name: "open-code"; repo: string }
   | { name: "open-remote"; repo: string }
   | { name: "notes-edit"; repo: string }
+  | { name: "dependabot-check"; json?: boolean }
   | { name: "planning-backup"; destination?: string }
   | { name: "backup-create"; directory?: string; keep?: number }
   | { name: "backup-verify"; archive: string }
@@ -159,6 +172,13 @@ function buildProgram(
     .description("Edit repository notes")
     .argument("<repo>")
     .action((repo: string) => onInvoke({ name: "notes-edit", repo }));
+
+  const dependabot = program.command("dependabot").description("Watch Dependabot pull requests on your starred repositories");
+  dependabot
+    .command("check")
+    .description("Report which open Dependabot PRs on starred repositories can be merged and which need work")
+    .option("--json", "machine-readable output")
+    .action((options: { json?: boolean }) => onInvoke({ name: "dependabot-check", json: options.json }));
 
   const planning = program.command("planning").description("Manage gitlib's own planning data (issues)");
   planning
@@ -335,6 +355,12 @@ async function execute(
       }
       return 0;
     }
+    case "dependabot-check": {
+      const report = await app.checkDependabot();
+      print(invocation.json ? renderJson(dependabotReportToDict(report)) : renderDependabotReport(report, color));
+      // A report that could not cover every owner is not a clean bill of health, so a scheduler can notice.
+      return report.errors.length > 0 ? 1 : 0;
+    }
     case "planning-backup": {
       print(`Backed up the planning database to ${app.backupPlanning(invocation.destination)}.`);
       return 0;
@@ -373,7 +399,7 @@ export async function main(argv: readonly string[], io: CliIo = {}): Promise<num
 
   try {
     if (isBackupInvocation(invocation)) return runBackupCommand(invocation, env, print);
-    const app = createApplication(env, io.system, io.searchBackend);
+    const app = createApplication(env, io.system, io.searchBackend, undefined, io.dependabotBackend);
     const color = Boolean((stdout as { isTTY?: boolean }).isTTY) && !env["NO_COLOR"];
     return await execute(invocation, app, env, print, printError, color);
   } catch (error) {
