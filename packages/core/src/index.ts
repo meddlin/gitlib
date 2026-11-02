@@ -2,6 +2,7 @@ export * from "./ai/index.js";
 export * from "./app.js";
 export * from "./backup.js";
 export * from "./config.js";
+export * from "./dependabot/index.js";
 export * from "./discovery.js";
 export * from "./errors.js";
 export * from "./models.js";

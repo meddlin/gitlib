@@ -1,4 +1,5 @@
 import type { RemoteTarget } from "./models.js";
+import { defaultSystemDeps, type SystemDeps } from "./system.js";
 
 const REMOTE_LINE = /^(?<name>\S+)\s+(?<url>\S+)\s+\((?<kind>fetch|push)\)$/;
 const SCP_STYLE = /^[^@]+@(?<host>[^:]+):/;
@@ -106,6 +107,26 @@ export function parseGitRemotes(output: string): RemoteTarget[] {
     remotes.push(formatRemoteTarget(name, fetchUrl, entry.push ?? fetchUrl));
   }
   return remotes;
+}
+
+export function loadGitRemotes(
+  repoPath: string,
+  system: SystemDeps = defaultSystemDeps,
+): { remotes: RemoteTarget[]; error: string | null } {
+  let result;
+  try {
+    result = system.runCommand(["git", "-C", repoPath, "remote", "-v"]);
+  } catch (error) {
+    return { remotes: [], error: error instanceof Error ? error.message : String(error) };
+  }
+
+  if (result.status !== 0) {
+    const message =
+      result.stderr.trim() || result.stdout.trim() || `git exited with status ${result.status}`;
+    return { remotes: [], error: message };
+  }
+
+  return { remotes: parseGitRemotes(result.stdout), error: null };
 }
 
 export function selectPreferredRemote(remotes: readonly RemoteTarget[]): RemoteTarget | null {
