@@ -354,7 +354,10 @@ function RepoLibrary() {
         {repos.length === 0 ? (
           <EmptyState>
             No git repositories were found under <span className="font-mono">{roots.join(", ") || "any root"}</span>.
-            Add scan roots to <span className="font-mono">~/.git-library/config.toml</span> and rescan.
+            Add scan roots to <span className="font-mono">~/.git-library/config.toml</span> and rescan. Running in
+            Docker? Set <span className="font-mono">GITLIB_REPOS</span> in <span className="font-mono">.env</span> to
+            the folder on your machine that holds your repos, then run{" "}
+            <span className="font-mono">docker compose up -d</span>.
           </EmptyState>
         ) : visible.length === 0 ? (
           <EmptyState>No repositories match your filters.</EmptyState>

@@ -53,7 +53,7 @@ git clone <this-repo-url> gitlib && cd gitlib
 cp .env.example .env
 ```
 
-Edit `.env`. The one setting you need is where your repositories are:
+Edit `.env` if your repositories are not in `~/git` (the default). Point `GITLIB_REPOS` at the directory that contains them:
 
 ```bash
 GITLIB_REPOS=/Users/you/git        # absolute path to the directory that contains your repos
@@ -397,7 +397,7 @@ docker compose run --rm gitlib list       # one-off CLI command
 | Symptom                                                         | Likely cause and fix                                                                                                                                              |
 | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `port is already allocated` / `address already in use`          | Something else uses the port. Set `GITLIB_PORT` (or `GITLIB_MEILI_PORT`) in `.env` to a free one. `npm run web` also refuses to start on a busy 4000.             |
-| No repositories listed                                          | `GITLIB_REPOS` is wrong, not shared with Docker Desktop, or empty. Check `docker compose exec web ls /home/node/git`. Press **Rescan** after fixing.              |
+| No repositories listed                                          | `GITLIB_REPOS` (default `~/git`) is wrong, not shared with Docker Desktop, or empty. Check `docker compose exec web ls /home/node/git`. Press **Rescan** after fixing.              |
 | Repo pages show no GitHub data / community scores               | Add `GITLIB_GITHUB_TOKEN` to `.env` (anonymous GitHub limit is 60 requests/hour), then `docker compose up -d`. Confirm the repo has a GitHub `origin` remote.     |
 | "Search falls back to substring matching"                       | Meilisearch is down or unreachable. `docker compose ps`, `docker compose logs meilisearch`. After changing `GITLIB_MEILI_API_KEY` run `docker compose up -d` so both containers get the new value. |
 | `meilisearch` will not start with `MEILI_ENV=production`        | Production mode requires a key of at least 16 characters in `GITLIB_MEILI_API_KEY`.                                                                               |
