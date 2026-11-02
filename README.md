@@ -155,6 +155,23 @@ npm run web          # dev server at http://localhost:4000
 npm run build -w @gitlib/web && npm run preview -w @gitlib/web   # production build
 ```
 
+- The **Repositories** page has four tabs over one list: **Combined** (the default), **Local**, **GitHub**
+  and **GitLab**. Combined joins each local clone with the GitHub and GitLab repos its remotes point at, so
+  one row shows where a project lives (clone, GitHub, GitLab) and which of those it is missing; clones of the
+  same remote collapse into one row. GitHub lists every repo the token's user owns, collaborates on or reaches
+  through an organization (`GITLIB_GITHUB_TOKEN`; the token needs read access to repositories). GitLab lists
+  the projects the user is a member of with `GITLIB_GITLAB_TOKEN` (a personal access token with `read_api`),
+  or only a user's public projects with just `GITLIB_GITLAB_USERNAME`; set `GITLIB_GITLAB_URL` for a
+  self-hosted instance. Each host's list is stored in the local database (`remote_repo_listings` table), so
+  the page reads it at once, survives restarts, and never calls GitHub or GitLab per view. The server checks
+  it in the background when it is missing or older than `GITLIB_REPO_REFRESH_HOURS` (default 6, `0` = only
+  on the button); a check sends each page's ETag, and a host that answers *Not Modified* costs no GitHub
+  quota and downloads nothing. **Refresh** fetches both complete lists now. If a check fails (a revoked
+  token, a rate limit) the stored list stays on screen with the error noted, and automatic retries pause for
+  half an hour. A host that isn't configured is noted on the page and the rest still works, and clones link
+  to GitHub or GitLab from their remotes either way. The **Local** tab is the full table (favorites, descriptions, issue
+  counts, community scores, preview pane); the other tabs list repos with links out, and clones open their
+  detail page. The tab is kept in the URL (`?source=`).
 - Each repo has a detail page (click its name) with Overview, **Issues** and **Pull requests** tabs; the
   last two list open GitHub items and say so in a banner. Public repos work as-is; set
   `GITLIB_GITHUB_TOKEN` (or `GITHUB_TOKEN`) for private repos and a higher rate limit. The web server

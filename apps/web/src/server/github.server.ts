@@ -1,6 +1,9 @@
 import { loadGitRemotes, selectGitHubRepo, type GitHubRepoRef } from "@gitlib/core";
+import { remoteKey, type ListingPage } from "#/lib/catalog";
 import { getApp, loadAndIndexRepositories } from "./gitlib.server";
 import type { Provider } from "./provider";
+import { ProviderSetupError } from "./provider-errors";
+import { PAGE_SIZE, fetchListingPages } from "./remote-listing.server";
 
 export const githubToken = (): string | undefined =>
   process.env["GITLIB_GITHUB_TOKEN"] || process.env["GITHUB_TOKEN"] || undefined;
@@ -87,4 +90,64 @@ export async function githubGet<T>(
     error: null,
     rateRemaining: remaining !== null && Number.isFinite(Number(remaining)) ? Number(remaining) : null,
   };
+}
+
+interface GitHubAccountRepo {
+  full_name: string;
+  name: string;
+  description: string | null;
+  html_url: string;
+  private: boolean;
+  fork: boolean;
+  archived: boolean;
+  pushed_at: string | null;
+  updated_at: string | null;
+  language: string | null;
+}
+
+/** Every repository the token's user owns, collaborates on, or can reach through an organization. */
+export async function listGitHubRepos(previous: readonly ListingPage[] = []) {
+  const token = githubToken();
+  if (!token) throw new ProviderSetupError("Set GITLIB_GITHUB_TOKEN to list your GitHub repositories.");
+
+  return fetchListingPages(
+    async (page, etag) => {
+      const url = new URL("https://api.github.com/user/repos");
+      url.search = new URLSearchParams({
+        per_page: String(PAGE_SIZE),
+        page: String(page),
+        sort: "pushed",
+        affiliation: "owner,collaborator,organization_member",
+      }).toString();
+      const response = await fetch(url, {
+        headers: {
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+          "User-Agent": "gitlib",
+          Authorization: `Bearer ${token}`,
+          ...(etag ? { "If-None-Match": etag } : {}),
+        },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (response.status === 401) throw new Error("GitHub rejected the token (401).");
+      if (response.status === 403 || response.status === 429) throw new Error("GitHub rate limit reached. Try again later.");
+      if (!response.ok && response.status !== 304) throw new Error(`GitHub responded with ${response.status}.`);
+      return response;
+    },
+    (body) =>
+      (body as GitHubAccountRepo[]).map((item) => ({
+        provider: "github",
+        key: remoteKey("github.com", item.full_name),
+        fullName: item.full_name,
+        name: item.name,
+        description: item.description ?? "",
+        url: item.html_url,
+        isPrivate: item.private,
+        isFork: item.fork,
+        isArchived: item.archived,
+        updatedAt: item.pushed_at ?? item.updated_at,
+        language: item.language,
+      })),
+    previous,
+  );
 }

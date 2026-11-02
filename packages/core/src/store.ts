@@ -83,6 +83,13 @@ const SCHEMA = `
     payload TEXT NOT NULL,
     fetched_at TEXT NOT NULL
   );
+
+  -- What a hosting service (GitHub, GitLab) last listed for the configured account, one row per provider.
+  CREATE TABLE IF NOT EXISTS remote_repo_listings (
+    provider TEXT PRIMARY KEY,
+    payload TEXT NOT NULL,
+    fetched_at TEXT NOT NULL
+  );
 `;
 
 /** A GitHub community profile as last fetched; `payload` is opaque to the store (the caller serializes it). */
@@ -90,6 +97,14 @@ export interface StoredCommunityProfile {
   /** Lowercased `owner/repo`. */
   slug: string;
   payload: string;
+  fetchedAt: string;
+}
+
+/** A hosting service's repository listing as last checked; `payload` is opaque to the store. */
+export interface StoredRemoteListing {
+  provider: string;
+  payload: string;
+  /** When the service was last asked, whether or not the answer changed. */
   fetchedAt: string;
 }
 
@@ -321,6 +336,24 @@ export class Store {
         }[]
       ).map((row) => ({ slug: row.slug, payload: row.payload, fetchedAt: row.fetched_at })),
     );
+  }
+
+  saveRemoteListing(provider: string, payload: string, fetchedAt: string): void {
+    this.transaction((db) => {
+      db.prepare(
+        `INSERT INTO remote_repo_listings(provider, payload, fetched_at) VALUES (?, ?, ?)
+         ON CONFLICT(provider) DO UPDATE SET payload = excluded.payload, fetched_at = excluded.fetched_at`,
+      ).run(provider, payload, fetchedAt);
+    });
+  }
+
+  getRemoteListing(provider: string): StoredRemoteListing | null {
+    return this.withConnection((db) => {
+      const row = db
+        .prepare("SELECT provider, payload, fetched_at FROM remote_repo_listings WHERE provider = ?")
+        .get(provider) as { provider: string; payload: string; fetched_at: string } | undefined;
+      return row ? { provider: row.provider, payload: row.payload, fetchedAt: row.fetched_at } : null;
+    });
   }
 
   updateNotes(repoId: number, notes: string): void {

@@ -297,6 +297,24 @@ describe("application", () => {
     expect(reopened.store.listCommunityProfiles().map((profile) => profile.slug)).toEqual(["meddlin/gitlib", "other/repo"]);
   });
 
+  it("persists each hosting service's repository listing and replaces it on the next save", () => {
+    fx.writeConfig();
+    const app = createApplication(fx.env());
+    expect(app.store.getRemoteListing("github")).toBeNull();
+
+    app.store.saveRemoteListing("github", '{"pages":[]}', "2026-11-01T00:00:00+00:00");
+    app.store.saveRemoteListing("gitlab", '{"pages":[1]}', "2026-11-01T00:00:00+00:00");
+    app.store.saveRemoteListing("github", '{"pages":[2]}', "2026-11-02T00:00:00+00:00");
+
+    const reopened = createApplication(fx.env());
+    expect(reopened.store.getRemoteListing("github")).toEqual({
+      provider: "github",
+      payload: '{"pages":[2]}',
+      fetchedAt: "2026-11-02T00:00:00+00:00",
+    });
+    expect(reopened.store.getRemoteListing("gitlab")?.payload).toBe('{"pages":[1]}');
+  });
+
   it("adds the community table to a database created before it existed", () => {
     fx.writeConfig();
     const first = createApplication(fx.env());

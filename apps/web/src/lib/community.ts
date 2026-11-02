@@ -89,9 +89,9 @@ export const DEFAULT_REFRESH_HOURS = 24;
  * (decimals are fine). Unset, blank or unusable means a day; `0` turns automatic refreshing off, leaving
  * only the buttons, in which case this returns null.
  */
-export function refreshIntervalMs(setting: string | undefined): number | null {
-  const hours = setting?.trim() ? Number(setting) : DEFAULT_REFRESH_HOURS;
-  if (!Number.isFinite(hours) || hours < 0) return DEFAULT_REFRESH_HOURS * 3_600_000;
+export function refreshIntervalMs(setting: string | undefined, defaultHours = DEFAULT_REFRESH_HOURS): number | null {
+  const hours = setting?.trim() ? Number(setting) : defaultHours;
+  if (!Number.isFinite(hours) || hours < 0) return defaultHours * 3_600_000;
   return hours === 0 ? null : hours * 3_600_000;
 }
 
