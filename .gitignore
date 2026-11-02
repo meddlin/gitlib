@@ -11,3 +11,4 @@ coverage/
 .output/
 repos/
 backups/
+.vscode/
