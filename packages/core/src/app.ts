@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { buildChatSystemPrompt, OllamaBackend, type ChatBackend } from "./ai/index.js";
 import { loadConfig, type AppConfig, type Env } from "./config.js";
 import { discoverRepos } from "./discovery.js";
 import { GitLibError } from "./errors.js";
@@ -98,6 +99,8 @@ export const DEFAULT_SEARCH_LIMIT = 200;
 
 export class GitLibApp {
   readonly search: RepoSearch;
+  /** The language-model server behind the chat panel; null when `ollama.enabled = false`. */
+  readonly chat: ChatBackend | null;
 
   constructor(
     readonly config: AppConfig,
@@ -105,8 +108,10 @@ export class GitLibApp {
     readonly system: SystemDeps = defaultSystemDeps,
     searchBackend?: SearchBackend | null,
     readonly planning: PlanningStore = new PlanningStore(config.planningDbPath),
+    chatBackend?: ChatBackend | null,
   ) {
     this.search = new RepoSearch(config.search, searchBackend);
+    this.chat = chatBackend !== undefined ? chatBackend : config.ollama.enabled ? new OllamaBackend(config.ollama) : null;
   }
 
   refresh(): RepoRecord[] {
@@ -200,6 +205,15 @@ export class GitLibApp {
   /** Re-indexes one repository, e.g. after its notes or description changed. */
   async syncRepositorySearch(selector: string): Promise<void> {
     await this.search.syncRepository(this.store.resolveRepository(selector));
+  }
+
+  /**
+   * The chat's system prompt: a capped list of every repository plus, when `repoSelector` names one, that
+   * repository's details and README. Throws `RepoNotFoundError` for a repository gitlib does not know.
+   */
+  chatSystemPrompt(repoSelector?: string | null): string {
+    const repo = repoSelector ? this.store.resolveRepository(repoSelector) : null;
+    return buildChatSystemPrompt({ repositories: this.loadRepositories(), repo });
   }
 
   listRepositories(options: FilterOptions & { refresh?: boolean } = {}): RepoRecord[] {
@@ -383,8 +397,9 @@ export function createApplication(
   env: Env = process.env,
   system: SystemDeps = defaultSystemDeps,
   searchBackend?: SearchBackend | null,
+  chatBackend?: ChatBackend | null,
 ): GitLibApp {
   const config = loadConfig(env);
   const store = new Store(config.dbPath);
-  return new GitLibApp(config, store, system, searchBackend);
+  return new GitLibApp(config, store, system, searchBackend, undefined, chatBackend);
 }

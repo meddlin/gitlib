@@ -116,6 +116,40 @@ index = "gitlib_repos"
 `GITLIB_MEILI_HOST` and `GITLIB_MEILI_API_KEY` override `host` and `api_key`. The web app's search bar
 is pinned to the top of the Repositories page (press `/` to focus it).
 
+## Chat
+
+The **Ask** button in the web app's top bar slides out a chat panel on the right. It answers questions about your
+repositories with a model on an [Ollama](https://ollama.com/) server, which can be another machine on your network;
+nothing is sent anywhere else. Ollama is optional: without it the panel says it cannot reach the server and nothing
+else changes. How the options were weighed is in [`docs/ollama-integration.md`](docs/ollama-integration.md).
+
+- The model sees a capped list of every repository (name, path, technologies, description, favorites) and, on a
+  repository's page, that repository's notes and the start of its README. It cannot browse files, run commands or
+  search, so it answers only from what gitlib knows and says so when it does not know.
+- Replies stream in as they are written. **Stop** cancels the request on the Ollama server too.
+- The conversation lives in the browser tab and survives moving between pages, not a reload. The model is picked from
+  the panel's list of what the server has installed, and the choice is remembered in that browser.
+- Replies are shown as Markdown without images: text a model writes can be shaped by a hostile README, and an image
+  address can carry data out.
+- Long conversations are cut to fit the context window (oldest turns first) before they are sent, because Ollama
+  would otherwise drop text without saying so.
+
+Set it in `~/.git-library/config.toml` (all keys optional):
+
+```toml
+[ollama]
+enabled = true                        # false = never contact Ollama
+host = "http://127.0.0.1:11434"
+model = ""                            # blank = the first installed model
+num_ctx = 8192                        # context window, in tokens, sent with every request
+```
+
+`GITLIB_OLLAMA_HOST`, `GITLIB_OLLAMA_MODEL` and `GITLIB_OLLAMA_NUM_CTX` override them. In Docker, `localhost` is the
+container itself, so set `GITLIB_OLLAMA_HOST` in `.env` to the Ollama machine's address, and on that machine start
+Ollama with `OLLAMA_HOST=0.0.0.0:11434` so it listens beyond loopback. Ollama has no login of its own and the web app
+has none either, so keep both off the internet. On a 12 GB graphics card an 8B-class model with `num_ctx = 8192` is a
+reasonable start; check with `ollama ps` on that machine that the model is fully on the GPU.
+
 ## Planning
 
 The web app's **Planning** page (`/planning`) is a place to file and track work against any
@@ -176,6 +210,7 @@ npm run build -w @gitlib/web && npm run preview -w @gitlib/web   # production bu
   Each missing item on the Community tab has an **Add to planning** button that files a gitlib
   [planning](#planning) issue for it (stored in gitlib only); once filed, the row links to that issue.
 - The **Planning** page (`/planning`) holds gitlib's own issues; see [Planning](#planning).
+- The **Ask** button opens a chat panel for questions about your repositories; see [Chat](#chat).
 - Lists every git repo found under your configured scan roots (scanned on first load; use
   **Rescan** after adding repos).
 - Add or edit a short **description** per repo. It is stored in the shared SQLite database

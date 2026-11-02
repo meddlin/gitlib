@@ -25,6 +25,12 @@ export const DEFAULT_IGNORE_DIRS = [
 export const DEFAULT_SEARCH_HOST = "http://127.0.0.1:7700";
 export const DEFAULT_SEARCH_INDEX = "gitlib_repos";
 
+export const DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434";
+/** Ollama's own default is 4,096 on a card under 24 GiB; this is a small step up that still fits 12 GB with an 8B model. */
+export const DEFAULT_OLLAMA_NUM_CTX = 8192;
+export const MIN_OLLAMA_NUM_CTX = 512;
+export const MAX_OLLAMA_NUM_CTX = 262_144;
+
 export class ConfigError extends GitLibError {}
 
 export type Env = Readonly<Record<string, string | undefined>>;
@@ -38,6 +44,20 @@ export interface SearchConfig {
   indexName: string;
 }
 
+/** Where to find the Ollama server that answers chat questions. */
+export interface OllamaConfig {
+  /** When false, Ollama is never contacted and the chat panel says it is turned off. */
+  enabled: boolean;
+  host: string;
+  /** Model used when the client does not pick one; null means the first model the server lists. */
+  model: string | null;
+  /**
+   * Context window requested on every call. It is one value for every caller on purpose: Ollama reloads a
+   * model when this changes between requests, which on one GPU costs seconds each time.
+   */
+  numCtx: number;
+}
+
 export interface AppConfig {
   appHome: string;
   configPath: string;
@@ -48,6 +68,7 @@ export interface AppConfig {
   vscodeCommand: string[];
   ignoreDirs: ReadonlySet<string>;
   search: SearchConfig;
+  ollama: OllamaConfig;
 }
 
 export function getAppHome(env: Env = process.env): string {
@@ -119,6 +140,47 @@ function loadSearchConfig(raw: unknown, env: Env, configPath: string): SearchCon
   return { enabled, host, apiKey: apiKey || null, indexName };
 }
 
+function loadOllamaConfig(raw: unknown, env: Env, configPath: string): OllamaConfig {
+  if (raw !== undefined && (typeof raw !== "object" || raw === null || Array.isArray(raw))) {
+    throw new ConfigError(`Config key 'ollama' must be a table in ${configPath}`);
+  }
+  const table = (raw ?? {}) as Record<string, unknown>;
+
+  const string = (key: string): string | undefined => {
+    const value = table[key];
+    if (value === undefined) return undefined;
+    if (typeof value !== "string") {
+      throw new ConfigError(`Config key 'ollama.${key}' must be a string in ${configPath}`);
+    }
+    return value;
+  };
+
+  const enabled = table["enabled"] ?? true;
+  if (typeof enabled !== "boolean") {
+    throw new ConfigError(`Config key 'ollama.enabled' must be true or false in ${configPath}`);
+  }
+
+  // The host is not checked here: a typo in it should break the chat panel, not every command.
+  const host = (env["GITLIB_OLLAMA_HOST"] || string("host") || DEFAULT_OLLAMA_HOST).trim().replace(/\/+$/, "");
+  const model = (env["GITLIB_OLLAMA_MODEL"] || string("model") || "").trim();
+
+  const fromEnv = env["GITLIB_OLLAMA_NUM_CTX"]?.trim();
+  const numCtx = fromEnv ? (/^\d+$/.test(fromEnv) ? Number(fromEnv) : NaN) : (table["num_ctx"] ?? DEFAULT_OLLAMA_NUM_CTX);
+  if (
+    typeof numCtx !== "number" ||
+    !Number.isInteger(numCtx) ||
+    numCtx < MIN_OLLAMA_NUM_CTX ||
+    numCtx > MAX_OLLAMA_NUM_CTX
+  ) {
+    throw new ConfigError(
+      `The Ollama context size must be a whole number from ${MIN_OLLAMA_NUM_CTX} to ${MAX_OLLAMA_NUM_CTX} ` +
+        `(GITLIB_OLLAMA_NUM_CTX, or 'ollama.num_ctx' in ${configPath})`,
+    );
+  }
+
+  return { enabled, host, model: model || null, numCtx };
+}
+
 export function loadConfig(env: Env = process.env): AppConfig {
   const appHome = getAppHome(env);
   const configPath = path.join(appHome, "config.toml");
@@ -162,5 +224,6 @@ export function loadConfig(env: Env = process.env): AppConfig {
     vscodeCommand: vscodeCommandRaw,
     ignoreDirs: new Set(ignoreDirsRaw),
     search: loadSearchConfig(data["search"], env, configPath),
+    ollama: loadOllamaConfig(data["ollama"], env, configPath),
   };
 }

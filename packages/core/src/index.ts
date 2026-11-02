@@ -1,3 +1,4 @@
+export * from "./ai/index.js";
 export * from "./app.js";
 export * from "./backup.js";
 export * from "./config.js";

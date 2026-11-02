@@ -25,7 +25,7 @@ export class Fixture {
     fs.rmSync(this.base, { recursive: true, force: true });
   }
 
-  writeConfig(options: { roots?: string[]; vscodeCommand?: string[]; search?: string[] } = {}): void {
+  writeConfig(options: { roots?: string[]; vscodeCommand?: string[]; search?: string[]; ollama?: string[] } = {}): void {
     const roots = options.roots ?? [this.gitRoot];
     fs.mkdirSync(this.appHome, { recursive: true });
     const list = (items: readonly string[]) => items.map((item) => `  "${item}",`).join("\n");
@@ -36,6 +36,7 @@ export class Fixture {
     lines.push("ignore_dirs = [", list(DEFAULT_IGNORE_DIRS), "]", "");
     // Keep tests away from any Meilisearch running on the developer's machine unless they opt in.
     lines.push("[search]", ...(options.search ?? ["enabled = false"]), "");
+    if (options.ollama) lines.push("[ollama]", ...options.ollama, "");
     fs.writeFileSync(path.join(this.appHome, "config.toml"), lines.join("\n"), "utf-8");
   }
 
