@@ -2,9 +2,20 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LlmUnavailableError, MAX_REPLY_TOKENS, createApplication, type ChatBackend, type ChatEvent, type ChatRequest, type GitLibApp } from "@gitlib/core";
+import {
+  LlmUnavailableError,
+  MAX_REPLY_TOKENS,
+  RepoNotFoundError,
+  createApplication,
+  type ChatBackend,
+  type ChatEvent,
+  type ChatRequest,
+  type GitLibApp,
+  type RemoteRepoContext,
+} from "@gitlib/core";
 import { MAX_BODY_BYTES, readStreamEvents, type ChatStreamEvent } from "../src/lib/chat-protocol";
 import { handleChat } from "../src/server/chat.server";
+import type { RemoteChatSource } from "../src/server/repo-snapshot.server";
 
 class FakeChat implements ChatBackend {
   readonly label = "fake-ollama";
@@ -77,6 +88,33 @@ async function events(response: Response): Promise<ChatStreamEvent[]> {
   return all;
 }
 
+/** GitHub-only repositories without GitHub: one known repository, whatever is asked about anything else is "not listed". */
+function fakeRemote(overrides: Partial<RemoteChatSource> = {}): RemoteChatSource & { resolved: string[] } {
+  const resolved: string[] = [];
+  const context: RemoteRepoContext = {
+    fullName: "acme/widgets",
+    url: "https://github.com/acme/widgets",
+    description: "Widgets for everyone",
+    isPrivate: false,
+    isFork: false,
+    isArchived: false,
+    primaryLanguage: "Go",
+    pushedAt: null,
+    snapshot: null,
+    syncNote: null,
+  };
+  return {
+    resolved,
+    list: async () => [{ fullName: "acme/widgets", description: "Widgets for everyone", language: "Go" }],
+    resolve: async (slug) => {
+      resolved.push(slug);
+      if (slug.toLowerCase() !== "acme/widgets") throw new RepoNotFoundError(`${slug} is not a repository your GitHub account lists.`);
+      return context;
+    },
+    ...overrides,
+  };
+}
+
 const errorOf = async (response: Response) => ((await response.json()) as { error: string }).error;
 
 describe("POST /api/chat", () => {
@@ -124,6 +162,57 @@ describe("POST /api/chat", () => {
     const system = fake.calls[0]!.messages[0]!.content;
     expect(system).toContain("<current_repository>");
     expect(system).toContain("Alpha readme text about gardening.");
+  });
+
+  describe("with a GitHub repository that is not cloned", () => {
+    it("lists the GitHub-only repositories in the prompt", async () => {
+      await events(await handleChat(post({ messages: [ask()] }), makeApp(), fakeRemote()));
+      const system = fake.calls[0]!.messages[0]!.content;
+      expect(system).toContain("</remote_library>");
+      expect(system).toContain("- acme/widgets [Go] - Widgets for everyone");
+      expect(system).not.toContain("<current_repository>");
+    });
+
+    it("describes the picked repository to the model", async () => {
+      const remote = fakeRemote();
+      await events(await handleChat(post({ messages: [ask("What is the composition?")], remote: "acme/widgets" }), makeApp(), remote));
+      const system = fake.calls[0]!.messages[0]!.content;
+      expect(remote.resolved).toEqual(["acme/widgets"]);
+      expect(system).toContain("<current_repository>");
+      expect(system).toContain("Name: acme/widgets");
+      expect(system).toContain("not cloned on this machine");
+    });
+
+    it("does not need the GitHub list to answer", async () => {
+      const remote = fakeRemote({ list: async () => Promise.reject(new Error("GitHub is down")) });
+      const response = await handleChat(post({ messages: [ask()] }), makeApp(), remote);
+      expect(response.status).toBe(200);
+      expect(fake.calls[0]!.messages[0]!.content).not.toContain("</remote_library>");
+    });
+
+    it("refuses a repository GitHub does not list, before calling the model", async () => {
+      const response = await handleChat(post({ messages: [ask()], remote: "someone/else" }), makeApp(), fakeRemote());
+      expect(response.status).toBe(400);
+      expect(await errorOf(response)).toMatch(/not a repository your GitHub account lists/);
+      expect(fake.calls).toHaveLength(0);
+    });
+
+    it("refuses a malformed repository, and any repository when GitHub is not available here", async () => {
+      const malformed = await handleChat(post({ messages: [ask()], remote: "../etc" }), makeApp(), fakeRemote());
+      expect(malformed.status).toBe(400);
+
+      const unavailable = await handleChat(post({ messages: [ask()], remote: "acme/widgets" }), makeApp());
+      expect(unavailable.status).toBe(400);
+      expect(await errorOf(unavailable)).toMatch(/not available/);
+      expect(fake.calls).toHaveLength(0);
+    });
+
+    it("still answers about a cloned repository when a GitHub source is present", async () => {
+      await events(await handleChat(post({ messages: [ask()], repo: "alpha" }), makeApp(), fakeRemote()));
+      const system = fake.calls[0]!.messages[0]!.content;
+      expect(system).toContain("Alpha readme text about gardening.");
+      expect(system).toContain("</remote_library>");
+    });
   });
 
   it("leaves out old turns that do not fit the context window, and says so", async () => {

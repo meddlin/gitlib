@@ -1,6 +1,10 @@
 import { createServerFn } from "@tanstack/react-start";
 import { isGitLibError } from "@gitlib/core";
+import { isRemoteSlug } from "../lib/chat-protocol";
 import { getApp } from "./gitlib.server";
+import { syncRemote, type RemoteSync } from "./repo-snapshot.server";
+
+export type { RemoteSync } from "./repo-snapshot.server";
 
 export interface ChatStatus {
   /** False when the config turns chat off; nothing else is filled in then. */
@@ -63,3 +67,14 @@ export const saveOllamaConnection = createServerFn({ method: "POST" })
       throw error;
     }
   });
+
+/**
+ * Fetches (if missing or old, or when `force`) what GitHub says about a repository that is not cloned, so the next
+ * question about it answers at once. Only repositories the GitHub account lists are accepted.
+ */
+export const syncRemoteRepo = createServerFn({ method: "POST" })
+  .validator((input: { slug: string; force?: boolean }): { slug: string; force: boolean } => {
+    if (!input || !isRemoteSlug(input.slug)) throw new Error("Choose a GitHub repository as owner/repo.");
+    return { slug: input.slug, force: input.force === true };
+  })
+  .handler(({ data }): Promise<RemoteSync> => syncRemote(data.slug, data.force));

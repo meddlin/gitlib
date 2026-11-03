@@ -1,6 +1,7 @@
 import { MAX_REPLY_TOKENS, fitMessages, isGitLibError, promptBudget, type GitLibApp } from "@gitlib/core";
 import { MAX_BODY_BYTES, parseChatRequest, type ChatStreamEvent } from "../lib/chat-protocol";
 import { getApp } from "./gitlib.server";
+import type { RemoteChatSource } from "./repo-snapshot.server";
 
 const jsonError = (status: number, error: string): Response => Response.json({ error }, { status });
 
@@ -27,9 +28,10 @@ async function readLimited(request: Request, limit: number): Promise<string | nu
 /**
  * `POST /api/chat`: answers the conversation with the configured model and streams the reply as NDJSON events
  * (see `lib/chat-protocol.ts`). Everything the model sees besides the user's turns is built here, from data
- * gitlib already holds, and is cut to fit the context window before it is sent.
+ * gitlib already holds, and is cut to fit the context window before it is sent. `remote` supplies the GitHub-only
+ * repositories (their list, and the details of one the user picked); without it the chat knows only cloned repos.
  */
-export async function handleChat(request: Request, app: GitLibApp = getApp()): Promise<Response> {
+export async function handleChat(request: Request, app: GitLibApp = getApp(), remote?: RemoteChatSource): Promise<Response> {
   const backend = app.chat;
   if (!backend) return jsonError(503, "Chat is turned off (ollama.enabled = false in config.toml).");
 
@@ -46,11 +48,14 @@ export async function handleChat(request: Request, app: GitLibApp = getApp()): P
   }
   const parsed = parseChatRequest(input);
   if (!parsed.ok) return jsonError(400, parsed.error);
-  const { messages, model: requestedModel, repo } = parsed.value;
+  const { messages, model: requestedModel, repo, remote: remoteSlug } = parsed.value;
+  if (remoteSlug && !remote) return jsonError(400, "GitHub repositories are not available to the chat here.");
 
   let systemPrompt: string;
   try {
-    systemPrompt = app.chatSystemPrompt(repo ?? null);
+    const remoteRepositories = remote ? await remote.list().catch(() => []) : [];
+    const remoteContext = remote && remoteSlug ? await remote.resolve(remoteSlug) : null;
+    systemPrompt = app.chatSystemPrompt(repo ?? null, { remote: remoteContext, remoteRepositories });
   } catch (error) {
     // `isGitLibError`, not `instanceof`: the dev server can hold two copies of core, and a class check then fails.
     if (isGitLibError(error)) return jsonError(400, error.message);

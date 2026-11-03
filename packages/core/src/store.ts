@@ -84,6 +84,14 @@ const SCHEMA = `
     fetched_at TEXT NOT NULL
   );
 
+  -- What GitHub says about one repository that is not cloned locally (languages, README, top-level files), so the
+  -- chat can answer questions about it. Keyed by lowercased "owner/repo" like the community profiles.
+  CREATE TABLE IF NOT EXISTS github_repo_snapshots (
+    slug TEXT PRIMARY KEY,
+    payload TEXT NOT NULL,
+    fetched_at TEXT NOT NULL
+  );
+
   -- What a hosting service (GitHub, GitLab) last listed for the configured account, one row per provider.
   CREATE TABLE IF NOT EXISTS remote_repo_listings (
     provider TEXT PRIMARY KEY,
@@ -91,6 +99,14 @@ const SCHEMA = `
     fetched_at TEXT NOT NULL
   );
 `;
+
+/** A GitHub repository snapshot as last fetched; `payload` is opaque to the store (the caller serializes it). */
+export interface StoredRepoSnapshot {
+  /** Lowercased `owner/repo`. */
+  slug: string;
+  payload: string;
+  fetchedAt: string;
+}
 
 /** A GitHub community profile as last fetched; `payload` is opaque to the store (the caller serializes it). */
 export interface StoredCommunityProfile {
@@ -336,6 +352,25 @@ export class Store {
         }[]
       ).map((row) => ({ slug: row.slug, payload: row.payload, fetchedAt: row.fetched_at })),
     );
+  }
+
+  /** Keeps the newest snapshot of a GitHub repo; `slug` is matched case-insensitively. */
+  saveRepoSnapshot(slug: string, payload: string, fetchedAt: string): void {
+    this.transaction((db) => {
+      db.prepare(
+        `INSERT INTO github_repo_snapshots(slug, payload, fetched_at) VALUES (?, ?, ?)
+         ON CONFLICT(slug) DO UPDATE SET payload = excluded.payload, fetched_at = excluded.fetched_at`,
+      ).run(slug.toLowerCase(), payload, fetchedAt);
+    });
+  }
+
+  getRepoSnapshot(slug: string): StoredRepoSnapshot | null {
+    return this.withConnection((db) => {
+      const row = db
+        .prepare("SELECT slug, payload, fetched_at FROM github_repo_snapshots WHERE slug = ?")
+        .get(slug.toLowerCase()) as { slug: string; payload: string; fetched_at: string } | undefined;
+      return row ? { slug: row.slug, payload: row.payload, fetchedAt: row.fetched_at } : null;
+    });
   }
 
   saveRemoteListing(provider: string, payload: string, fetchedAt: string): void {

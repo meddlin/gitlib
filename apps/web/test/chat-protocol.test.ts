@@ -55,8 +55,18 @@ describe("parseChatRequest", () => {
     ["a model name that is not text", { messages: [ask()], model: 5 }],
     ["an empty repo", { messages: [ask()], repo: "" }],
     ["a repo that is not text", { messages: [ask()], repo: { path: "x" } }],
+    ["a remote that is not owner/repo", { messages: [ask()], remote: "just-a-name" }],
+    ["a remote with a path that climbs", { messages: [ask()], remote: "../etc" }],
+    ["a remote with a third segment", { messages: [ask()], remote: "a/b/c" }],
+    ["a remote that is not text", { messages: [ask()], remote: 5 }],
+    ["both a repo and a remote", { messages: [ask()], repo: "work/x", remote: "acme/widgets" }],
   ])("rejects %s", (_name, input) => {
     expect(parseChatRequest(input).ok).toBe(false);
+  });
+
+  it("accepts a GitHub repository to ask about", () => {
+    const parsed = parseChatRequest({ messages: [ask()], remote: "acme/widgets.js" });
+    expect(parsed).toEqual({ ok: true, value: { messages: [{ role: "user", content: "hi" }], remote: "acme/widgets.js" } });
   });
 
   it("enforces the size limits", () => {
