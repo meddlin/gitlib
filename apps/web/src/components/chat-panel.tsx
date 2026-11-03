@@ -1,14 +1,17 @@
 import { useMatch } from "@tanstack/react-router";
-import { BookMarked, Library, RefreshCw, Send, Square, Trash2, TriangleAlert } from "lucide-react";
-import { memo, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { RefreshCw, Send, Square, Trash2, TriangleAlert } from "lucide-react";
+import { memo, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { MarkdownBody } from "#/components/markdown-body";
 import { Button } from "#/components/ui/button";
+import { RelativeTime } from "#/components/relative-time";
 import { NativeSelect } from "#/components/ui/native-select";
+import { SearchSelect, type SearchSelectOption } from "#/components/ui/search-select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "#/components/ui/sheet";
 import { Textarea } from "#/components/ui/textarea";
 import { MAX_TURN_CHARS } from "#/lib/chat-protocol";
 import { useChat, type ChatMessageView } from "#/lib/use-chat";
-import { getChatStatus, type ChatStatus } from "#/server/chat";
+import { getCatalog } from "#/server/catalog";
+import { getChatStatus, syncRemoteRepo, type ChatStatus, type RemoteSync } from "#/server/chat";
 
 const MODEL_KEY = "gitlib:chat-model";
 
@@ -51,16 +54,103 @@ function useChatStatus(open: boolean) {
   return { result, retry: () => setAttempt((count) => count + 1) };
 }
 
-function ScopeChip({ repo }: { repo: string | null }) {
-  const Icon = repo ? BookMarked : Library;
+/** What the next question is about: everything, a cloned repository, or a GitHub repository that is not cloned. */
+type Scope = { kind: "all" } | { kind: "local"; path: string } | { kind: "remote"; slug: string };
+
+const ALL_VALUE = "all";
+
+const scopeValue = (scope: Scope): string =>
+  scope.kind === "all" ? ALL_VALUE : scope.kind === "local" ? `local:${scope.path}` : `remote:${scope.slug}`;
+
+function scopeFromValue(value: string): Scope {
+  if (value.startsWith("local:")) return { kind: "local", path: value.slice("local:".length) };
+  if (value.startsWith("remote:")) return { kind: "remote", slug: value.slice("remote:".length) };
+  return { kind: "all" };
+}
+
+function scopeLabel(scope: Scope): string {
+  if (scope.kind === "all") return "All repositories";
+  if (scope.kind === "local") return scope.path.split("/").pop() || scope.path;
+  return `${scope.slug} (GitHub)`;
+}
+
+/** Every repository the chat can be pointed at: cloned ones, and GitHub ones that are not cloned. Loaded once, when the panel first opens. */
+function useScopeOptions(open: boolean): SearchSelectOption[] {
+  const [entries, setEntries] = useState<Awaited<ReturnType<typeof getCatalog>>["entries"] | null>(null);
+  useEffect(() => {
+    if (!open || entries) return;
+    let cancelled = false;
+    getCatalog()
+      .then((catalog) => !cancelled && setEntries(catalog.entries))
+      .catch(() => !cancelled && setEntries([])); // the picker still offers "All repositories"
+    return () => {
+      cancelled = true;
+    };
+  }, [open, entries]);
+
+  return useMemo(
+    () => [
+      { value: ALL_VALUE, label: "All repositories" },
+      ...(entries ?? []).flatMap((entry): SearchSelectOption[] => {
+        const local = entry.locals[0];
+        if (local) return [{ value: scopeValue({ kind: "local", path: local }), label: entry.fullName }];
+        if (entry.github?.listed) return [{ value: scopeValue({ kind: "remote", slug: entry.github.fullName }), label: `${entry.github.fullName} (GitHub only)` }];
+        return [];
+      }),
+    ],
+    [entries],
+  );
+}
+
+type SyncState = ({ state: "loading" } | ({ state: "done" } & RemoteSync)) & { slug: string };
+
+/** Fetches what GitHub says about the picked repository, so the first question about it is not slowed down. */
+function useRemoteSync(slug: string | null) {
+  const [sync, setSync] = useState<SyncState | null>(null);
+
+  function run(target: string, force: boolean) {
+    setSync({ slug: target, state: "loading" });
+    syncRemoteRepo({ data: { slug: target, force } })
+      .then((result) => setSync((current) => (current?.slug === target ? { slug: target, state: "done", ...result } : current)))
+      .catch((error: unknown) =>
+        setSync((current) =>
+          current?.slug === target
+            ? { slug: target, state: "done", fetchedAt: null, error: error instanceof Error ? error.message : "Could not reach GitHub." }
+            : current,
+        ),
+      );
+  }
+
+  useEffect(() => {
+    if (slug) run(slug, false);
+    else setSync(null);
+  }, [slug]);
+
+  return { sync: sync && sync.slug === slug ? sync : null, refresh: () => slug && run(slug, true) };
+}
+
+function RemoteStatus({ sync, refresh, disabled }: { sync: SyncState | null; refresh: () => void; disabled: boolean }) {
+  if (!sync || sync.state === "loading") return <p className="text-xs text-muted-foreground">Fetching details from GitHub…</p>;
   return (
-    <span
-      className="inline-flex min-w-0 max-w-48 items-center gap-1 rounded-full border px-2 py-0.5 text-xs text-muted-foreground"
-      title={repo ? `Answers can use ${repo}'s notes and README` : "Answers use the list of all your repositories"}
-    >
-      <Icon className="size-3 shrink-0" aria-hidden />
-      <span className="truncate">{repo ? (repo.split("/").pop() ?? repo) : "All repositories"}</span>
-    </span>
+    <div className="space-y-1 text-xs text-muted-foreground">
+      <p className="flex flex-wrap items-center gap-x-2">
+        {sync.fetchedAt ? (
+          <span>
+            Details from GitHub, <RelativeTime iso={sync.fetchedAt} />
+          </span>
+        ) : (
+          <span>No details from GitHub yet.</span>
+        )}
+        <Button type="button" variant="ghost" size="xs" onClick={refresh} disabled={disabled} className="h-5 px-1.5">
+          <RefreshCw /> Refresh
+        </Button>
+      </p>
+      {sync.error && (
+        <p role="alert" className="text-destructive">
+          {sync.error}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -96,6 +186,7 @@ const Message = memo(function Message({ message }: { message: ChatMessageView })
 
 const LIBRARY_QUESTIONS = ["Which of my repos use TypeScript?", "Which repos have no description?", "What are my favorites?"];
 const REPO_QUESTIONS = ["What is this repo for?", "How do I run it?", "Summarize my notes on it."];
+const REMOTE_QUESTIONS = ["What can you tell me about the repo composition?", "What is this repo for?", "What is at the top level of the repo?"];
 
 /** Why the composer is off, or null when chat is ready. */
 function Banner({ result, retry }: { result: StatusState; retry: () => void }) {
@@ -136,8 +227,17 @@ function Banner({ result, retry }: { result: StatusState; retry: () => void }) {
 export function ChatPanel({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const { result, retry } = useChatStatus(open);
   const status = result.state === "ready" ? result.status : null;
-  // On a repository's page the answers can use its notes and README.
-  const repo = useMatch({ from: "/repos/$", shouldThrow: false })?.params._splat || null;
+  // On a repository's page the answers can use its notes and README, unless another scope is picked.
+  const routeRepo = useMatch({ from: "/repos/$", shouldThrow: false })?.params._splat || null;
+  const [picked, setPicked] = useState<Scope | null>(null);
+  // Going to another page puts the scope back to what that page is about.
+  useEffect(() => setPicked(null), [routeRepo]);
+  const scope: Scope = picked ?? (routeRepo ? { kind: "local", path: routeRepo } : { kind: "all" });
+  const repo = scope.kind === "local" ? scope.path : null;
+  const remote = scope.kind === "remote" ? scope.slug : null;
+  const scoped = repo !== null || remote !== null;
+  const scopeOptions = useScopeOptions(open);
+  const remoteSync = useRemoteSync(remote);
 
   const chat = useChat();
   const [draft, setDraft] = useState("");
@@ -161,7 +261,7 @@ export function ChatPanel({ open, onOpenChange }: { open: boolean; onOpenChange:
     if (!ready || chat.busy || !question) return;
     setDraft("");
     stuckToBottom.current = true;
-    void chat.send(question, { model, repo });
+    void chat.send(question, { model, repo, remote });
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -171,7 +271,7 @@ export function ChatPanel({ open, onOpenChange }: { open: boolean; onOpenChange:
     }
   }
 
-  const questions = repo ? REPO_QUESTIONS : LIBRARY_QUESTIONS;
+  const questions = remote ? REMOTE_QUESTIONS : repo ? REPO_QUESTIONS : LIBRARY_QUESTIONS;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange} modal={false}>
@@ -186,7 +286,6 @@ export function ChatPanel({ open, onOpenChange }: { open: boolean; onOpenChange:
         <SheetHeader className="gap-2 border-b p-3 pr-10">
           <div className="flex items-center gap-2">
             <SheetTitle className="text-sm">Ask Gitlib</SheetTitle>
-            <ScopeChip repo={repo} />
             <Button
               type="button"
               variant="ghost"
@@ -201,6 +300,15 @@ export function ChatPanel({ open, onOpenChange }: { open: boolean; onOpenChange:
             </Button>
           </div>
           <SheetDescription className="sr-only">Ask a local model questions about your repositories.</SheetDescription>
+          <SearchSelect
+            aria-label="Repository to ask about"
+            className="h-8 text-xs"
+            options={scopeOptions}
+            placeholder={scopeLabel(scope)}
+            searchPlaceholder="Find a repository…"
+            onSelect={(value) => setPicked(scopeFromValue(value))}
+          />
+          {remote && <RemoteStatus sync={remoteSync.sync} refresh={remoteSync.refresh} disabled={chat.busy || remoteSync.sync?.state === "loading"} />}
           {status && status.models.length > 0 && (
             <NativeSelect
               aria-label="Model"
@@ -234,8 +342,10 @@ export function ChatPanel({ open, onOpenChange }: { open: boolean; onOpenChange:
           {chat.messages.length === 0 && ready && (
             <div className="space-y-2">
               <p className="text-sm text-muted-foreground">
-                {repo ? "Ask about this repository, or about your library." : "Ask about your repositories."} Answers use only what
-                Gitlib knows: names, technologies, descriptions, notes and READMEs.
+                {scoped ? "Ask about this repository, or about your library." : "Ask about your repositories."}{" "}
+                {remote
+                  ? "This one is not cloned, so answers use what GitHub reports: description, languages, top-level files and README."
+                  : "Answers use only what Gitlib knows: names, technologies, descriptions, notes and READMEs."}
               </p>
               <div className="flex flex-wrap gap-2">
                 {questions.map((question) => (
@@ -271,7 +381,7 @@ export function ChatPanel({ open, onOpenChange }: { open: boolean; onOpenChange:
               disabled={!ready}
               maxLength={MAX_TURN_CHARS}
               aria-label="Your question"
-              placeholder={repo ? "Ask about this repo…" : "Ask about your repositories…"}
+              placeholder={scoped ? "Ask about this repo…" : "Ask about your repositories…"}
               className="max-h-40 min-h-9 resize-none"
             />
             {chat.busy ? (

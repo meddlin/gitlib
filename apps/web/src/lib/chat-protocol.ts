@@ -7,6 +7,12 @@ export const MAX_TURNS = 40;
 export const MAX_TURN_CHARS = 8_000;
 export const MAX_MODEL_NAME_CHARS = 120;
 export const MAX_REPO_PATH_CHARS = 1_000;
+export const MAX_REMOTE_SLUG_CHARS = 200;
+/** GitHub's `owner/repo`: an owner of letters, digits and dashes, and a repo of those plus dots and underscores, but never `.` or `..`. */
+const REMOTE_SLUG = /^[A-Za-z0-9-]+\/(?!\.{1,2}$)[A-Za-z0-9_.-]+$/;
+
+export const isRemoteSlug = (value: unknown): value is string =>
+  typeof value === "string" && value.length <= MAX_REMOTE_SLUG_CHARS && REMOTE_SLUG.test(value);
 /** Room for MAX_TURNS full turns, with multi-byte characters, and no more. */
 export const MAX_BODY_BYTES = 400_000;
 
@@ -22,6 +28,8 @@ export interface ChatRequestBody {
   model?: string;
   /** `relativePath` of the repository the user is looking at. */
   repo?: string;
+  /** `owner/repo` of a GitHub repository that is not cloned locally, picked in the chat. Not sent together with `repo`. */
+  remote?: string;
 }
 
 export type ChatStreamEvent =
@@ -37,7 +45,7 @@ const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
 /** Checks an untrusted request body. Only `user` and `assistant` turns are accepted: the system prompt is the server's. */
 export function parseChatRequest(input: unknown): Parsed<ChatRequestBody> {
   if (typeof input !== "object" || input === null || Array.isArray(input)) return { ok: false, error: "Send a JSON object." };
-  const { messages, model, repo } = input as Record<string, unknown>;
+  const { messages, model, repo, remote } = input as Record<string, unknown>;
 
   if (!Array.isArray(messages) || messages.length === 0) return { ok: false, error: "messages must be a non-empty list." };
   if (messages.length > MAX_TURNS) return { ok: false, error: `messages can hold at most ${MAX_TURNS} turns.` };
@@ -62,6 +70,13 @@ export function parseChatRequest(input: unknown): Parsed<ChatRequestBody> {
   if (repo !== undefined) {
     if (typeof repo !== "string" || !repo || repo.length > MAX_REPO_PATH_CHARS) return { ok: false, error: "repo must be a repository path." };
     value.repo = repo;
+  }
+  if (remote !== undefined) {
+    if (repo !== undefined) return { ok: false, error: "Send repo or remote, not both." };
+    if (!isRemoteSlug(remote)) {
+      return { ok: false, error: "remote must be a GitHub repository as owner/repo." };
+    }
+    value.remote = remote;
   }
   return { ok: true, value };
 }

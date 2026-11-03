@@ -17,6 +17,8 @@ export interface SendOptions {
   model: string | null;
   /** `relativePath` of the repository on screen, if any. */
   repo: string | null;
+  /** `owner/repo` of a GitHub repository that is not cloned, if one is picked. Never set together with `repo`. */
+  remote?: string | null;
 }
 
 /** A failure whose message is already fit to show. */
@@ -51,7 +53,7 @@ export function useChat() {
   );
 
   const send = useCallback(
-    async (text: string, { model, repo }: SendOptions) => {
+    async (text: string, { model, repo, remote }: SendOptions) => {
       const question = text.trim();
       if (!question || controllerRef.current) return;
 
@@ -71,7 +73,7 @@ export function useChat() {
       const controller = new AbortController();
       controllerRef.current = controller;
       setBusy(true);
-      const body: ChatRequestBody = { messages: turns, ...(model ? { model } : {}), ...(repo ? { repo } : {}) };
+      const body: ChatRequestBody = { messages: turns, ...(model ? { model } : {}), ...(repo ? { repo } : {}), ...(remote && !repo ? { remote } : {}) };
 
       try {
         const response = await fetch("/api/chat", {

@@ -1,6 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
-import { buildChatSystemPrompt, ModelLane, OllamaBackend, type ChatBackend } from "./ai/index.js";
+import {
+  buildChatSystemPrompt,
+  ModelLane,
+  OllamaBackend,
+  type ChatBackend,
+  type RemoteLibraryEntry,
+  type RemoteRepoContext,
+} from "./ai/index.js";
 import { DEFAULT_OLLAMA_HOST, loadConfig, type AppConfig, type Env, type OllamaConnectionMode } from "./config.js";
 import {
   hostFor,
@@ -251,10 +258,15 @@ export class GitLibApp {
   /**
    * The chat's system prompt: a capped list of every repository plus, when `repoSelector` names one, that
    * repository's details and README. Throws `RepoNotFoundError` for a repository gitlib does not know.
+   * GitHub-only repositories are not in gitlib's scan, so the caller that knows them passes them in `remote`
+   * (the one being looked at) and `remoteRepositories` (all of them).
    */
-  chatSystemPrompt(repoSelector?: string | null): string {
+  chatSystemPrompt(
+    repoSelector?: string | null,
+    { remote, remoteRepositories }: { remote?: RemoteRepoContext | null; remoteRepositories?: readonly RemoteLibraryEntry[] } = {},
+  ): string {
     const repo = repoSelector ? this.store.resolveRepository(repoSelector) : null;
-    return buildChatSystemPrompt({ repositories: this.loadRepositories(), repo });
+    return buildChatSystemPrompt({ repositories: this.loadRepositories(), repo, remote, remoteRepositories });
   }
 
   /**

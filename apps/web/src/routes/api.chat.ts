@@ -12,7 +12,9 @@ export const Route = createFileRoute("/api/chat")({
     handlers: {
       POST: async ({ request }: { request: Request }): Promise<Response> => {
         const { handleChat } = await import("../server/chat.server");
-        return handleChat(request);
+        const { githubChatSource } = await import("../server/repo-snapshot.server");
+        const { getApp } = await import("../server/gitlib.server");
+        return handleChat(request, getApp(), githubChatSource);
       },
     },
   },
