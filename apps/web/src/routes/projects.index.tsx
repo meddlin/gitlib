@@ -52,7 +52,7 @@ function Projects() {
                   {project.name}
                 </Link>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  {count(project.repoCount, "repository", "repositories")} · {count(project.issueCount, "issue", "issues")}
+                  {count(project.repoCount, "repository", "repositories")} · {count(project.issueCount, "gitlib issue", "gitlib issues")}
                   {project.issueCount > 0 ? ` (${project.openIssueCount} open)` : ""}
                 </p>
               </div>
