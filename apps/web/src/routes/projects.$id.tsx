@@ -2,6 +2,7 @@ import { Link, createFileRoute, notFound, useRouter } from "@tanstack/react-rout
 import { ArrowLeft, CircleCheck, CircleDot, Pencil, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { DeleteProjectDialog } from "#/components/delete-project-dialog";
+import { ProjectGitHubPreview } from "#/components/project-github-preview";
 import { ProjectNameDialog } from "#/components/project-name-dialog";
 import { Button } from "#/components/ui/button";
 import { SearchSelect } from "#/components/ui/search-select";
@@ -153,13 +154,16 @@ function ProjectDetailPage() {
 
       <section aria-labelledby="project-issues" className="grid gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 id="project-issues" className="text-lg font-semibold">
-            Issues <span className="text-sm font-normal text-muted-foreground">{project.issues.length}</span>
-          </h2>
+          <div>
+            <h2 id="project-issues" className="text-lg font-semibold">
+              Gitlib issues <span className="text-sm font-normal text-muted-foreground">{project.issues.length}</span>
+            </h2>
+            <p className="text-sm text-muted-foreground">Your own planning issues. They live in gitlib only and are never sent to GitHub.</p>
+          </div>
           {project.unassignedIssues.length > 0 ? (
             <SearchSelect
-              aria-label="Add an issue"
-              placeholder="Add an issue…"
+              aria-label="Add a gitlib issue"
+              placeholder="Add a gitlib issue…"
               searchPlaceholder="Search issues…"
               emptyText="No matching issues."
               disabled={busy}
@@ -178,7 +182,7 @@ function ProjectDetailPage() {
           ) : null}
         </div>
         {project.issues.length === 0 ? (
-          <p className="border-y py-6 text-center text-sm text-muted-foreground">No issues in this project yet.</p>
+          <p className="border-y py-6 text-center text-sm text-muted-foreground">No gitlib issues in this project yet.</p>
         ) : (
           <ul className="divide-y border-y" data-testid="project-issue-list">
             {project.issues.map((issue) => {
@@ -225,6 +229,8 @@ function ProjectDetailPage() {
           </ul>
         )}
       </section>
+
+      <ProjectGitHubPreview projectId={project.id} repoPaths={project.repos.map((repo) => repo.relativePath)} />
     </div>
   );
 }

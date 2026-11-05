@@ -242,6 +242,21 @@ tabs are separate and stay read-only GitHub views).
   stay readable and are labelled "repository not found"; new issues can only be filed against repos
   gitlib currently sees.
 
+### Projects
+
+The **Projects** page (`/projects`) groups repositories and gitlib issues under a name, so one project can span
+several repos. A project page has two parts that are kept apart on purpose:
+
+- **Repositories** and **Gitlib issues** are gitlib's own data, stored in `planning.db`. You can add, remove and
+  edit them, and nothing in them is ever sent to GitHub.
+- **On GitHub** is a read-only preview: for each repo in the project that has a GitHub remote it shows the open
+  pull requests, open issues and the latest commits on the default branch. Every row links out to GitHub and is
+  named `owner/repo#12`, so it cannot be mistaken for a gitlib issue (`repo#3`). Gitlib never writes to GitHub
+  here, never saves what it reads, and never reads it back into planning: the only copy is an in-memory cache that
+  lasts about five minutes (the **Refresh** button skips it) and is gone when the server restarts. A repo with no
+  GitHub remote, or one GitHub cannot show (not found, rate limited), is reported on its own line. Set
+  `GITHUB_TOKEN` to read private repos and avoid the 60-requests-an-hour limit for anonymous use.
+
 Planning data lives in its own file, `~/.git-library/planning.db`, not in `gitlib.db`. `gitlib.db` is
 rebuilt by rescanning and its tables are shared with the original Python version; planning data cannot
 be rebuilt, so it has its own versioned schema (append-only migrations tracked in `PRAGMA

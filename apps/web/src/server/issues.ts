@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import type { GitHubRepoRef } from "@gitlib/core";
-import { githubGet, githubToken, groupReposByGitHubSlug, resolveGitHubSource } from "./github.server";
+import { githubToken, groupReposByGitHubSlug, resolveGitHubSource } from "./github.server";
+import { fetchOpenIssues } from "./github-lists.server";
 import type { Provider } from "./provider";
 
 export interface IssueView {
@@ -28,21 +29,6 @@ export interface IssuesView {
   error: string | null;
 }
 
-const PAGE_SIZE = 50;
-
-interface GitHubIssue {
-  number: number;
-  title: string;
-  html_url: string;
-  created_at: string;
-  updated_at: string;
-  comments: number;
-  user: { login: string } | null;
-  labels: (string | { name?: string; color?: string })[];
-  /** Present when the "issue" is really a pull request. */
-  pull_request?: unknown;
-}
-
 type IssuesSource = Pick<IssuesView, "provider" | "slug" | "issuesUrl">;
 
 const NO_SOURCE: IssuesSource = { provider: null, slug: null, issuesUrl: null };
@@ -68,37 +54,9 @@ export const getIssues = createServerFn({ method: "GET" })
       if (!source) return { ...view, ...NO_ISSUES, error: null };
       view = { provider: source.provider, slug: source.slug, issuesUrl: `https://github.com/${source.slug}/issues` };
 
-      // The issues endpoint also lists pull requests, so over-fetch a page and filter them out below.
-      const result = await githubGet<GitHubIssue[]>(source, "/issues", {
-        state: "open",
-        sort: "updated",
-        direction: "desc",
-        per_page: String(PAGE_SIZE),
-      });
+      const result = await fetchOpenIssues(source);
       if (result.error !== null) return failure(view, result.error);
-
-      const items = result.data;
-      const issues = items
-        .filter((item) => !item.pull_request)
-        .map(
-          (item): IssueView => ({
-            number: item.number,
-            title: item.title,
-            url: item.html_url,
-            author: item.user?.login ?? null,
-            createdAt: item.created_at,
-            updatedAt: item.updated_at,
-            comments: item.comments,
-            labels: item.labels.flatMap((label) =>
-              typeof label === "string"
-                ? [{ name: label, color: "888888" }]
-                : label.name
-                  ? [{ name: label.name, color: label.color ?? "888888" }]
-                  : [],
-            ),
-          }),
-        );
-      return { ...view, issues, hasMore: items.length === PAGE_SIZE, error: null };
+      return { ...view, issues: result.items, hasMore: result.hasMore, error: null };
     } catch (caught) {
       return failure(view, caught instanceof Error ? caught.message : "Could not load issues.");
     }
