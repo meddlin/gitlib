@@ -7,7 +7,12 @@ import {
   LocalIssueValidationError,
   MAX_ISSUE_BODY_LENGTH,
   MAX_ISSUE_TITLE_LENGTH,
+  MAX_MILESTONE_TITLE_LENGTH,
   MIGRATIONS,
+  MilestoneNotFoundError,
+  MilestoneProjectMismatchError,
+  MilestoneTitleTakenError,
+  MilestoneValidationError,
   PlanningSchemaError,
   PlanningStore,
   ProjectNameTakenError,
@@ -388,5 +393,172 @@ describe("projects", () => {
     app.addRepoToProject(project.id, "alpha");
     app.deleteProject(project.id);
     expect(app.createProject("Launch").repoPaths).toEqual([]);
+  });
+});
+
+describe("milestones", () => {
+  beforeEach(() => {
+    fx.makeRepo("alpha");
+  });
+
+  const appWithRepos = () => {
+    const app = createApplication(fx.env());
+    app.refresh();
+    return app;
+  };
+
+  it("creates, edits, lists and deletes milestones within a project", () => {
+    const app = appWithRepos();
+    const project = app.createProject("Launch");
+    const later = app.createMilestone(project.id, { title: "  Beta  ", dueDate: "2026-09-01" });
+    const sooner = app.createMilestone(project.id, { title: "Alpha", description: " First cut ", dueDate: "2026-06-01" });
+    const undated = app.createMilestone(project.id, { title: "Someday" });
+
+    expect(later.title).toBe("Beta");
+    expect(sooner.description).toBe("First cut");
+    expect(undated.dueDate).toBeNull();
+    // Soonest first, undated last.
+    expect(app.listMilestones(project.id).map((m) => m.title)).toEqual(["Alpha", "Beta", "Someday"]);
+
+    const edited = app.updateMilestone(later.id, { title: "Beta 2", dueDate: null });
+    expect(edited).toMatchObject({ title: "Beta 2", dueDate: null, description: "" });
+    expect(app.updateMilestone(sooner.id, { description: "Changed" })).toMatchObject({
+      title: "Alpha",
+      dueDate: "2026-06-01",
+    });
+
+    app.deleteMilestone(undated.id);
+    expect(() => app.getMilestone(undated.id)).toThrow(MilestoneNotFoundError);
+    expect(() => app.updateMilestone(undated.id, { title: "x" })).toThrow(MilestoneNotFoundError);
+    expect(app.listMilestones().map((m) => m.title)).toEqual(["Alpha", "Beta 2"]);
+  });
+
+  it("validates titles, descriptions and due dates", () => {
+    const app = appWithRepos();
+    const project = app.createProject("Launch");
+    const milestone = app.createMilestone(project.id, { title: "Alpha" });
+
+    expect(() => app.createMilestone(project.id, { title: "   " })).toThrow(MilestoneValidationError);
+    expect(() => app.createMilestone(project.id, { title: "x".repeat(MAX_MILESTONE_TITLE_LENGTH + 1) })).toThrow(
+      MilestoneValidationError,
+    );
+    for (const bad of ["2026-02-31", "2026-13-01", "06/01/2026", "2026-6-1", "tomorrow"]) {
+      expect(() => app.createMilestone(project.id, { title: "Bad", dueDate: bad })).toThrow(MilestoneValidationError);
+      expect(() => app.updateMilestone(milestone.id, { dueDate: bad })).toThrow(MilestoneValidationError);
+    }
+    expect(app.createMilestone(project.id, { title: "Leap", dueDate: "2028-02-29" }).dueDate).toBe("2028-02-29");
+    expect(app.createMilestone(project.id, { title: "Blank", dueDate: "  " }).dueDate).toBeNull();
+    expect(() => app.createMilestone(999, { title: "Orphan" })).toThrow(ProjectNotFoundError);
+  });
+
+  it("keeps titles unique per project, ignoring case", () => {
+    const app = appWithRepos();
+    const a = app.createProject("A");
+    const b = app.createProject("B");
+    const first = app.createMilestone(a.id, { title: "v1" });
+    const second = app.createMilestone(a.id, { title: "v2" });
+
+    expect(() => app.createMilestone(a.id, { title: "V1" })).toThrow(MilestoneTitleTakenError);
+    expect(() => app.updateMilestone(second.id, { title: "V1" })).toThrow(MilestoneTitleTakenError);
+    // Changing only the case of its own title is allowed, and another project may reuse a title.
+    expect(app.updateMilestone(first.id, { title: "V1" }).title).toBe("V1");
+    expect(app.createMilestone(b.id, { title: "v1" }).projectId).toBe(b.id);
+  });
+
+  it("puts an issue in a milestone of its own project only", () => {
+    const app = appWithRepos();
+    const launch = app.createProject("Launch");
+    const other = app.createProject("Other");
+    const milestone = app.createMilestone(launch.id, { title: "Alpha" });
+    const foreign = app.createMilestone(other.id, { title: "Elsewhere" });
+    const issue = app.createLocalIssue("alpha", { title: "Ship it" });
+    expect(issue.milestoneId).toBeNull();
+
+    // No project yet, so no milestone.
+    expect(() => app.setLocalIssueMilestone(issue.id, milestone.id)).toThrow(MilestoneProjectMismatchError);
+    app.setLocalIssueProject(issue.id, launch.id);
+    expect(() => app.setLocalIssueMilestone(issue.id, foreign.id)).toThrow(MilestoneProjectMismatchError);
+    expect(() => app.setLocalIssueMilestone(issue.id, 999)).toThrow(MilestoneNotFoundError);
+
+    expect(app.setLocalIssueMilestone(issue.id, milestone.id).milestoneId).toBe(milestone.id);
+    expect(app.listLocalIssues({ milestoneId: milestone.id }).map((i) => i.id)).toEqual([issue.id]);
+    expect(app.setLocalIssueMilestone(issue.id, null).milestoneId).toBeNull();
+    expect(app.listLocalIssues({ milestoneId: milestone.id })).toEqual([]);
+  });
+
+  it("leaves an issue untouched when its milestone is set to what it already is", () => {
+    const app = appWithRepos();
+    const project = app.createProject("Launch");
+    const milestone = app.createMilestone(project.id, { title: "Alpha" });
+    const issue = app.createLocalIssue("alpha", { title: "Ship it" });
+    app.setLocalIssueProject(issue.id, project.id);
+    const assigned = app.setLocalIssueMilestone(issue.id, milestone.id);
+
+    expect(app.setLocalIssueMilestone(issue.id, milestone.id)).toEqual(assigned);
+  });
+
+  it("clears the milestone when the issue changes project or leaves its project", () => {
+    const app = appWithRepos();
+    const launch = app.createProject("Launch");
+    const other = app.createProject("Other");
+    const milestone = app.createMilestone(launch.id, { title: "Alpha" });
+    const issue = app.createLocalIssue("alpha", { title: "Ship it" });
+    app.setLocalIssueProject(issue.id, launch.id);
+
+    app.setLocalIssueMilestone(issue.id, milestone.id);
+    expect(app.setLocalIssueProject(issue.id, other.id)).toMatchObject({ projectId: other.id, milestoneId: null });
+
+    app.setLocalIssueProject(issue.id, launch.id);
+    app.setLocalIssueMilestone(issue.id, milestone.id);
+    expect(app.setLocalIssueProject(issue.id, null)).toMatchObject({ projectId: null, milestoneId: null });
+
+    // Re-filing under the project it is already in keeps the milestone.
+    app.setLocalIssueProject(issue.id, launch.id);
+    app.setLocalIssueMilestone(issue.id, milestone.id);
+    expect(app.setLocalIssueProject(issue.id, launch.id).milestoneId).toBe(milestone.id);
+  });
+
+  it("keeps issues in their project when a milestone is deleted", () => {
+    const app = appWithRepos();
+    const project = app.createProject("Launch");
+    const milestone = app.createMilestone(project.id, { title: "Alpha" });
+    const issue = app.createLocalIssue("alpha", { title: "Ship it" });
+    app.setLocalIssueProject(issue.id, project.id);
+    app.setLocalIssueMilestone(issue.id, milestone.id);
+
+    app.deleteMilestone(milestone.id);
+
+    expect(app.getLocalIssue(issue.id)).toMatchObject({ projectId: project.id, milestoneId: null });
+  });
+
+  it("deletes a project's milestones with it and frees their issues", () => {
+    const app = appWithRepos();
+    const project = app.createProject("Launch");
+    const milestone = app.createMilestone(project.id, { title: "Alpha" });
+    const issue = app.createLocalIssue("alpha", { title: "Ship it" });
+    app.setLocalIssueProject(issue.id, project.id);
+    app.setLocalIssueMilestone(issue.id, milestone.id);
+
+    app.deleteProject(project.id);
+
+    expect(app.listMilestones()).toEqual([]);
+    expect(app.getLocalIssue(issue.id)).toMatchObject({ projectId: null, milestoneId: null });
+  });
+
+  it("migrates an older database forward, keeping issues and projects", () => {
+    const before = MIGRATIONS.slice(0, 5);
+    const old = new PlanningStore(planningDbPath(), before);
+    const project = old.createProject("Launch", "2026-01-01T00:00:00+00:00");
+    const issue = old.createIssue({ repoPath: "alpha", title: "Ship it", body: "" }, "2026-01-01T00:00:00+00:00");
+    // The store only knows the newest schema, so file the issue the way a version-5 gitlib would have.
+    const db = new DatabaseSync(planningDbPath());
+    db.prepare("UPDATE local_issues SET project_id = ? WHERE id = ?").run(project.id, issue.id);
+    db.close();
+
+    const upgraded = new PlanningStore(planningDbPath());
+
+    expect(upgraded.schemaVersion()).toBe(LATEST_SCHEMA_VERSION);
+    expect(upgraded.getIssue(issue.id)).toMatchObject({ projectId: project.id, milestoneId: null });
+    expect(upgraded.listMilestones()).toEqual([]);
   });
 });
