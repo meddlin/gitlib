@@ -9,6 +9,7 @@ import {
   type RepoRecord,
 } from "@gitlib/core";
 import { getApp, loadRepositories } from "./gitlib.server";
+import type { MilestoneOption } from "./milestones";
 
 /** An issue that lives in gitlib's own planning database; nothing here is read from or sent to a forge. */
 export interface LocalIssueView extends LocalIssue {
@@ -43,6 +44,8 @@ export interface LocalIssueDetail {
   issue: LocalIssueView;
   limits: IssueLimits;
   projects: { id: number; name: string }[];
+  /** Milestones of the issue's project, which are the only ones it can be put in; empty when it has no project. */
+  milestones: MilestoneOption[];
 }
 
 // A function, not a constant: client bundles must not keep a runtime import of @gitlib/core.
@@ -82,8 +85,16 @@ export const getLocalIssue = createServerFn({ method: "GET" })
     return input;
   })
   .handler(async ({ data }): Promise<LocalIssueDetail | null> => {
-    const issue = getApp().planning.getIssue(data.id);
-    return issue ? { issue: toView(issue, loadRepositories()), limits: issueLimits(), projects: projectOptions() } : null;
+    const app = getApp();
+    const issue = app.planning.getIssue(data.id);
+    if (!issue) return null;
+    return {
+      issue: toView(issue, loadRepositories()),
+      limits: issueLimits(),
+      projects: projectOptions(),
+      milestones:
+        issue.projectId === null ? [] : app.listMilestones(issue.projectId).map(({ id, title }) => ({ id, title })),
+    };
   });
 
 /** Every planning issue filed against one repo (open and closed), most recently updated first. */

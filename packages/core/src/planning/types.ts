@@ -30,6 +30,12 @@ export interface LocalIssue {
   status: IssueStatus;
   /** The project this issue is filed under, or null. Deleting a project sets this back to null. */
   projectId: number | null;
+  /**
+   * The milestone this issue counts toward, or null. It is always one of `projectId`'s milestones, so
+   * an issue with no project has none, and moving an issue to another project clears it. Deleting the
+   * milestone sets this back to null.
+   */
+  milestoneId: number | null;
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;
@@ -41,6 +47,8 @@ export interface LocalIssueQuery {
   state?: LocalIssueState;
   /** Only issues in this project. */
   projectId?: number;
+  /** Only issues in this milestone. */
+  milestoneId?: number;
 }
 
 export interface NewLocalIssue {
@@ -65,6 +73,33 @@ export interface Project {
   repoPaths: string[];
   createdAt: string;
   updatedAt: string;
+}
+
+/** A target within a project that issues are grouped under, optionally with a due date. */
+export interface Milestone {
+  id: number;
+  projectId: number;
+  /** Unique within the project, ignoring case. */
+  title: string;
+  /** Markdown. */
+  description: string;
+  /** A calendar date, `YYYY-MM-DD`, with no time zone; null when the milestone has no deadline. */
+  dueDate: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewMilestone {
+  title: string;
+  description?: string;
+  dueDate?: string | null;
+}
+
+export interface MilestoneChanges {
+  title?: string;
+  description?: string;
+  /** `null` clears the due date. */
+  dueDate?: string | null;
 }
 
 /**
