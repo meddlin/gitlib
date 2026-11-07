@@ -6,10 +6,17 @@ import { ProjectGitHubPreview } from "#/components/project-github-preview";
 import { ProjectNameDialog } from "#/components/project-name-dialog";
 import { Button } from "#/components/ui/button";
 import { SearchSelect } from "#/components/ui/search-select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
 import { statusLabel } from "#/lib/issue-status";
 import { addProjectRepo, getProjectDetail, removeProjectRepo, setIssueProject } from "#/server/projects";
 
+const TABS = ["repositories", "issues", "github"] as const;
+type ProjectTab = (typeof TABS)[number];
+
 export const Route = createFileRoute("/projects/$id")({
+  validateSearch: (search: Record<string, unknown>): { tab?: ProjectTab } => ({
+    tab: TABS.find((tab) => tab === search.tab && tab !== "repositories"),
+  }),
   loader: async ({ params }) => {
     const id = Number(params.id);
     const detail = Number.isInteger(id) && id > 0 ? await getProjectDetail({ data: { id } }) : null;
@@ -17,7 +24,11 @@ export const Route = createFileRoute("/projects/$id")({
     return detail;
   },
   head: ({ loaderData }) => ({
-    meta: [{ title: `${loaderData ? `${loaderData.name} · ` : ""}Projects · Gitlib` }],
+    meta: [
+      {
+        title: `${loaderData ? `${loaderData.name} · ` : ""}Projects · Gitlib`,
+      },
+    ],
   }),
   notFoundComponent: ProjectNotFound,
   component: ProjectDetailPage,
@@ -46,6 +57,7 @@ function ProjectNotFound() {
 function ProjectDetailPage() {
   const project = Route.useLoaderData();
   const navigate = Route.useNavigate();
+  const { tab = "repositories" } = Route.useSearch();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -91,146 +103,198 @@ function ProjectDetailPage() {
         </p>
       ) : null}
 
-      <section aria-labelledby="project-repos" className="grid gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 id="project-repos" className="text-lg font-semibold">
-            Repositories <span className="text-sm font-normal text-muted-foreground">{project.repos.length}</span>
-          </h2>
-          {project.availableRepos.length > 0 ? (
-            <SearchSelect
-              aria-label="Add a repository"
-              placeholder="Add a repository…"
-              searchPlaceholder="Search repositories…"
-              emptyText="No matching repositories."
-              disabled={busy}
-              options={project.availableRepos.map((repo) => ({ value: repo.relativePath, label: repo.relativePath }))}
-              onSelect={(repo) =>
-                void run(() => addProjectRepo({ data: { id: project.id, repo } }), "Could not add the repository.")
-              }
-              className="sm:w-72"
-            />
-          ) : null}
-        </div>
-        {project.repos.length === 0 ? (
-          <p className="border-y py-6 text-center text-sm text-muted-foreground">No repositories in this project yet.</p>
-        ) : (
-          <ul className="divide-y border-y" data-testid="project-repo-list">
-            {project.repos.map((repo) => (
-              <li key={repo.relativePath} className="flex items-center gap-3 py-2.5">
-                <div className="min-w-0 flex-1">
-                  {repo.known ? (
-                    <Link
-                      to="/repos/$"
-                      params={{ _splat: repo.relativePath }}
-                      className="font-mono text-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      {repo.relativePath}
-                    </Link>
-                  ) : (
-                    <span className="font-mono text-sm" title="Gitlib no longer finds this repository.">
-                      {repo.relativePath} (not found)
-                    </span>
-                  )}
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label={`Remove ${repo.relativePath} from this project`}
+      <Tabs
+        value={tab}
+        onValueChange={(next) =>
+          void navigate({
+            search: {
+              tab: TABS.find((t) => t === next && t !== "repositories"),
+            },
+            replace: true,
+          })
+        }
+      >
+        <TabsList aria-label="Project sections">
+          <TabsTrigger value="repositories">
+            Repositories <span className="font-normal text-muted-foreground">{project.repos.length}</span>
+          </TabsTrigger>
+          <TabsTrigger value="issues">
+            Gitlib issues <span className="font-normal text-muted-foreground">{project.issues.length}</span>
+          </TabsTrigger>
+          <TabsTrigger value="github">GitHub</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="repositories">
+          <section aria-labelledby="project-repos" className="grid gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 id="project-repos" className="text-lg font-semibold">
+                Repositories <span className="text-sm font-normal text-muted-foreground">{project.repos.length}</span>
+              </h2>
+              {project.availableRepos.length > 0 ? (
+                <SearchSelect
+                  aria-label="Add a repository"
+                  placeholder="Add a repository…"
+                  searchPlaceholder="Search repositories…"
+                  emptyText="No matching repositories."
                   disabled={busy}
-                  onClick={() =>
+                  options={project.availableRepos.map((repo) => ({
+                    value: repo.relativePath,
+                    label: repo.relativePath,
+                  }))}
+                  onSelect={(repo) =>
+                    void run(() => addProjectRepo({ data: { id: project.id, repo } }), "Could not add the repository.")
+                  }
+                  className="sm:w-72"
+                />
+              ) : null}
+            </div>
+            {project.repos.length === 0 ? (
+              <p className="border-y py-6 text-center text-sm text-muted-foreground">
+                No repositories in this project yet.
+              </p>
+            ) : (
+              <ul className="divide-y border-y" data-testid="project-repo-list">
+                {project.repos.map((repo) => (
+                  <li key={repo.relativePath} className="flex items-center gap-3 py-2.5">
+                    <div className="min-w-0 flex-1">
+                      {repo.known ? (
+                        <Link
+                          to="/repos/$"
+                          params={{ _splat: repo.relativePath }}
+                          className="font-mono text-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          {repo.relativePath}
+                        </Link>
+                      ) : (
+                        <span className="font-mono text-sm" title="Gitlib no longer finds this repository.">
+                          {repo.relativePath} (not found)
+                        </span>
+                      )}
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Remove ${repo.relativePath} from this project`}
+                      disabled={busy}
+                      onClick={() =>
+                        void run(
+                          () =>
+                            removeProjectRepo({
+                              data: { id: project.id, repo: repo.relativePath },
+                            }),
+                          "Could not remove the repository.",
+                        )
+                      }
+                    >
+                      <X aria-hidden />
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </TabsContent>
+
+        <TabsContent value="issues">
+          <section aria-labelledby="project-issues" className="grid gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 id="project-issues" className="text-lg font-semibold">
+                  Gitlib issues{" "}
+                  <span className="text-sm font-normal text-muted-foreground">{project.issues.length}</span>
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Your own planning issues. They live in gitlib only and are never sent to GitHub.
+                </p>
+              </div>
+              {project.unassignedIssues.length > 0 ? (
+                <SearchSelect
+                  aria-label="Add a gitlib issue"
+                  placeholder="Add a gitlib issue…"
+                  searchPlaceholder="Search issues…"
+                  emptyText="No matching issues."
+                  disabled={busy}
+                  options={project.unassignedIssues.map((issue) => ({
+                    value: String(issue.id),
+                    label: `${issue.repoName}#${issue.number} ${issue.title}`,
+                  }))}
+                  onSelect={(value) =>
                     void run(
-                      () => removeProjectRepo({ data: { id: project.id, repo: repo.relativePath } }),
-                      "Could not remove the repository.",
+                      () =>
+                        setIssueProject({
+                          data: {
+                            issueId: Number(value),
+                            projectId: project.id,
+                          },
+                        }),
+                      "Could not add the issue.",
                     )
                   }
-                >
-                  <X aria-hidden />
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+                  className="sm:w-72"
+                />
+              ) : null}
+            </div>
+            {project.issues.length === 0 ? (
+              <p className="border-y py-6 text-center text-sm text-muted-foreground">
+                No gitlib issues in this project yet.
+              </p>
+            ) : (
+              <ul className="divide-y border-y" data-testid="project-issue-list">
+                {project.issues.map((issue) => {
+                  const open = issue.state === "open";
+                  const StateIcon = open ? CircleDot : CircleCheck;
+                  return (
+                    <li key={issue.id} className="flex items-start gap-3 py-2.5">
+                      <StateIcon
+                        className={
+                          open ? "mt-0.5 size-4 shrink-0 text-primary" : "mt-0.5 size-4 shrink-0 text-muted-foreground"
+                        }
+                        aria-label={open ? "Open" : "Closed"}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <Link
+                          to="/planning/issues/$id"
+                          params={{ id: String(issue.id) }}
+                          className="font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          {issue.title}
+                        </Link>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          <span className="font-mono" title={issue.repoPath}>
+                            {issue.repoName}#{issue.number}
+                          </span>
+                          {open ? ` · ${statusLabel(issue.status)}` : " · Closed"}
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Remove ${issue.title} from this project`}
+                        disabled={busy}
+                        onClick={() =>
+                          void run(
+                            () =>
+                              setIssueProject({
+                                data: { issueId: issue.id, projectId: null },
+                              }),
+                            "Could not remove the issue.",
+                          )
+                        }
+                      >
+                        <X aria-hidden />
+                      </Button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+        </TabsContent>
 
-      <section aria-labelledby="project-issues" className="grid gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 id="project-issues" className="text-lg font-semibold">
-              Gitlib issues <span className="text-sm font-normal text-muted-foreground">{project.issues.length}</span>
-            </h2>
-            <p className="text-sm text-muted-foreground">Your own planning issues. They live in gitlib only and are never sent to GitHub.</p>
-          </div>
-          {project.unassignedIssues.length > 0 ? (
-            <SearchSelect
-              aria-label="Add a gitlib issue"
-              placeholder="Add a gitlib issue…"
-              searchPlaceholder="Search issues…"
-              emptyText="No matching issues."
-              disabled={busy}
-              options={project.unassignedIssues.map((issue) => ({
-                value: String(issue.id),
-                label: `${issue.repoName}#${issue.number} ${issue.title}`,
-              }))}
-              onSelect={(value) =>
-                void run(
-                  () => setIssueProject({ data: { issueId: Number(value), projectId: project.id } }),
-                  "Could not add the issue.",
-                )
-              }
-              className="sm:w-72"
-            />
-          ) : null}
-        </div>
-        {project.issues.length === 0 ? (
-          <p className="border-y py-6 text-center text-sm text-muted-foreground">No gitlib issues in this project yet.</p>
-        ) : (
-          <ul className="divide-y border-y" data-testid="project-issue-list">
-            {project.issues.map((issue) => {
-              const open = issue.state === "open";
-              const StateIcon = open ? CircleDot : CircleCheck;
-              return (
-                <li key={issue.id} className="flex items-start gap-3 py-2.5">
-                  <StateIcon
-                    className={open ? "mt-0.5 size-4 shrink-0 text-primary" : "mt-0.5 size-4 shrink-0 text-muted-foreground"}
-                    aria-label={open ? "Open" : "Closed"}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <Link
-                      to="/planning/issues/$id"
-                      params={{ id: String(issue.id) }}
-                      className="font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-                    >
-                      {issue.title}
-                    </Link>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      <span className="font-mono" title={issue.repoPath}>
-                        {issue.repoName}#{issue.number}
-                      </span>
-                      {open ? ` · ${statusLabel(issue.status)}` : " · Closed"}
-                    </p>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Remove ${issue.title} from this project`}
-                    disabled={busy}
-                    onClick={() =>
-                      void run(
-                        () => setIssueProject({ data: { issueId: issue.id, projectId: null } }),
-                        "Could not remove the issue.",
-                      )
-                    }
-                  >
-                    <X aria-hidden />
-                  </Button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
-
-      <ProjectGitHubPreview projectId={project.id} repoPaths={project.repos.map((repo) => repo.relativePath)} />
+        <TabsContent value="github">
+          <ProjectGitHubPreview projectId={project.id} repoPaths={project.repos.map((repo) => repo.relativePath)} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
