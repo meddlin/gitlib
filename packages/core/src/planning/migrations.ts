@@ -97,6 +97,27 @@ export const MIGRATIONS: readonly Migration[] = [
       );
     `,
   },
+  {
+    version: 6,
+    name: "milestones",
+    sql: `
+      -- A milestone belongs to one project; deleting the project deletes its milestones. due_date is a
+      -- calendar date (YYYY-MM-DD) with no time zone, or NULL.
+      CREATE TABLE milestones (
+        id INTEGER PRIMARY KEY,
+        project_id INTEGER NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+        title TEXT NOT NULL COLLATE NOCASE,
+        description TEXT NOT NULL DEFAULT '',
+        due_date TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (project_id, title)
+      );
+      -- Deleting a milestone takes its issues out of it; the issues stay.
+      ALTER TABLE local_issues ADD COLUMN milestone_id INTEGER REFERENCES milestones (id) ON DELETE SET NULL;
+      CREATE INDEX local_issues_by_milestone ON local_issues (milestone_id);
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

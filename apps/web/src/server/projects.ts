@@ -1,6 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { MAX_PROJECT_NAME_LENGTH, type RepoRecord } from "@gitlib/core";
 import { getApp, loadRepositories } from "./gitlib.server";
+import type { MilestoneLimits, MilestoneView } from "./milestones";
+import { milestoneLimits, milestoneViews } from "./milestones.server";
 import { toView, type LocalIssueView, type PlanningRepoOption } from "./planning";
 
 export interface ProjectRepoView {
@@ -32,6 +34,9 @@ export interface ProjectDetail {
   issues: LocalIssueView[];
   /** Issues in no project, which can be added. */
   unassignedIssues: LocalIssueView[];
+  /** Soonest due date first, then milestones with no due date. */
+  milestones: MilestoneView[];
+  milestoneLimits: MilestoneLimits;
   nameLimit: number;
 }
 
@@ -93,6 +98,8 @@ export const getProjectDetail = createServerFn({ method: "GET" })
         .map(({ relativePath, name }) => ({ relativePath, name })),
       issues: issues.filter((issue) => issue.projectId === project.id).map((issue) => toView(issue, repos)),
       unassignedIssues: issues.filter((issue) => issue.projectId === null).map((issue) => toView(issue, repos)),
+      milestones: milestoneViews(app.listMilestones(project.id), issues),
+      milestoneLimits: milestoneLimits(),
       nameLimit: nameLimit(),
     };
   });

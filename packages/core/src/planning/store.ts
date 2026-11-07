@@ -12,6 +12,8 @@ import type {
   LocalIssueChanges,
   LocalIssueQuery,
   LocalIssueState,
+  Milestone,
+  MilestoneChanges,
   NewLocalIssue,
   Project,
 } from "./types.js";
@@ -29,6 +31,10 @@ export const DEFAULT_DEPENDABOT_SCHEDULE: DependabotSchedule = { enabled: false,
 export class LocalIssueNotFoundError extends GitLibError {}
 export class ProjectNotFoundError extends GitLibError {}
 export class ProjectNameTakenError extends GitLibError {}
+export class MilestoneNotFoundError extends GitLibError {}
+export class MilestoneTitleTakenError extends GitLibError {}
+/** An issue was put in a milestone that belongs to a different project than the issue's own. */
+export class MilestoneProjectMismatchError extends GitLibError {}
 
 interface LocalIssueRow {
   id: number;
@@ -39,6 +45,7 @@ interface LocalIssueRow {
   state: LocalIssueState;
   status: IssueStatus;
   project_id: number | null;
+  milestone_id: number | null;
   created_at: string;
   updated_at: string;
   closed_at: string | null;
@@ -53,9 +60,30 @@ const toLocalIssue = (row: LocalIssueRow): LocalIssue => ({
   state: row.state,
   status: row.status,
   projectId: row.project_id === null || row.project_id === undefined ? null : Number(row.project_id),
+  milestoneId: row.milestone_id === null || row.milestone_id === undefined ? null : Number(row.milestone_id),
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   closedAt: row.closed_at || null,
+});
+
+interface MilestoneRow {
+  id: number;
+  project_id: number;
+  title: string;
+  description: string;
+  due_date: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+const toMilestone = (row: MilestoneRow): Milestone => ({
+  id: Number(row.id),
+  projectId: Number(row.project_id),
+  title: row.title,
+  description: row.description,
+  dueDate: row.due_date || null,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
 });
 
 interface ProjectRow {
@@ -151,6 +179,10 @@ export class PlanningStore {
       conditions.push("project_id = ?");
       params.push(query.projectId);
     }
+    if (query.milestoneId !== undefined) {
+      conditions.push("milestone_id = ?");
+      params.push(query.milestoneId);
+    }
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
     return this.withConnection((db) => {
@@ -208,14 +240,99 @@ export class PlanningStore {
     });
   }
 
-  /** Files an issue under a project, or takes it out of its project with `null`. */
+  /**
+   * Files an issue under a project, or takes it out of its project with `null`. A milestone belongs to
+   * one project, so changing the project takes the issue out of its milestone.
+   */
   setIssueProject(id: number, projectId: number | null, now: string): LocalIssue {
     return this.transaction((db) => {
       const current = this.requireIssue(db, id);
       if (projectId !== null) this.requireProject(db, projectId);
       if (current.projectId === projectId) return current;
-      db.prepare("UPDATE local_issues SET project_id = ?, updated_at = ? WHERE id = ?").run(projectId, now, id);
+      db.prepare("UPDATE local_issues SET project_id = ?, milestone_id = NULL, updated_at = ? WHERE id = ?").run(
+        projectId,
+        now,
+        id,
+      );
       return this.requireIssue(db, id);
+    });
+  }
+
+  /**
+   * Puts an issue in a milestone, or takes it out with `null`. The milestone must belong to the issue's
+   * project, so the issue has to be filed under that project first.
+   */
+  setIssueMilestone(id: number, milestoneId: number | null, now: string): LocalIssue {
+    return this.transaction((db) => {
+      const current = this.requireIssue(db, id);
+      if (milestoneId !== null) {
+        const milestone = this.requireMilestone(db, milestoneId);
+        if (current.projectId !== milestone.projectId) {
+          throw new MilestoneProjectMismatchError(
+            `Milestone "${milestone.title}" belongs to a different project. Put the issue in that project first.`,
+          );
+        }
+      }
+      if (current.milestoneId === milestoneId) return current;
+      db.prepare("UPDATE local_issues SET milestone_id = ?, updated_at = ? WHERE id = ?").run(milestoneId, now, id);
+      return this.requireIssue(db, id);
+    });
+  }
+
+  createMilestone(projectId: number, input: { title: string; description: string; dueDate: string | null }, now: string): Milestone {
+    return this.transaction((db) => {
+      this.requireProject(db, projectId);
+      try {
+        const { lastInsertRowid } = db
+          .prepare(
+            "INSERT INTO milestones (project_id, title, description, due_date, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+          )
+          .run(projectId, input.title, input.description, input.dueDate, now, now);
+        return this.requireMilestone(db, Number(lastInsertRowid));
+      } catch (error) {
+        throw this.titleTaken(error, input.title);
+      }
+    });
+  }
+
+  getMilestone(id: number): Milestone | null {
+    return this.withConnection((db) => this.findMilestone(db, id));
+  }
+
+  /** Soonest due date first, then milestones with no due date; ties by title. */
+  listMilestones(projectId?: number): Milestone[] {
+    return this.withConnection((db) => {
+      const where = projectId === undefined ? "" : "WHERE project_id = ?";
+      const rows = db
+        .prepare(`SELECT * FROM milestones ${where} ORDER BY due_date IS NULL, due_date, title, id`)
+        .all(...(projectId === undefined ? [] : [projectId])) as unknown as MilestoneRow[];
+      return rows.map(toMilestone);
+    });
+  }
+
+  updateMilestone(id: number, changes: MilestoneChanges, now: string): Milestone {
+    return this.transaction((db) => {
+      const current = this.requireMilestone(db, id);
+      try {
+        db.prepare("UPDATE milestones SET title = ?, description = ?, due_date = ?, updated_at = ? WHERE id = ?").run(
+          changes.title ?? current.title,
+          changes.description ?? current.description,
+          changes.dueDate === undefined ? current.dueDate : changes.dueDate,
+          now,
+          id,
+        );
+      } catch (error) {
+        throw this.titleTaken(error, changes.title ?? current.title);
+      }
+      return this.requireMilestone(db, id);
+    });
+  }
+
+  /** Removes the milestone. Its issues stay in the project, no longer in any milestone. */
+  deleteMilestone(id: number): void {
+    this.transaction((db) => {
+      this.requireMilestone(db, id);
+      db.prepare("DELETE FROM milestones WHERE id = ?").run(id);
     });
   }
 
@@ -395,6 +512,23 @@ export class PlanningStore {
     const project = this.findProject(db, id);
     if (!project) throw new ProjectNotFoundError(`Project ${id} was not found.`);
     return project;
+  }
+
+  private findMilestone(db: DatabaseSync, id: number): Milestone | null {
+    const row = db.prepare("SELECT * FROM milestones WHERE id = ?").get(id) as unknown as MilestoneRow | undefined;
+    return row ? toMilestone(row) : null;
+  }
+
+  private requireMilestone(db: DatabaseSync, id: number): Milestone {
+    const milestone = this.findMilestone(db, id);
+    if (!milestone) throw new MilestoneNotFoundError(`Milestone ${id} was not found.`);
+    return milestone;
+  }
+
+  private titleTaken(error: unknown, title: string): unknown {
+    return isUniqueViolation(error)
+      ? new MilestoneTitleTakenError(`This project already has a milestone named "${title}".`)
+      : error;
   }
 
   private nameTaken(error: unknown, name: string): unknown {

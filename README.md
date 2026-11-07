@@ -249,6 +249,13 @@ several repos. A project page has two parts that are kept apart on purpose:
 
 - **Repositories** and **Gitlib issues** are gitlib's own data, stored in `planning.db`. You can add, remove and
   edit them, and nothing in them is ever sent to GitHub.
+- **Milestones** are goals within a project, each with a title, an optional due date and an optional Markdown
+  description. Pick an issue's milestone from its row on the project page or from the issue's own page; the
+  project page groups its issues by milestone and shows how many of each are closed. An issue can only be in a
+  milestone of its own project, so moving it to another project (or out of its project) takes it out of its
+  milestone, and deleting a milestone leaves its issues in the project. A due date is a calendar day with no time
+  zone, and a milestone is flagged overdue only while it still has open (or no) issues after that day. Deleting a
+  project deletes its milestones.
 - **On GitHub** is a read-only preview: for each repo in the project that has a GitHub remote it shows the open
   pull requests, open issues and the latest commits on the default branch. Every row links out to GitHub and is
   named `owner/repo#12`, so it cannot be mistaken for a gitlib issue (`repo#3`). Gitlib never writes to GitHub

@@ -1,16 +1,21 @@
 import { Link, createFileRoute, notFound, useRouter } from "@tanstack/react-router";
-import { ArrowLeft, CircleCheck, CircleDot, Pencil, Trash2, X } from "lucide-react";
+import { ArrowLeft, CircleCheck, CircleDot, Flag, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
+import { DeleteMilestoneDialog } from "#/components/delete-milestone-dialog";
 import { DeleteProjectDialog } from "#/components/delete-project-dialog";
+import { MilestoneFormDialog } from "#/components/milestone-form-dialog";
 import { ProjectGitHubPreview } from "#/components/project-github-preview";
 import { ProjectNameDialog } from "#/components/project-name-dialog";
 import { Button } from "#/components/ui/button";
+import { NativeSelect } from "#/components/ui/native-select";
 import { SearchSelect } from "#/components/ui/search-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
 import { statusLabel } from "#/lib/issue-status";
+import { formatDueDate, isOverdue, milestoneProgress } from "#/lib/milestones";
+import { setIssueMilestone } from "#/server/milestones";
 import { addProjectRepo, getProjectDetail, removeProjectRepo, setIssueProject } from "#/server/projects";
 
-const TABS = ["repositories", "issues", "github"] as const;
+const TABS = ["repositories", "milestones", "issues", "github"] as const;
 type ProjectTab = (typeof TABS)[number];
 
 export const Route = createFileRoute("/projects/$id")({
@@ -24,11 +29,7 @@ export const Route = createFileRoute("/projects/$id")({
     return detail;
   },
   head: ({ loaderData }) => ({
-    meta: [
-      {
-        title: `${loaderData ? `${loaderData.name} · ` : ""}Projects · Gitlib`,
-      },
-    ],
+    meta: [{ title: `${loaderData ? `${loaderData.name} · ` : ""}Projects · Gitlib` }],
   }),
   notFoundComponent: ProjectNotFound,
   component: ProjectDetailPage,
@@ -77,6 +78,24 @@ function ProjectDetailPage() {
 
   const self = { id: project.id, name: project.name };
 
+  // Without milestones the issues are one plain list. With them, each milestone gets a heading so it is clear
+  // which issues count toward which, and issues in none come last.
+  const issueGroups =
+    project.milestones.length === 0
+      ? [{ key: "all", heading: null, issues: project.issues }]
+      : [
+          ...project.milestones.map((milestone) => ({
+            key: String(milestone.id),
+            heading: milestone.title,
+            issues: project.issues.filter((issue) => issue.milestoneId === milestone.id),
+          })),
+          {
+            key: "none",
+            heading: "No milestone",
+            issues: project.issues.filter((issue) => issue.milestoneId === null),
+          },
+        ].filter((group) => group.issues.length > 0);
+
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-6 px-4 py-8 sm:px-6">
       <BackLink />
@@ -106,17 +125,15 @@ function ProjectDetailPage() {
       <Tabs
         value={tab}
         onValueChange={(next) =>
-          void navigate({
-            search: {
-              tab: TABS.find((t) => t === next && t !== "repositories"),
-            },
-            replace: true,
-          })
+          void navigate({ search: { tab: TABS.find((t) => t === next && t !== "repositories") }, replace: true })
         }
       >
         <TabsList aria-label="Project sections">
           <TabsTrigger value="repositories">
             Repositories <span className="font-normal text-muted-foreground">{project.repos.length}</span>
+          </TabsTrigger>
+          <TabsTrigger value="milestones">
+            Milestones <span className="font-normal text-muted-foreground">{project.milestones.length}</span>
           </TabsTrigger>
           <TabsTrigger value="issues">
             Gitlib issues <span className="font-normal text-muted-foreground">{project.issues.length}</span>
@@ -178,10 +195,7 @@ function ProjectDetailPage() {
                       disabled={busy}
                       onClick={() =>
                         void run(
-                          () =>
-                            removeProjectRepo({
-                              data: { id: project.id, repo: repo.relativePath },
-                            }),
+                          () => removeProjectRepo({ data: { id: project.id, repo: repo.relativePath } }),
                           "Could not remove the repository.",
                         )
                       }
@@ -190,6 +204,95 @@ function ProjectDetailPage() {
                     </Button>
                   </li>
                 ))}
+              </ul>
+            )}
+          </section>
+        </TabsContent>
+
+        <TabsContent value="milestones">
+          <section aria-labelledby="project-milestones" className="grid gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 id="project-milestones" className="text-lg font-semibold">
+                  Milestones{" "}
+                  <span className="text-sm font-normal text-muted-foreground">{project.milestones.length}</span>
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Goals to group this project's issues under, optionally with a due date.
+                </p>
+              </div>
+              <MilestoneFormDialog mode="create" projectId={project.id} limits={project.milestoneLimits}>
+                <Button variant="outline">
+                  <Plus aria-hidden /> New milestone
+                </Button>
+              </MilestoneFormDialog>
+            </div>
+            {project.milestones.length === 0 ? (
+              <p className="border-y py-6 text-center text-sm text-muted-foreground">
+                No milestones in this project yet.
+              </p>
+            ) : (
+              <ul className="divide-y border-y" data-testid="project-milestone-list">
+                {project.milestones.map((milestone) => {
+                  const progress = milestoneProgress(milestone.issueCount, milestone.closedCount);
+                  const overdue = isOverdue(milestone.dueDate, progress);
+                  return (
+                    <li key={milestone.id} className="flex items-start gap-3 py-3">
+                      <Flag
+                        className={
+                          progress.complete
+                            ? "mt-0.5 size-4 shrink-0 text-primary"
+                            : "mt-0.5 size-4 shrink-0 text-muted-foreground"
+                        }
+                        aria-hidden
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium break-words">{milestone.title}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {milestone.dueDate ? (
+                            <span className={overdue ? "font-medium text-destructive" : undefined}>
+                              {overdue ? "Overdue · " : "Due "}
+                              {formatDueDate(milestone.dueDate)}
+                            </span>
+                          ) : (
+                            "No due date"
+                          )}
+                          {" · "}
+                          {progress.total === 0
+                            ? "No issues"
+                            : `${progress.closed} of ${progress.total} ${progress.total === 1 ? "issue" : "issues"} closed`}
+                        </p>
+                        {milestone.description ? (
+                          <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{milestone.description}</p>
+                        ) : null}
+                        {progress.total > 0 ? (
+                          <div
+                            role="progressbar"
+                            aria-label={`${milestone.title} progress`}
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-valuenow={progress.percent}
+                            className="mt-2 h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-muted"
+                          >
+                            <div className="h-full rounded-full bg-primary" style={{ width: `${progress.percent}%` }} />
+                          </div>
+                        ) : null}
+                      </div>
+                      <div className="flex items-center">
+                        <MilestoneFormDialog mode="edit" milestone={milestone} limits={project.milestoneLimits}>
+                          <Button variant="ghost" size="icon" aria-label={`Edit ${milestone.title}`}>
+                            <Pencil aria-hidden />
+                          </Button>
+                        </MilestoneFormDialog>
+                        <DeleteMilestoneDialog milestone={milestone} issueCount={milestone.issueCount}>
+                          <Button variant="ghost" size="icon" aria-label={`Delete ${milestone.title}`}>
+                            <Trash2 aria-hidden />
+                          </Button>
+                        </DeleteMilestoneDialog>
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </section>
@@ -220,13 +323,7 @@ function ProjectDetailPage() {
                   }))}
                   onSelect={(value) =>
                     void run(
-                      () =>
-                        setIssueProject({
-                          data: {
-                            issueId: Number(value),
-                            projectId: project.id,
-                          },
-                        }),
+                      () => setIssueProject({ data: { issueId: Number(value), projectId: project.id } }),
                       "Could not add the issue.",
                     )
                   }
@@ -239,54 +336,92 @@ function ProjectDetailPage() {
                 No gitlib issues in this project yet.
               </p>
             ) : (
-              <ul className="divide-y border-y" data-testid="project-issue-list">
-                {project.issues.map((issue) => {
-                  const open = issue.state === "open";
-                  const StateIcon = open ? CircleDot : CircleCheck;
-                  return (
-                    <li key={issue.id} className="flex items-start gap-3 py-2.5">
-                      <StateIcon
-                        className={
-                          open ? "mt-0.5 size-4 shrink-0 text-primary" : "mt-0.5 size-4 shrink-0 text-muted-foreground"
-                        }
-                        aria-label={open ? "Open" : "Closed"}
-                      />
-                      <div className="min-w-0 flex-1">
-                        <Link
-                          to="/planning/issues/$id"
-                          params={{ id: String(issue.id) }}
-                          className="font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-                        >
-                          {issue.title}
-                        </Link>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          <span className="font-mono" title={issue.repoPath}>
-                            {issue.repoName}#{issue.number}
-                          </span>
-                          {open ? ` · ${statusLabel(issue.status)}` : " · Closed"}
-                        </p>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`Remove ${issue.title} from this project`}
-                        disabled={busy}
-                        onClick={() =>
-                          void run(
-                            () =>
-                              setIssueProject({
-                                data: { issueId: issue.id, projectId: null },
-                              }),
-                            "Could not remove the issue.",
-                          )
-                        }
-                      >
-                        <X aria-hidden />
-                      </Button>
-                    </li>
-                  );
-                })}
-              </ul>
+              <div className="grid gap-4" data-testid="project-issue-list">
+                {issueGroups.map((group) => (
+                  <div key={group.key} className="grid gap-1">
+                    {group.heading ? (
+                      <h3 className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+                        {group.heading}
+                        <span className="font-normal">{group.issues.length}</span>
+                      </h3>
+                    ) : null}
+                    <ul className="divide-y border-y">
+                      {group.issues.map((issue) => {
+                        const open = issue.state === "open";
+                        const StateIcon = open ? CircleDot : CircleCheck;
+                        return (
+                          <li key={issue.id} className="flex items-start gap-3 py-2.5">
+                            <StateIcon
+                              className={
+                                open
+                                  ? "mt-0.5 size-4 shrink-0 text-primary"
+                                  : "mt-0.5 size-4 shrink-0 text-muted-foreground"
+                              }
+                              aria-label={open ? "Open" : "Closed"}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <Link
+                                to="/planning/issues/$id"
+                                params={{ id: String(issue.id) }}
+                                className="font-medium outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                              >
+                                {issue.title}
+                              </Link>
+                              <p className="mt-0.5 text-xs text-muted-foreground">
+                                <span className="font-mono" title={issue.repoPath}>
+                                  {issue.repoName}#{issue.number}
+                                </span>
+                                {open ? ` · ${statusLabel(issue.status)}` : " · Closed"}
+                              </p>
+                            </div>
+                            {project.milestones.length > 0 ? (
+                              <NativeSelect
+                                aria-label={`Milestone for ${issue.title}`}
+                                value={issue.milestoneId ?? ""}
+                                disabled={busy}
+                                onChange={(event) =>
+                                  void run(
+                                    () =>
+                                      setIssueMilestone({
+                                        data: {
+                                          issueId: issue.id,
+                                          milestoneId: event.target.value ? Number(event.target.value) : null,
+                                        },
+                                      }),
+                                    "Could not change the issue's milestone.",
+                                  )
+                                }
+                                className="w-auto max-w-40"
+                              >
+                                <option value="">No milestone</option>
+                                {project.milestones.map((milestone) => (
+                                  <option key={milestone.id} value={milestone.id}>
+                                    {milestone.title}
+                                  </option>
+                                ))}
+                              </NativeSelect>
+                            ) : null}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              aria-label={`Remove ${issue.title} from this project`}
+                              disabled={busy}
+                              onClick={() =>
+                                void run(
+                                  () => setIssueProject({ data: { issueId: issue.id, projectId: null } }),
+                                  "Could not remove the issue.",
+                                )
+                              }
+                            >
+                              <X aria-hidden />
+                            </Button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                ))}
+              </div>
             )}
           </section>
         </TabsContent>

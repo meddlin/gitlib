@@ -44,8 +44,15 @@ import {
   type StoredDependabotSchedule,
   normalizeIssueBody,
   normalizeIssueTitle,
+  normalizeMilestoneDescription,
+  normalizeMilestoneDueDate,
+  normalizeMilestoneTitle,
   normalizeProjectName,
+  MilestoneNotFoundError,
   ProjectNotFoundError,
+  type Milestone,
+  type MilestoneChanges,
+  type NewMilestone,
   type Project,
   type IssueStatus,
   type LocalIssue,
@@ -528,6 +535,46 @@ export class GitLibApp {
   /** Files an issue under a project, or pass `null` to take it out of its project. */
   setLocalIssueProject(id: number, projectId: number | null): LocalIssue {
     return this.planning.setIssueProject(id, projectId, utcNow());
+  }
+
+  /** Puts an issue in a milestone of its project, or pass `null` to take it out. */
+  setLocalIssueMilestone(id: number, milestoneId: number | null): LocalIssue {
+    return this.planning.setIssueMilestone(id, milestoneId, utcNow());
+  }
+
+  /** Milestones of one project, or of every project when `projectId` is omitted. */
+  listMilestones(projectId?: number): Milestone[] {
+    return this.planning.listMilestones(projectId);
+  }
+
+  getMilestone(id: number): Milestone {
+    const milestone = this.planning.getMilestone(id);
+    if (!milestone) throw new MilestoneNotFoundError(`Milestone ${id} was not found.`);
+    return milestone;
+  }
+
+  createMilestone(projectId: number, input: NewMilestone): Milestone {
+    return this.planning.createMilestone(
+      projectId,
+      {
+        title: normalizeMilestoneTitle(input.title),
+        description: normalizeMilestoneDescription(input.description ?? ""),
+        dueDate: normalizeMilestoneDueDate(input.dueDate),
+      },
+      utcNow(),
+    );
+  }
+
+  updateMilestone(id: number, changes: MilestoneChanges): Milestone {
+    const normalized: MilestoneChanges = {};
+    if (changes.title !== undefined) normalized.title = normalizeMilestoneTitle(changes.title);
+    if (changes.description !== undefined) normalized.description = normalizeMilestoneDescription(changes.description);
+    if (changes.dueDate !== undefined) normalized.dueDate = normalizeMilestoneDueDate(changes.dueDate);
+    return this.planning.updateMilestone(id, normalized, utcNow());
+  }
+
+  deleteMilestone(id: number): void {
+    this.planning.deleteMilestone(id);
   }
 
   /** Snapshots the planning database, by default into `<app home>/backups/`. Returns the file written. */
