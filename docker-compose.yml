@@ -49,7 +49,7 @@ services:
   # Full-text search. Its index is derived from the scan, so it is not part of backups: a fresh volume is
   # rebuilt the first time the web app loads (or with `gitlib reindex`).
   meilisearch:
-    image: getmeili/meilisearch:v1.56.0
+    image: getmeili/meilisearch:v1.56.1
     container_name: gitlib-meilisearch
     restart: unless-stopped
     environment:
