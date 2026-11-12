@@ -1,5 +1,6 @@
 import "./env.server";
 import { remoteKey, type ListingPage } from "#/lib/catalog";
+import { MAX_README_LENGTH, NO_README, isMarkdownFileName, pickReadmeName, type RemoteReadme } from "#/lib/readme";
 import { ProviderSetupError } from "./provider-errors";
 import { PAGE_SIZE, fetchListingPages } from "./remote-listing.server";
 
@@ -82,6 +83,42 @@ export async function listGitLabProjects(previous: readonly ListingPage[] = []) 
       })),
     previous,
   );
+}
+
+/**
+ * One GET against a project's repository API. A 404 comes back for the caller to interpret (no such file, or an empty
+ * repository); every other failure is turned into a message worth showing.
+ */
+async function gitlabRepositoryGet(fullName: string, path: string, params: Record<string, string> = {}): Promise<Response> {
+  const token = gitlabToken();
+  const url = new URL(`${gitlabBase()}/api/v4/projects/${encodeURIComponent(fullName)}/repository${path}`);
+  url.search = new URLSearchParams(params).toString();
+  const response = await fetch(url, {
+    headers: { "User-Agent": "gitlib", ...(token ? { "PRIVATE-TOKEN": token } : {}) },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (response.status === 401) throw new Error("GitLab rejected the token (401).");
+  if (response.status === 429) throw new Error("GitLab rate limit reached. Try again later.");
+  if (!response.ok && response.status !== 404) throw new Error(`GitLab responded with ${response.status}.`);
+  return response;
+}
+
+/**
+ * The README in the root of a project's default branch, found by listing the root (so `readme.md` and `README.markdown`
+ * count) and then reading that file. A project without one, or an empty project, is `NO_README`. Only the first 100
+ * entries of the root are searched, which holds for any ordinary repository.
+ */
+export async function fetchGitLabReadme(fullName: string): Promise<RemoteReadme> {
+  const tree = await gitlabRepositoryGet(fullName, "/tree", { per_page: "100" });
+  if (tree.status === 404) return NO_README;
+  const entries = (await tree.json()) as { name: string; type: string }[];
+  const fileName = pickReadmeName(entries.filter((entry) => entry.type === "blob").map((entry) => entry.name));
+  if (!fileName) return NO_README;
+  if (!isMarkdownFileName(fileName)) return { fileName, markdown: null, error: null };
+
+  const raw = await gitlabRepositoryGet(fullName, `/files/${encodeURIComponent(fileName)}/raw`);
+  if (raw.status === 404) return NO_README;
+  return { fileName, markdown: (await raw.text()).slice(0, MAX_README_LENGTH), error: null };
 }
 
 /** Which host and account a stored listing was made for, so changing either never shows the old one's repos. */

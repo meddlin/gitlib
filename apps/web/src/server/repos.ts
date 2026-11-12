@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { loadRepoReadme, technologyCategory, type RepoRecord, type TechnologyCategory } from "@gitlib/core";
+import { MAX_README_LENGTH } from "#/lib/readme";
 import { getApp, loadAndIndexRepositories } from "./gitlib.server";
 import { clearCatalogClones } from "./catalog.server";
 import { clearContributions } from "./contributions";
@@ -112,9 +113,6 @@ export interface ReadmeView {
   markdown: string | null;
   error: string | null;
 }
-
-/** Keeps a pathological README from bloating the response. */
-const MAX_README_LENGTH = 500_000;
 
 /** Reads README.md for a repository gitlib already knows about; never an arbitrary path. */
 export const getReadme = createServerFn({ method: "GET" })

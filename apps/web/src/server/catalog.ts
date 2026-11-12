@@ -1,8 +1,16 @@
 import { createServerFn } from "@tanstack/react-start";
 import { isGitLibError } from "@gitlib/core";
 import { findRemoteOnly, type CatalogEntry, type RemoteProvider } from "#/lib/catalog";
+import type { RemoteReadme } from "#/lib/readme";
 import { getApp } from "./gitlib.server";
-import { buildCatalog, cloneRemoteRepo, refreshAllListings, setCatalogFavorite, type CloneResult } from "./catalog.server";
+import {
+  buildCatalog,
+  cloneRemoteRepo,
+  loadRemoteReadme,
+  refreshAllListings,
+  setCatalogFavorite,
+  type CloneResult,
+} from "./catalog.server";
 
 export type { CatalogView, CloneResult, ProviderStatus } from "./catalog.server";
 
@@ -32,6 +40,11 @@ function validateRemoteRepo(input: RemoteRepoInput): RemoteRepoInput {
 export const getRemoteRepo = createServerFn({ method: "GET" })
   .validator(validateRemoteRepo)
   .handler(async ({ data }): Promise<CatalogEntry | null> => findRemoteOnly((await buildCatalog()).entries, data.provider, data.fullName));
+
+/** The README of a remote-only repo, fetched from its host each time the page asks. */
+export const getRemoteReadme = createServerFn({ method: "GET" })
+  .validator(validateRemoteRepo)
+  .handler(({ data }): Promise<RemoteReadme> => loadRemoteReadme(data.provider, data.fullName));
 
 interface FavoriteInput {
   relativePath?: string;
