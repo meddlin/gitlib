@@ -372,6 +372,48 @@ describe("projects", () => {
     expect(app.getProject(a.id).repoPaths).toEqual(["group/beta"]);
   });
 
+  it("adds several repos at once, including hosted ones that are not cloned", () => {
+    const app = appWithRepos();
+    const project = app.createProject("A");
+
+    const added = app.addReposToProject(
+      project.id,
+      ["alpha", "group/beta"],
+      [
+        { provider: "github", fullName: "octo/widgets" },
+        { provider: "gitlab", fullName: "team/sub/service" },
+      ],
+    );
+    expect(added.repoPaths).toEqual(["alpha", "group/beta"]);
+    expect(added.remotes).toEqual([
+      { provider: "github", fullName: "octo/widgets" },
+      { provider: "gitlab", fullName: "team/sub/service" },
+    ]);
+
+    // Adding again, or in another case, changes nothing.
+    app.addReposToProject(project.id, ["alpha"], [{ provider: "github", fullName: "Octo/Widgets" }]);
+    expect(app.getProject(project.id).remotes).toHaveLength(2);
+    expect(app.listProjects()[0]!.remotes).toHaveLength(2);
+
+    app.removeRemoteFromProject(project.id, { provider: "github", fullName: "OCTO/widgets" });
+    expect(app.getProject(project.id).remotes).toEqual([{ provider: "gitlab", fullName: "team/sub/service" }]);
+  });
+
+  it("adds nothing when one of several repos is unknown or malformed", () => {
+    const app = appWithRepos();
+    const project = app.createProject("A");
+
+    expect(() => app.addReposToProject(project.id, ["alpha", "missing"])).toThrow(RepoNotFoundError);
+    expect(() =>
+      app.addReposToProject(project.id, ["alpha"], [{ provider: "github", fullName: "no-slash" }]),
+    ).toThrow(ProjectValidationError);
+    expect(() =>
+      app.addReposToProject(project.id, [], [{ provider: "bitbucket" as "github", fullName: "a/b" }]),
+    ).toThrow(ProjectValidationError);
+    expect(app.getProject(project.id).repoPaths).toEqual([]);
+    expect(() => app.addReposToProject(999, ["alpha"])).toThrow(ProjectNotFoundError);
+  });
+
   it("files issues under a project and keeps them when the project is deleted", () => {
     const app = appWithRepos();
     const project = app.createProject("Launch");
@@ -391,8 +433,10 @@ describe("projects", () => {
     const app = appWithRepos();
     const project = app.createProject("Launch");
     app.addRepoToProject(project.id, "alpha");
+    app.addReposToProject(project.id, [], [{ provider: "github", fullName: "octo/widgets" }]);
     app.deleteProject(project.id);
     expect(app.createProject("Launch").repoPaths).toEqual([]);
+    expect(app.createProject("Launch 2").remotes).toEqual([]);
   });
 });
 
@@ -548,10 +592,13 @@ describe("milestones", () => {
   it("migrates an older database forward, keeping issues and projects", () => {
     const before = MIGRATIONS.slice(0, 5);
     const old = new PlanningStore(planningDbPath(), before);
-    const project = old.createProject("Launch", "2026-01-01T00:00:00+00:00");
     const issue = old.createIssue({ repoPath: "alpha", title: "Ship it", body: "" }, "2026-01-01T00:00:00+00:00");
-    // The store only knows the newest schema, so file the issue the way a version-5 gitlib would have.
+    // The store only knows the newest schema, so make the project and file the issue the way a version-5 gitlib would.
     const db = new DatabaseSync(planningDbPath());
+    const { lastInsertRowid } = db
+      .prepare("INSERT INTO projects (name, created_at, updated_at) VALUES ('Launch', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')")
+      .run();
+    const project = { id: Number(lastInsertRowid) };
     db.prepare("UPDATE local_issues SET project_id = ? WHERE id = ?").run(project.id, issue.id);
     db.close();
 
@@ -560,5 +607,6 @@ describe("milestones", () => {
     expect(upgraded.schemaVersion()).toBe(LATEST_SCHEMA_VERSION);
     expect(upgraded.getIssue(issue.id)).toMatchObject({ projectId: project.id, milestoneId: null });
     expect(upgraded.listMilestones()).toEqual([]);
+    expect(upgraded.getProject(project.id)).toMatchObject({ name: "Launch", repoPaths: [], remotes: [] });
   });
 });

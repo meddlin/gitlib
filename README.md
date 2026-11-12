@@ -248,7 +248,11 @@ The **Projects** page (`/projects`) groups repositories and gitlib issues under 
 several repos. A project page has two parts that are kept apart on purpose:
 
 - **Repositories** and **Gitlib issues** are gitlib's own data, stored in `planning.db`. You can add, remove and
-  edit them, and nothing in them is ever sent to GitHub.
+  edit them, and nothing in them is ever sent to GitHub. **Add repositories** opens a searchable list with a
+  checkbox per repo, so several can be added at once: local clones, and repos that GitHub or GitLab list for your
+  account but that you have not cloned (these need `GITLIB_GITHUB_TOKEN` / `GITLIB_GITLAB_TOKEN`, as on the
+  Repositories page). A repo added without a clone is kept by its host name (`owner/repo`); once you clone it, its
+  row links to the clone. Hosted GitHub repos also appear in the **GitHub** tab.
 - **Milestones** are goals within a project, each with a title, an optional due date and an optional Markdown
   description. They show as cards at the top of the project page, each with its due date and how many of its
   issues are closed. Pick an issue's milestone from its row on the project page or from the issue's own page; the

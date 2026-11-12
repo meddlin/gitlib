@@ -118,6 +118,21 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX local_issues_by_milestone ON local_issues (milestone_id);
     `,
   },
+  {
+    version: 7,
+    name: "project remote repos",
+    sql: `
+      -- A repo in a project that is hosted on GitHub or GitLab but not cloned here. full_name is as the host
+      -- writes it (owner/repo, or group/subgroup/project); the project keeps it whether or not it is cloned later.
+      CREATE TABLE project_remotes (
+        project_id INTEGER NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+        provider TEXT NOT NULL CHECK (provider IN ('github', 'gitlab')),
+        full_name TEXT NOT NULL COLLATE NOCASE,
+        added_at TEXT NOT NULL,
+        PRIMARY KEY (project_id, provider, full_name)
+      );
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;
