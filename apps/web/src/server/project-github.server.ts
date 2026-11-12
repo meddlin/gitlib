@@ -78,7 +78,7 @@ async function inPool<T, R>(items: readonly T[], limit: number, work: (item: T) 
  */
 export async function readProjectGitHub(
   repoPaths: readonly string[],
-  { refresh = false }: { refresh?: boolean } = {},
+  { refresh = false, remotes = [] }: { refresh?: boolean; remotes?: readonly string[] } = {},
 ): Promise<ProjectGitHubView> {
   const repos = await inPool(repoPaths, CONCURRENCY, async (relativePath): Promise<ProjectGitHubRepo> => {
     const empty = { relativePath, slug: null, url: null, pulls: noList<never>(), issues: noList<never>(), commits: noList<never>() };
@@ -100,5 +100,17 @@ export async function readProjectGitHub(
       ...(await activityOf(source, refresh)),
     };
   });
-  return { repos, fetchedAt: new Date().toISOString(), hasToken: githubToken() !== undefined };
+  // Hosted repos the project holds without a clone, by `owner/repo`. One whose slug a clone already covers is skipped.
+  const seen = new Set(repos.flatMap((repo) => (repo.slug ? [repo.slug.toLowerCase()] : [])));
+  const hosted = remotes.filter((slug) => {
+    const key = slug.toLowerCase();
+    return !seen.has(key) && seen.add(key);
+  });
+  const hostedRepos = await inPool(hosted, CONCURRENCY, async (slug): Promise<ProjectGitHubRepo> => {
+    const empty = { relativePath: slug, slug, url: `https://github.com/${slug}`, error: null, pulls: noList<never>(), issues: noList<never>(), commits: noList<never>() };
+    const [owner, repo, ...rest] = slug.split("/");
+    if (!owner || !repo || rest.length > 0) return { ...empty, slug: null, url: null, error: "That is not a GitHub repository name." };
+    return { ...empty, ...(await activityOf({ provider: "github", owner, repo, slug }, refresh)) };
+  });
+  return { repos: [...repos, ...hostedRepos], fetchedAt: new Date().toISOString(), hasToken: githubToken() !== undefined };
 }
