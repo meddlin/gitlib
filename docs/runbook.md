@@ -140,8 +140,17 @@ git clone <remote> ...             # or rsync from your Mac, or mount NFS/SMB at
 Keep the **same folder layout as on your Mac** (`/srv/git/team/api` where it was `~/git/team/api`): notes and
 descriptions are tied to each repo's path *relative to the scan root*.
 
-The container reads them through a read-only mount as a non-root user, so they need to be world-readable
-(the default for normal clones). The image already tells git to trust the mount, so differing file owners are fine.
+The container sees this directory through a read-write bind mount as a non-root user (uid 1000). That is what lets
+**Clone locally** in the app put repositories here, on the server's disk rather than inside the container, so they
+survive `docker compose stop/start`, `down` and rebuilds. Two requirements:
+
+- The directory must exist and be **writable by uid 1000**. The first user on Ubuntu/Debian is uid 1000, so
+  `mkdir -p /srv/git` as that user is enough; otherwise run `sudo chown 1000:1000 /srv/git`. If you let Docker create
+  a missing directory it is owned by root and cloning fails with `Permission denied`.
+- Existing repositories only need to be readable. The image already tells git to trust the mount, so differing file
+  owners are fine.
+
+Repositories cloned from the app are owned by uid 1000 on the host.
 
 **4. Configure**
 
@@ -420,4 +429,7 @@ docker compose run --rm gitlib list       # one-off CLI command
 | Ask panel says "Cannot reach Ollama at …"                       | Inside Docker `localhost` is the container. Set `GITLIB_OLLAMA_HOST` in `.env` to the Ollama machine's address, then `docker compose up -d`. On that machine Ollama must listen beyond loopback (`OLLAMA_HOST=0.0.0.0:11434`) and its firewall must allow the port. Test with `curl http://<host>:11434/api/version`. |
 | Ask panel is slow to answer, or the model reloads between questions | Ollama unloads an idle model after 5 minutes (`OLLAMA_KEEP_ALIVE` on that machine), and reloads it when a request changes the context size, so other tools using the same Ollama with a different context size cause reloads. Check what is loaded with `ollama ps` on that machine. |
 | `permission denied` writing to `/backups`                       | The backups directory is not writable by uid 1000: `sudo chown 1000:1000 "$GITLIB_BACKUPS"`.                                                                      |
+| **Clone locally** fails with `Read-only file system`            | The container still has the old read-only repos mount. Pull the current `docker-compose.yml` and run `docker compose up -d` to recreate it (a restart keeps the old mount). Check with `docker compose exec web touch /home/node/git/.w && docker compose exec web rm /home/node/git/.w`. |
+| **Clone locally** fails with `Permission denied`                | The host directory behind `GITLIB_REPOS` is not writable by uid 1000 (Docker creates a missing one as root). `sudo chown 1000:1000 "$GITLIB_REPOS"`, then try again. |
+| **Clone locally** fails with `could not read Username`          | The repository is private. Cloning uses its plain HTTPS URL with no credentials, so only public repos clone from the app. Clone private ones on the server yourself (`git clone` over SSH or with a credential helper) and press **Rescan**. |
 | Notes missing after moving to a new machine                     | The repos are at a different path under the scan root, or you restored from a non-Docker `~/.git-library` ([Developing](#2-developing)).                          |
