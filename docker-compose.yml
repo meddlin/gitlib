@@ -57,6 +57,11 @@ services:
       MEILI_ENV: ${MEILI_ENV:-development}
       MEILI_MASTER_KEY: ${GITLIB_MEILI_API_KEY:-}
       MEILI_NO_ANALYTICS: "true"
+      # Meilisearch refuses to open a database written by another version, even a patch release, so a
+      # version bump (e.g. a Dependabot PR) would leave it unhealthy. This migrates the data in place on
+      # startup. It is a no-op when the versions already match. The index is derived, so if an upgrade ever
+      # fails, `docker volume rm gitlib_meili-data` and restart (see docs/runbook.md, Troubleshooting).
+      MEILI_UPGRADE_DB: "true"
     volumes:
       - meili-data:/meili_data
     ports:
