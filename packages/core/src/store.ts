@@ -92,6 +92,15 @@ const SCHEMA = `
     fetched_at TEXT NOT NULL
   );
 
+  -- Favorites for repositories that are not cloned here (only on GitHub or GitLab). Keyed by provider and the
+  -- lowercased "host/path" like a catalog entry, not by repo_id, since there is no scanned repo to point at.
+  CREATE TABLE IF NOT EXISTS remote_favorites (
+    provider TEXT NOT NULL,
+    key TEXT NOT NULL,
+    full_name TEXT NOT NULL,
+    PRIMARY KEY (provider, key)
+  );
+
   -- What a hosting service (GitHub, GitLab) last listed for the configured account, one row per provider.
   CREATE TABLE IF NOT EXISTS remote_repo_listings (
     provider TEXT PRIMARY KEY,
@@ -114,6 +123,15 @@ export interface StoredCommunityProfile {
   slug: string;
   payload: string;
   fetchedAt: string;
+}
+
+/** A repository on a hosting service that the user starred without cloning it. */
+export interface RemoteFavorite {
+  provider: string;
+  /** Lowercased `host/path`, the identity a catalog entry matches on. */
+  key: string;
+  /** The path as the host spells it (`owner/repo`), for people reading the database. */
+  fullName: string;
 }
 
 /** A hosting service's repository listing as last checked; `payload` is opaque to the store. */
@@ -321,6 +339,32 @@ export class Store {
       if (favorite) db.prepare("INSERT OR IGNORE INTO repo_favorites(repo_id) VALUES (?)").run(repoId);
       else db.prepare("DELETE FROM repo_favorites WHERE repo_id = ?").run(repoId);
     });
+  }
+
+  /** Stars or unstars a repository that lives only on a hosting service. Idempotent either way. */
+  setRemoteFavorite(remote: RemoteFavorite, favorite: boolean): void {
+    this.transaction((db) => {
+      if (favorite) {
+        db.prepare(
+          `INSERT INTO remote_favorites(provider, key, full_name) VALUES (?, ?, ?)
+           ON CONFLICT(provider, key) DO UPDATE SET full_name = excluded.full_name`,
+        ).run(remote.provider, remote.key, remote.fullName);
+      } else {
+        db.prepare("DELETE FROM remote_favorites WHERE provider = ? AND key = ?").run(remote.provider, remote.key);
+      }
+    });
+  }
+
+  listRemoteFavorites(): RemoteFavorite[] {
+    return this.withConnection((db) =>
+      (
+        db.prepare("SELECT provider, key, full_name FROM remote_favorites ORDER BY provider, key").all() as {
+          provider: string;
+          key: string;
+          full_name: string;
+        }[]
+      ).map((row) => ({ provider: row.provider, key: row.key, fullName: row.full_name })),
+    );
   }
 
   /** Keeps the newest community profile for a GitHub repo; `slug` is matched case-insensitively. */

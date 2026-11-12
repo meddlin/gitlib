@@ -801,6 +801,10 @@ The Star button in the repo table (`components/repo-table.tsx`) calls `setFavori
   turns repos into unique `owner/repo` slugs and collapses linked worktrees that share a remote, so the watch list is
   that function filtered by `isFavorite`. Favorites with no GitHub remote are absent today; a report should say how many
   were skipped and why.
+- Repositories starred on GitHub without a clone (the catalog's star, `remote_favorites` in `gitlib.db`) are watched
+  too: `addRemoteFavorites` (`packages/core/src/dependabot/check.ts`) adds them as watched repos with no checkout
+  paths, de-duplicated against starred clones by slug. Ones starred on GitLab are listed as skipped, since only
+  GitHub is checked.
 - The GitHub-stars reading would watch repos that are not cloned locally and that the user may not own (section 14).
   That is a different feature.
 

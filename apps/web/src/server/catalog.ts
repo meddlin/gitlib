@@ -3,7 +3,14 @@ import { isGitLibError } from "@gitlib/core";
 import { findRemoteOnly, type CatalogEntry, type RemoteProvider } from "#/lib/catalog";
 import type { RemoteReadme } from "#/lib/readme";
 import { getApp } from "./gitlib.server";
-import { buildCatalog, cloneRemoteRepo, loadRemoteReadme, refreshAllListings, type CloneResult } from "./catalog.server";
+import {
+  buildCatalog,
+  cloneRemoteRepo,
+  loadRemoteReadme,
+  refreshAllListings,
+  setCatalogFavorite,
+  type CloneResult,
+} from "./catalog.server";
 
 export type { CatalogView, CloneResult, ProviderStatus } from "./catalog.server";
 
@@ -38,6 +45,31 @@ export const getRemoteRepo = createServerFn({ method: "GET" })
 export const getRemoteReadme = createServerFn({ method: "GET" })
   .validator(validateRemoteRepo)
   .handler(({ data }): Promise<RemoteReadme> => loadRemoteReadme(data.provider, data.fullName));
+
+interface FavoriteInput {
+  relativePath?: string;
+  provider?: RemoteProvider;
+  fullName?: string;
+  favorite: boolean;
+}
+
+/**
+ * Stars or unstars a repo from the catalog. Name a clone by `relativePath`, or a repo with no clone by `provider`
+ * and `fullName`. Returns the refreshed catalog.
+ */
+export const setCatalogEntryFavorite = createServerFn({ method: "POST" })
+  .validator((input: FavoriteInput) => {
+    if (typeof input?.favorite !== "boolean") throw new Error("Invalid favorite request.");
+    if (typeof input.relativePath === "string" && input.relativePath) return input;
+    validateRemoteRepo({ provider: input.provider as RemoteProvider, fullName: input.fullName as string });
+    return input;
+  })
+  .handler(({ data }) =>
+    setCatalogFavorite(
+      data.relativePath ? { relativePath: data.relativePath } : { provider: data.provider!, fullName: data.fullName! },
+      data.favorite,
+    ),
+  );
 
 /** Clones a remote-only repo into the clone directory. */
 export const cloneRepo = createServerFn({ method: "POST" })

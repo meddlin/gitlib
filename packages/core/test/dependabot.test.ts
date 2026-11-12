@@ -831,6 +831,53 @@ describe("watching favorites", () => {
       expect(report.skipped).toHaveLength(1);
     });
 
+    it("also watches repositories starred on GitHub without a clone, and reports other hosts as skipped", async () => {
+      setUp({ gitlib: "https://github.com/meddlin/gitlib.git" });
+      const backend = new FakeBackend({
+        meddlin: { prs: [pr({ number: 1, repo: "meddlin/gitlib" }), pr({ number: 7, repo: "meddlin/server-only" })] },
+        "far-org": { prs: [pr({ number: 3, repo: "far-org/elsewhere" })] },
+      });
+      const app = appWith(backend);
+      star(app, "gitlib");
+      const favorite = (provider: string, fullName: string) =>
+        app.store.setRemoteFavorite({ provider, key: `${provider}.com/${fullName.toLowerCase()}`, fullName }, true);
+      favorite("github", "meddlin/server-only");
+      favorite("github", "far-org/elsewhere");
+      // Starred through a clone as well: still one watched repository, and the clone keeps its path.
+      favorite("github", "Meddlin/GitLib");
+      favorite("gitlab", "group/proj");
+      favorite("github", "not/a/repo");
+
+      const report = await app.checkDependabot();
+
+      expect(backend.calls).toEqual([
+        { owner: "far-org", repoNames: ["elsewhere"] },
+        { owner: "meddlin", repoNames: ["gitlib", "server-only"] },
+      ]);
+      expect(report.watched.map((repo) => [repo.slug, repo.status, repo.openPrs, repo.paths])).toEqual([
+        ["far-org/elsewhere", "checked", 1, []],
+        ["meddlin/gitlib", "checked", 1, ["gitlib"]],
+        ["meddlin/server-only", "checked", 1, []],
+      ]);
+      expect(report.skipped).toEqual([
+        { relativePath: "github.com/not/a/repo", reason: '"not/a/repo" is not a valid GitHub name' },
+        { relativePath: "gitlab.com/group/proj", reason: "it is only on GitLab, and only GitHub is checked" },
+      ]);
+    });
+
+    it("checks a GitHub-only favorite when nothing is cloned", async () => {
+      setUp({});
+      const backend = new FakeBackend({ meddlin: { prs: [pr({ repo: "meddlin/server-only" })] } });
+      const app = appWith(backend);
+      app.refresh();
+      app.store.setRemoteFavorite({ provider: "github", key: "github.com/meddlin/server-only", fullName: "meddlin/server-only" }, true);
+
+      const report = await app.checkDependabot();
+
+      expect(report.items.map((item) => item.pr.repo)).toEqual(["meddlin/server-only"]);
+      expect(report.skipped).toEqual([]);
+    });
+
     it("works on its own, without a GitLibApp", async () => {
       setUp({ gitlib: "https://github.com/meddlin/gitlib.git" });
       const app = appWith(null);

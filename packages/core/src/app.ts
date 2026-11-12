@@ -48,12 +48,14 @@ import {
   normalizeMilestoneDueDate,
   normalizeMilestoneTitle,
   normalizeProjectName,
+  normalizeProjectRemote,
   MilestoneNotFoundError,
   ProjectNotFoundError,
   type Milestone,
   type MilestoneChanges,
   type NewMilestone,
   type Project,
+  type ProjectRemote,
   type IssueStatus,
   type LocalIssue,
   type LocalIssueChanges,
@@ -295,7 +297,13 @@ export class GitLibApp {
         "Checking Dependabot pull requests needs a GitHub token: set GITLIB_GITHUB_TOKEN or GITHUB_TOKEN.",
       );
     }
-    return checkDependabot({ repositories: this.loadRepositories(), backend: this.dependabot, system: this.system, ...options });
+    return checkDependabot({
+      repositories: this.loadRepositories(),
+      remoteFavorites: this.store.listRemoteFavorites(),
+      backend: this.dependabot,
+      system: this.system,
+      ...options,
+    });
   }
 
   /**
@@ -525,6 +533,20 @@ export class GitLibApp {
   addRepoToProject(id: number, selector: string): Project {
     const repo = this.store.resolveRepository(selector);
     return this.planning.addRepoToProject(id, repo.relativePath, utcNow());
+  }
+
+  /**
+   * Puts several repos into a project at once: clones gitlib has scanned (by selector) and hosted repos that are not
+   * cloned. Nothing is added unless every clone resolves. Repos already in the project are skipped.
+   */
+  addReposToProject(id: number, selectors: readonly string[], remotes: readonly ProjectRemote[] = []): Project {
+    const paths = selectors.map((selector) => this.store.resolveRepository(selector).relativePath);
+    return this.planning.addReposToProject(id, paths, remotes.map(normalizeProjectRemote), utcNow());
+  }
+
+  /** Takes a hosted repo that was added without a clone out of a project. */
+  removeRemoteFromProject(id: number, remote: ProjectRemote): Project {
+    return this.planning.removeRemoteFromProject(id, normalizeProjectRemote(remote), utcNow());
   }
 
   /** Takes a repo out by its `relativePath`, which works even for a repo gitlib no longer finds. */
