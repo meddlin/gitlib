@@ -1,10 +1,12 @@
 import { Link } from "@tanstack/react-router";
 import { ExternalLink } from "lucide-react";
+import { CommunityMeter, NOT_FAVORITED_HINT, describeScore } from "#/components/community-score";
 import { TechBadge } from "#/components/tech-badge";
 import { formatAgo } from "#/lib/format";
 import type { CatalogEntry, RemoteLink } from "#/lib/catalog";
 import { cn } from "#/lib/utils";
 import type { ProviderStatus } from "#/server/catalog";
+import type { CommunityScoresView } from "#/server/community";
 import type { RepoView } from "#/server/repos";
 
 const chip = "inline-flex h-5 items-center gap-1 border px-1.5 text-xs whitespace-nowrap";
@@ -38,6 +40,51 @@ function RemoteChip({ label, link, listed }: { label: string; link: RemoteLink |
   );
 }
 
+const UNCLONED_HINT =
+  "Repositories that aren't cloned can't be favorited, so they are only scored when Settings says to score all repositories. Open it to see its score.";
+
+/**
+ * GitHub's community score for a row, from what gitlib has stored: cloned or not, since the score belongs to the
+ * GitHub repository. A dash says why when the Settings page is the reason there isn't one.
+ */
+function CommunityCell({
+  entry,
+  favorite,
+  community,
+}: {
+  entry: CatalogEntry;
+  /** Whether any clone of the repo is a favorite. */
+  favorite: boolean;
+  community: CommunityScoresView | undefined;
+}) {
+  const link = entry.github;
+  if (!link) return <span className="text-muted-foreground">—</span>;
+  if (!community) return <span aria-label="Loading community score">…</span>;
+
+  const found = community.bySlug[link.fullName.toLowerCase()];
+  if (!found) {
+    const outOfScope = community.scope === "favorites" && !favorite;
+    return (
+      <span className="text-muted-foreground" title={outOfScope ? (entry.locals.length === 0 ? UNCLONED_HINT : NOT_FAVORITED_HINT) : "No score stored yet."}>
+        —
+      </span>
+    );
+  }
+
+  const { label, title } = describeScore(entry.name, found);
+  const className = "flex w-fit flex-col gap-1 outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring";
+  const local = entry.locals[0];
+  return local ? (
+    <Link to="/repos/$" params={{ _splat: local }} search={{ tab: "community" }} aria-label={label} title={title} className={className}>
+      <CommunityMeter entry={found} />
+    </Link>
+  ) : (
+    <Link to="/remotes/$provider/$" params={{ provider: "github", _splat: link.fullName }} aria-label={label} title={title} className={className}>
+      <CommunityMeter entry={found} />
+    </Link>
+  );
+}
+
 function flagsOf(entry: CatalogEntry): string[] {
   const links = [entry.github, entry.gitlab].filter((link): link is RemoteLink => link !== null);
   return [
@@ -56,22 +103,26 @@ export function CatalogTable({
   reposByPath,
   github,
   gitlab,
+  community,
 }: {
   entries: CatalogEntry[];
-  /** Local repos by relativePath, for the stack detected in a clone. */
+  /** Local repos by relativePath, for the stack detected in a clone and whether it is a favorite. */
   reposByPath: ReadonlyMap<string, RepoView>;
   github: ProviderStatus | undefined;
   gitlab: ProviderStatus | undefined;
+  /** GitHub community scores; undefined while they are still loading. */
+  community: CommunityScoresView | undefined;
 }) {
   return (
     <div className="overflow-x-auto border-y">
-      <table className="w-full min-w-176 table-fixed border-collapse text-sm" data-testid="catalog-table">
+      <table className="w-full min-w-192 table-fixed border-collapse text-sm" data-testid="catalog-table">
         <thead className="border-b">
           <tr className="h-9 text-left text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            <th scope="col" className="w-[28%] px-3">Repository</th>
-            <th scope="col" className="w-[28%] px-3">Description</th>
-            <th scope="col" className="w-[24%] px-3">Where</th>
+            <th scope="col" className="w-[24%] px-3">Repository</th>
+            <th scope="col" className="w-[24%] px-3">Description</th>
+            <th scope="col" className="w-[20%] px-3">Where</th>
             <th scope="col" className="w-[10%] px-3">Stack</th>
+            <th scope="col" className="w-[12%] px-3" title="GitHub community profile score">Community</th>
             <th scope="col" className="w-[10%] px-3">Updated</th>
           </tr>
         </thead>
@@ -157,6 +208,13 @@ export function CatalogTable({
                   ) : (
                     <span className="text-muted-foreground">—</span>
                   )}
+                </td>
+                <td className="px-3 py-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+                  <CommunityCell
+                    entry={entry}
+                    favorite={entry.locals.some((path) => reposByPath.get(path)?.isFavorite)}
+                    community={community}
+                  />
                 </td>
                 <td className="px-3 py-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
                   {entry.updatedAt ? formatAgo(entry.updatedAt) : "—"}

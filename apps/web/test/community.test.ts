@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   COMMUNITY_ITEMS,
+  COMMUNITY_SCOPES,
+  DEFAULT_COMMUNITY_SCOPE,
   isStale,
   missingItems,
+  oldestFetchedAt,
   parseCommunityProfile,
+  parseCommunityScope,
   parseStoredProfile,
   planningIssueDraft,
   refreshIntervalMs,
@@ -215,5 +219,45 @@ describe("formatAgo", () => {
     expect(formatAgo("2026-11-02T07:00:00+00:00", now)).toBe("5 h ago");
     expect(formatAgo("2026-10-30T12:00:00+00:00", now)).toBe("3 days ago");
     expect(formatAgo("garbage", now)).toBe("");
+  });
+});
+
+describe("parseCommunityScope", () => {
+  it("scores only favorites unless told otherwise", () => {
+    expect(DEFAULT_COMMUNITY_SCOPE).toBe("favorites");
+    expect(COMMUNITY_SCOPES).toEqual(["favorites", "all"]);
+  });
+
+  it("reads a saved choice", () => {
+    expect(parseCommunityScope("all")).toBe("all");
+    expect(parseCommunityScope("favorites")).toBe("favorites");
+  });
+
+  it("falls back to the default for anything else", () => {
+    for (const raw of [undefined, null, "", "everyone", "ALL", 1, true, {}, ["all"]]) {
+      expect(parseCommunityScope(raw), String(raw)).toBe("favorites");
+    }
+  });
+});
+
+describe("oldestFetchedAt", () => {
+  const scores = {
+    "me/app": { score: 50, missing: [], fetchedAt: "2026-03-02T00:00:00.000Z" },
+    "me/lib": { score: 80, missing: [], fetchedAt: "2026-03-01T00:00:00.000Z" },
+    "me/new": { score: 90, missing: [], fetchedAt: "2026-03-05T00:00:00.000Z" },
+  } as const;
+
+  it("is the oldest fetch among the repos asked about", () => {
+    expect(oldestFetchedAt(["me/app", "me/lib", "me/new"], scores)).toBe("2026-03-01T00:00:00.000Z");
+    expect(oldestFetchedAt(["me/app", "me/new"], scores)).toBe("2026-03-02T00:00:00.000Z");
+  });
+
+  it("matches names without regard to case and skips repos with no stored score", () => {
+    expect(oldestFetchedAt(["Me/App", "someone/else"], scores)).toBe("2026-03-02T00:00:00.000Z");
+  });
+
+  it("is null when none has one", () => {
+    expect(oldestFetchedAt([], scores)).toBeNull();
+    expect(oldestFetchedAt(["someone/else"], scores)).toBeNull();
   });
 });

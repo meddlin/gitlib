@@ -171,3 +171,39 @@ export const TONE_CLASSES: Record<ScoreTone, { bar: string; text: string }> = {
   fair: { bar: "bg-amber-500", text: "text-amber-700 dark:text-amber-400" },
   poor: { bar: "bg-red-500", text: "text-red-700 dark:text-red-400" },
 };
+
+/**
+ * Which repositories get a community score: only the ones you've favorited, or all of them. A repo you haven't
+ * favorited is one you're probably not investing in, so by default gitlib neither fetches nor shows its score.
+ * Repos that aren't cloned can't be favorited, so they are only scored under "all". Opening a repo's own page
+ * always shows its score, whatever this says, since that is asking for it.
+ */
+export const COMMUNITY_SCOPES = ["favorites", "all"] as const;
+export type CommunityScope = (typeof COMMUNITY_SCOPES)[number];
+export const DEFAULT_COMMUNITY_SCOPE: CommunityScope = "favorites";
+
+/** The saved choice; anything unrecognisable (no file, a bad edit, an old value) means the default. */
+export function parseCommunityScope(raw: unknown): CommunityScope {
+  return COMMUNITY_SCOPES.find((scope) => scope === raw) ?? DEFAULT_COMMUNITY_SCOPE;
+}
+
+/** What a table needs of a stored profile: the score and which checklist items are missing. */
+export interface CommunityScoreEntry {
+  score: number;
+  missing: CommunityItemId[];
+}
+
+/** A stored profile as the repository list reads it, with when it was fetched. */
+export interface CommunitySlugScore extends CommunityScoreEntry {
+  fetchedAt: string;
+}
+
+/** The oldest fetch time among the given repos' stored scores (`owner/repo`, any case); null when none has one. */
+export function oldestFetchedAt(slugs: readonly string[], scores: Readonly<Record<string, CommunitySlugScore>>): string | null {
+  let oldest: string | null = null;
+  for (const slug of slugs) {
+    const fetchedAt = scores[slug.toLowerCase()]?.fetchedAt;
+    if (fetchedAt !== undefined && (oldest === null || fetchedAt < oldest)) oldest = fetchedAt;
+  }
+  return oldest;
+}

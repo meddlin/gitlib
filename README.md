@@ -315,7 +315,12 @@ npm run build -w @gitlib/web && npm run preview -w @gitlib/web   # production bu
   [community profile](https://docs.github.com/rest/metrics/community) score. The column gives the
   percentage plus one square per recommended item (description, README, license, code of conduct,
   contributing guide, issue and pull request templates), hollow when missing; hover for the names, click
-  through to the tab for what each item is for. It is sortable (lowest first). Scores are stored in the
+  through to the tab for what each item is for. It is sortable (lowest first). **Only favorited repositories
+  are scored by default**: a repo you haven't favorited probably isn't one you're investing in, so gitlib
+  neither fetches nor shows its score (the cell is a dash, and its hover text says why). **Settings →
+  Community scores** switches that to all repositories. It is saved on the server, so it applies in every
+  browser and to the background refresh. Opening a repo's own page always shows its score, whatever the
+  setting, since that is asking for it. Scores are stored in the
   local database (`github_community_profiles` table in `gitlib.db`), so the table shows them at once and
   works offline. They are fetched from GitHub again once a day (the server checks hourly, and a page load
   also starts a refresh when scores are older than that), or whenever you press **Refresh scores** on the
@@ -326,6 +331,18 @@ npm run build -w @gitlib/web && npm run preview -w @gitlib/web   # production bu
   next run carries on. Set `GITLIB_GITHUB_TOKEN` to refresh everything.
   Each missing item on the Community tab has an **Add to planning** button that files a gitlib
   [planning](#planning) issue for it (stored in gitlib only); once filed, the row links to that issue.
+  A repository you haven't cloned can be scored without cloning it. Its page (click it in the **Combined**
+  or **GitHub** tab; it must be one the token lists, so `GITLIB_GITHUB_TOKEN` is needed) has a **Community
+  profile** section with the score and what's missing, so you can see how far off it is before cloning it.
+  It is fetched when you open the page and stored like the others; opening it again after the refresh
+  interval (or pressing **Refresh**) asks GitHub again, since nothing refreshes uncloned repos in the
+  background. There is no **Add to planning** button there, because a planning issue belongs to a
+  repository in your library. The tabs other than **Local** have the same **Community** column for every
+  row that is on GitHub, cloned or not, with a note on how old the scores shown are. An uncloned repo
+  can't be favorited, so it appears in that column only under **All repositories**; there, **Refresh
+  scores** on those tabs fetches every GitHub repo in the list (one request each; it runs in the
+  background and the column fills in as it goes), while the daily refresh covers clones only. The
+  **Community** switch under **Repository tabs** on the Settings page also hides the profile section.
 - The **Planning** page (`/planning`) holds gitlib's own issues; see [Planning](#planning).
 - The **Dependabot** page (`/dependabot`) shows the newest saved check of your starred repositories' Dependabot PRs,
   with a **Check now** button and a count badge in the top bar; see [Dependabot watch](#dependabot-watch).
