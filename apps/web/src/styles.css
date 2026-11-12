@@ -226,9 +226,36 @@
   margin: 1.5em 0;
   border-color: var(--border);
 }
+/* Tailwind's reset makes images display:block, which would stack a README's row of badges one per line. */
 .markdown img {
+  display: inline-block;
+  vertical-align: middle;
   max-width: 100%;
   height: auto;
+}
+.markdown details {
+  margin: 0.75em 0;
+}
+.markdown summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+.markdown details[open] > summary {
+  margin-bottom: 0.5em;
+}
+.markdown kbd {
+  font-family: var(--font-mono);
+  font-size: 0.8em;
+  padding: 0.1em 0.4em;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  background: var(--muted);
+}
+.markdown dt {
+  font-weight: 600;
+}
+.markdown dd {
+  margin: 0 0 0.5em 1.5em;
 }
 .markdown table {
   display: block;

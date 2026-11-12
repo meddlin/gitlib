@@ -237,7 +237,8 @@ tabs are separate and stay read-only GitHub views).
 - **New issue** files one against any repo (title, optional Markdown description). Issues are numbered
   per repo, so they read as `repo#3`. Open an issue to edit it, close it, or reopen it. The list filters
   by state and repo, and the filters live in the URL (`?state=closed&repo=…`).
-- Descriptions are rendered as Markdown with raw HTML dropped and only `http(s)` links made live.
+- Descriptions are rendered as Markdown. Raw HTML is cut down to a safe subset (see the README rendering
+  note in [Web App](#web-app)) and only `http(s)` links are made live.
 - An issue is tied to its repo by the repo's relative path. If a repo is moved or deleted its issues
   stay readable and are labelled "repository not found"; new issues can only be filed against repos
   gitlib currently sees.
@@ -319,6 +320,14 @@ npm run build -w @gitlib/web && npm run preview -w @gitlib/web   # production bu
   `GITLIB_GITHUB_TOKEN` (or `GITHUB_TOKEN`) for private repos and a higher rate limit. The web server
   reads it from the environment or from `.env.local` / `.env` in `apps/web/` or the repo root (both
   gitignored); `apps/web/.env.example` shows the format.
+- A repo's `README.md` is shown rendered on its Overview tab and in the preview pane. READMEs are untrusted
+  text, so raw HTML is allowed only as a safe subset: centered blocks (`align`), `<img>` (with `width` and
+  `height`), `<details>`, tables, `<kbd>` and the like. Scripts, styles, event handlers, frames, forms and
+  inline SVG are removed, and only absolute `http(s)` links and images are live. A relative image
+  (`![](docs/logo.png)`, or an `<img src="docs/logo.png">`) is read from that repo's folder through
+  `/api/repo-asset`, which serves only image files (PNG, JPEG, GIF, WebP, AVIF, BMP, ICO, SVG, up to
+  10 MB) that really are inside a repo gitlib has scanned: `..` and symlinks that leave the repo are
+  refused, and so is anything under `.git`. Relative links to other files are shown as plain text.
 - The repo table's **Community** column and each repo's **Community** tab show GitHub's
   [community profile](https://docs.github.com/rest/metrics/community) score. The column gives the
   percentage plus one square per recommended item (description, README, license, code of conduct,

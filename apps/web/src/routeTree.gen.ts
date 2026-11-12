@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as DependabotRouteImport } from './routes/dependabot'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ApiChatRouteImport } from './routes/api.chat'
+import { Route as ApiRepoAssetRouteImport } from './routes/api.repo-asset'
 import { Route as PlanningIndexRouteImport } from './routes/planning.index'
 import { Route as PlanningBoardRouteImport } from './routes/planning.board'
 import { Route as ProjectsIndexRouteImport } from './routes/projects.index'
@@ -40,6 +41,11 @@ const SettingsRoute = SettingsRouteImport.update({
 const ApiChatRoute = ApiChatRouteImport.update({
   id: '/api/chat',
   path: '/api/chat',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiRepoAssetRoute = ApiRepoAssetRouteImport.update({
+  id: '/api/repo-asset',
+  path: '/api/repo-asset',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PlanningIndexRoute = PlanningIndexRouteImport.update({
@@ -88,6 +94,7 @@ export interface FileRoutesByFullPath {
   '/dependabot': typeof DependabotRoute
   '/settings': typeof SettingsRoute
   '/api/chat': typeof ApiChatRoute
+  '/api/repo-asset': typeof ApiRepoAssetRoute
   '/planning/board': typeof PlanningBoardRoute
   '/projects/$id': typeof ProjectsIdRoute
   '/repos/$': typeof ReposSplatRoute
@@ -102,6 +109,7 @@ export interface FileRoutesByTo {
   '/dependabot': typeof DependabotRoute
   '/settings': typeof SettingsRoute
   '/api/chat': typeof ApiChatRoute
+  '/api/repo-asset': typeof ApiRepoAssetRoute
   '/planning/board': typeof PlanningBoardRoute
   '/projects/$id': typeof ProjectsIdRoute
   '/repos/$': typeof ReposSplatRoute
@@ -117,6 +125,7 @@ export interface FileRoutesById {
   '/dependabot': typeof DependabotRoute
   '/settings': typeof SettingsRoute
   '/api/chat': typeof ApiChatRoute
+  '/api/repo-asset': typeof ApiRepoAssetRoute
   '/planning/board': typeof PlanningBoardRoute
   '/projects/$id': typeof ProjectsIdRoute
   '/repos/$': typeof ReposSplatRoute
@@ -133,6 +142,7 @@ export interface FileRouteTypes {
     | '/dependabot'
     | '/settings'
     | '/api/chat'
+    | '/api/repo-asset'
     | '/planning/board'
     | '/projects/$id'
     | '/repos/$'
@@ -147,6 +157,7 @@ export interface FileRouteTypes {
     | '/dependabot'
     | '/settings'
     | '/api/chat'
+    | '/api/repo-asset'
     | '/planning/board'
     | '/projects/$id'
     | '/repos/$'
@@ -161,6 +172,7 @@ export interface FileRouteTypes {
     | '/dependabot'
     | '/settings'
     | '/api/chat'
+    | '/api/repo-asset'
     | '/planning/board'
     | '/projects/$id'
     | '/repos/$'
@@ -176,6 +188,7 @@ export interface RootRouteChildren {
   DependabotRoute: typeof DependabotRoute
   SettingsRoute: typeof SettingsRoute
   ApiChatRoute: typeof ApiChatRoute
+  ApiRepoAssetRoute: typeof ApiRepoAssetRoute
   PlanningBoardRoute: typeof PlanningBoardRoute
   ProjectsIdRoute: typeof ProjectsIdRoute
   ReposSplatRoute: typeof ReposSplatRoute
@@ -214,6 +227,13 @@ declare module '@tanstack/react-router' {
       path: '/api/chat'
       fullPath: '/api/chat'
       preLoaderRoute: typeof ApiChatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/repo-asset': {
+      id: '/api/repo-asset'
+      path: '/api/repo-asset'
+      fullPath: '/api/repo-asset'
+      preLoaderRoute: typeof ApiRepoAssetRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/planning/': {
@@ -280,6 +300,7 @@ const rootRouteChildren: RootRouteChildren = {
   DependabotRoute: DependabotRoute,
   SettingsRoute: SettingsRoute,
   ApiChatRoute: ApiChatRoute,
+  ApiRepoAssetRoute: ApiRepoAssetRoute,
   PlanningBoardRoute: PlanningBoardRoute,
   ProjectsIdRoute: ProjectsIdRoute,
   ReposSplatRoute: ReposSplatRoute,
