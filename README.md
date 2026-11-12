@@ -357,9 +357,11 @@ has **no login**. On a server or homelab VM, set `GITLIB_BIND=0.0.0.0` in `.env`
 reach it from other machines on a trusted LAN, and keep it off the internet or behind an authenticating reverse
 proxy. See [docs/runbook.md](docs/runbook.md#3-homelab-install) if the page still does not load.
 
-- Your repos are mounted read-only at `/home/node/git`, the default scan root for the container user. The host
+- Your repos are bind-mounted read-write at `/home/node/git`, the default scan root for the container user, so
+  **Clone locally** writes to the host and clones persist when the container stops or is recreated. The host
   directory is `~/git` unless you set `GITLIB_REPOS` in `.env` (e.g. `GITLIB_REPOS=/Volumes/work/code`); run
-  `docker compose up -d` afterwards and press **Rescan**.
+  `docker compose up -d` afterwards and press **Rescan**. On Linux that directory must be writable by uid 1000
+  (`sudo chown 1000:1000 /srv/git`); see [docs/runbook.md](docs/runbook.md#3-homelab-install).
 - Config, notes, descriptions and planning data live in the `gitlib-data` volume (`GITLIB_HOME=/data`); the
   search index lives in `meili-data` and is rebuilt automatically, so it is not backed up.
 - `docker compose down` keeps your data; `docker compose down -v` **deletes it**.

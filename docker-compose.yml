@@ -29,8 +29,11 @@ x-gitlib: &gitlib
   image: gitlib-web:latest
   environment: *gitlib-env
   volumes:
-    # Directory containing the git repositories you want to browse (mounted read-only).
-    - ${GITLIB_REPOS:-${HOME}/git}:/home/node/git:ro
+    # Directory containing the git repositories you want to browse. Mounted read-write because "Clone locally"
+    # runs `git clone` into it. It is a bind mount of a host directory, so clones live on the host and survive
+    # `docker compose down`, rebuilds and restarts. The container writes as uid 1000, so on Linux that directory
+    # must be writable by uid 1000 (see docs/runbook.md, "Put your repositories on the VM").
+    - ${GITLIB_REPOS:-${HOME}/git}:/home/node/git
     # Config (config.toml) and the SQLite databases (notes, descriptions, planning); persists across rebuilds.
     - gitlib-data:/data
 
@@ -87,6 +90,7 @@ services:
       # Backups and the pre-restore safety copy go to the host-visible /backups mount, not into the data volume.
       GITLIB_BACKUP_DIR: /backups
     volumes:
+      # Read-only on purpose: backup, restore and reindex never write to your repositories.
       - ${GITLIB_REPOS:-${HOME}/git}:/home/node/git:ro
       - gitlib-data:/data
       # Where backup archives are written. A bind mount, so they land on the host (or an NFS share) in plain sight.
