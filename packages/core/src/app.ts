@@ -295,7 +295,13 @@ export class GitLibApp {
         "Checking Dependabot pull requests needs a GitHub token: set GITLIB_GITHUB_TOKEN or GITHUB_TOKEN.",
       );
     }
-    return checkDependabot({ repositories: this.loadRepositories(), backend: this.dependabot, system: this.system, ...options });
+    return checkDependabot({
+      repositories: this.loadRepositories(),
+      remoteFavorites: this.store.listRemoteFavorites(),
+      backend: this.dependabot,
+      system: this.system,
+      ...options,
+    });
   }
 
   /**

@@ -1,7 +1,7 @@
 import { createFileRoute, useRouter, useRouterState } from "@tanstack/react-router";
 import { RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CatalogTable } from "#/components/catalog-table";
+import { CatalogTable, favoriteTarget } from "#/components/catalog-table";
 import { ContributionGraph, type ContributionSource } from "#/components/contribution-graph";
 import { RepoPreview } from "#/components/repo-preview";
 import {
@@ -17,11 +17,11 @@ import {
 import { SearchBar } from "#/components/search-bar";
 import { TechBadge } from "#/components/tech-badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
-import { CATALOG_SOURCES, entriesForSource, matchesQuery, type CatalogSource } from "#/lib/catalog";
+import { CATALOG_SOURCES, entriesForSource, matchesQuery, type CatalogEntry, type CatalogSource } from "#/lib/catalog";
 import { formatAgo } from "#/lib/format";
 import { saveLibraryState, type LibraryTableState } from "#/lib/library-state";
 import { cn } from "#/lib/utils";
-import { getCatalog, refreshCatalog, type CatalogView, type ProviderStatus } from "#/server/catalog";
+import { getCatalog, refreshCatalog, setCatalogEntryFavorite, type CatalogView, type ProviderStatus } from "#/server/catalog";
 import { getCommunityScores, refreshCommunityScores, type CommunityScoresView } from "#/server/community";
 import { getContributions, type ContributionsView } from "#/server/contributions";
 import { getIssueCounts, type IssueCountsView } from "#/server/issues";
@@ -219,7 +219,14 @@ function useCatalog(refreshKey: unknown) {
     }
   }, []);
 
-  return { view, error, refresh, busy: requesting || refreshing };
+  /** Stars or unstars an entry; the server answers with the catalog as it is now, so the order updates too. */
+  const setFavorite = useCallback(async (entry: CatalogEntry, favorite: boolean) => {
+    const target = favoriteTarget(entry);
+    if (!target) return;
+    setView(await setCatalogEntryFavorite({ data: { ...target, favorite } }));
+  }, []);
+
+  return { view, error, refresh, setFavorite, busy: requesting || refreshing };
 }
 
 const CONTRIBUTION_SOURCE_KEY = "gitlib-contribution-source";
@@ -602,6 +609,7 @@ function RepoLibrary() {
                 gitlab={catalog.view?.gitlab}
                 reposByPath={reposByPath}
                 query={q}
+                onToggleFavorite={catalog.setFavorite}
               />
             )}
           </TabsContent>
@@ -655,6 +663,7 @@ function SourceBody({
   gitlab,
   reposByPath,
   query,
+  onToggleFavorite,
 }: {
   source: Exclude<CatalogSource, "local">;
   rows: ReturnType<typeof entriesForSource> | undefined;
@@ -663,6 +672,7 @@ function SourceBody({
   gitlab: ProviderStatus | undefined;
   reposByPath: ReadonlyMap<string, RepoView>;
   query: string | undefined;
+  onToggleFavorite: (entry: CatalogEntry, favorite: boolean) => Promise<unknown>;
 }) {
   if (error) return <EmptyState>Couldn't load repositories: {error}</EmptyState>;
   if (!rows) return <EmptyState>Loading repositories…</EmptyState>;
@@ -699,7 +709,7 @@ function SourceBody({
               : (hostNotice ?? "No repositories found.")}
         </EmptyState>
       ) : (
-        <CatalogTable entries={rows} reposByPath={reposByPath} github={github} gitlab={gitlab} />
+        <CatalogTable entries={rows} reposByPath={reposByPath} github={github} gitlab={gitlab} onToggleFavorite={onToggleFavorite} />
       )}
     </>
   );
