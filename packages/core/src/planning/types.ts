@@ -62,6 +62,13 @@ export interface LocalIssueChanges {
   body?: string;
 }
 
+/** A repo hosted on GitHub or GitLab that a project holds without a local clone. */
+export interface ProjectRemote {
+  provider: "github" | "gitlab";
+  /** As the host writes it: `owner/repo`, or `group/subgroup/project` on GitLab. */
+  fullName: string;
+}
+
 /**
  * A named group of repositories and issues. Repos are referenced by `relativePath` (see
  * `LocalIssue.repoPath`), so a project can mention a repo gitlib has since lost track of.
@@ -71,6 +78,8 @@ export interface Project {
   name: string;
   /** `relativePath` of every repo in the project, sorted. */
   repoPaths: string[];
+  /** Hosted repos added without a clone, sorted by provider then name. */
+  remotes: ProjectRemote[];
   createdAt: string;
   updatedAt: string;
 }

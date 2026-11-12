@@ -154,7 +154,7 @@ reasonable start; check with `ollama ps` on that machine that the model is fully
 
 `gitlib dependabot check` reports which open [Dependabot](https://docs.github.com/code-security/dependabot) pull
 requests on your **starred** repositories can be merged and which need work. "Starred" is the Star toggle in gitlib
-(`repo_favorites`), not GitHub stars, and only favorites with a github.com remote can be watched; the report says
+(`repo_favorites`, or `remote_favorites` for a repo starred on GitHub without a clone), not GitHub stars, and only favorites on github.com can be watched; the report says
 how many were skipped and why. Nothing is ever written to GitHub, and the verdict comes only from fields GitHub
 returns (never from the PR text, which quotes third-party release notes). The research and the reasoning behind it
 are in [`docs/dependabot-watch.md`](docs/dependabot-watch.md).
@@ -237,7 +237,8 @@ tabs are separate and stay read-only GitHub views).
 - **New issue** files one against any repo (title, optional Markdown description). Issues are numbered
   per repo, so they read as `repo#3`. Open an issue to edit it, close it, or reopen it. The list filters
   by state and repo, and the filters live in the URL (`?state=closed&repo=…`).
-- Descriptions are rendered as Markdown with raw HTML dropped and only `http(s)` links made live.
+- Descriptions are rendered as Markdown. Raw HTML is cut down to a safe subset (see the README rendering
+  note in [Web App](#web-app)) and only `http(s)` links are made live.
 - An issue is tied to its repo by the repo's relative path. If a repo is moved or deleted its issues
   stay readable and are labelled "repository not found"; new issues can only be filed against repos
   gitlib currently sees.
@@ -248,7 +249,11 @@ The **Projects** page (`/projects`) groups repositories and gitlib issues under 
 several repos. A project page has two parts that are kept apart on purpose:
 
 - **Repositories** and **Gitlib issues** are gitlib's own data, stored in `planning.db`. You can add, remove and
-  edit them, and nothing in them is ever sent to GitHub.
+  edit them, and nothing in them is ever sent to GitHub. **Add repositories** opens a searchable list with a
+  checkbox per repo, so several can be added at once: local clones, and repos that GitHub or GitLab list for your
+  account but that you have not cloned (these need `GITLIB_GITHUB_TOKEN` / `GITLIB_GITLAB_TOKEN`, as on the
+  Repositories page). A repo added without a clone is kept by its host name (`owner/repo`); once you clone it, its
+  row links to the clone. Hosted GitHub repos also appear in the **GitHub** tab.
 - **Milestones** are goals within a project, each with a title, an optional due date and an optional Markdown
   description. They show as cards at the top of the project page, each with its due date and how many of its
   issues are closed. Pick an issue's milestone from its row on the project page or from the issue's own page; the
@@ -305,12 +310,24 @@ npm run build -w @gitlib/web && npm run preview -w @gitlib/web   # production bu
   half an hour. A host that isn't configured is noted on the page and the rest still works, and clones link
   to GitHub or GitLab from their remotes either way. The **Local** tab is the full table (favorites, descriptions, issue
   counts, community scores, preview pane); the other tabs list repos with links out, and clones open their
-  detail page. The tab is kept in the URL (`?source=`).
+  detail page. The tab is kept in the URL (`?source=`). Every row has a star, so a repo that is only on GitHub
+  or GitLab can be a favorite without being cloned (stored in the `remote_favorites` table, and also on the
+  repo's own page). A cloned repo uses the same star as the Local tab, and cloning a starred repo carries the
+  star over to the clone. Starred rows are listed first. Dependabot checks (below) also watch repos starred on
+  GitHub without a clone; ones starred only on GitLab are reported as skipped.
 - Each repo has a detail page (click its name) with Overview, **Issues** and **Pull requests** tabs; the
   last two list open GitHub items and say so in a banner. Public repos work as-is; set
   `GITLIB_GITHUB_TOKEN` (or `GITHUB_TOKEN`) for private repos and a higher rate limit. The web server
   reads it from the environment or from `.env.local` / `.env` in `apps/web/` or the repo root (both
   gitignored); `apps/web/.env.example` shows the format.
+- A repo's `README.md` is shown rendered on its Overview tab and in the preview pane. READMEs are untrusted
+  text, so raw HTML is allowed only as a safe subset: centered blocks (`align`), `<img>` (with `width` and
+  `height`), `<details>`, tables, `<kbd>` and the like. Scripts, styles, event handlers, frames, forms and
+  inline SVG are removed, and only absolute `http(s)` links and images are live. A relative image
+  (`![](docs/logo.png)`, or an `<img src="docs/logo.png">`) is read from that repo's folder through
+  `/api/repo-asset`, which serves only image files (PNG, JPEG, GIF, WebP, AVIF, BMP, ICO, SVG, up to
+  10 MB) that really are inside a repo gitlib has scanned: `..` and symlinks that leave the repo are
+  refused, and so is anything under `.git`. Relative links to other files are shown as plain text.
 - The repo table's **Community** column and each repo's **Community** tab show GitHub's
   [community profile](https://docs.github.com/rest/metrics/community) score. The column gives the
   percentage plus one square per recommended item (description, README, license, code of conduct,
@@ -335,14 +352,24 @@ npm run build -w @gitlib/web && npm run preview -w @gitlib/web   # production bu
   or **GitHub** tab; it must be one the token lists, so `GITLIB_GITHUB_TOKEN` is needed) has a **Community
   profile** section with the score and what's missing, so you can see how far off it is before cloning it.
   It is fetched when you open the page and stored like the others; opening it again after the refresh
-  interval (or pressing **Refresh**) asks GitHub again, since nothing refreshes uncloned repos in the
-  background. There is no **Add to planning** button there, because a planning issue belongs to a
-  repository in your library. The tabs other than **Local** have the same **Community** column for every
-  row that is on GitHub, cloned or not, with a note on how old the scores shown are. An uncloned repo
-  can't be favorited, so it appears in that column only under **All repositories**; there, **Refresh
-  scores** on those tabs fetches every GitHub repo in the list (one request each; it runs in the
-  background and the column fills in as it goes), while the daily refresh covers clones only. The
-  **Community** switch under **Repository tabs** on the Settings page also hides the profile section.
+  interval (or pressing **Refresh**) asks GitHub again. There is no **Add to planning** button there,
+  because a planning issue belongs to a repository in your library. The tabs other than **Local** have the
+  same **Community** column for every row that is on GitHub, cloned or not, with a note on how old the scores
+  shown are. Starring a repo you haven't cloned (the star on its row or its page) adds it to the favorites
+  that get scored, and the daily refresh then keeps its score current. Under **All repositories**, **Refresh
+  scores** on those tabs also fetches every other GitHub repo in the list (one request each; it runs in the
+  background and the column fills in as it goes), while the daily refresh covers clones and starred repos
+  only. The **Community** switch under **Repository tabs** on the Settings page also hides the profile
+  section.
+- A **blue dot** beside a repo's name means the branch it has checked out is behind the remote branch it
+  tracks (`origin/main` and so on): the remote has commits the clone lacks, so it needs a `git pull`. Hover
+  for the branch. Gitlib asks each remote with `git ls-remote`, which only reads, so it works on the
+  read-only Docker mount, and it never fetches or pulls for you. A clone that has diverged counts as behind
+  (a pull still has something to bring in); one that is only ahead, up to date, on a detached HEAD, on a
+  branch with no upstream, or a linked worktree shows no dot. Answers are cached for five minutes;
+  **Rescan** asks again at once, so run it after pulling. The server needs its own access to each remote
+  (see Troubleshooting in [the runbook](docs/runbook.md)); repos it could not reach are counted in a note
+  above the table.
 - The **Planning** page (`/planning`) holds gitlib's own issues; see [Planning](#planning).
 - The **Dependabot** page (`/dependabot`) shows the newest saved check of your starred repositories' Dependabot PRs,
   with a **Check now** button and a count badge in the top bar; see [Dependabot watch](#dependabot-watch).

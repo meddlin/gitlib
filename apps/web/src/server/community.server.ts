@@ -67,7 +67,7 @@ const RETRY_AFTER_MS = 60 * 60_000;
 interface RefreshRun {
   /** Whether it fetches every repo rather than only those that are due. */
   force: boolean;
-  /** Whether it also covers GitHub repos that aren't cloned (only ever the case under the "all" setting). */
+  /** Whether it also covers the GitHub repos with no clone that aren't starred (only under the "all" setting). */
   uncloned: boolean;
   promise: Promise<void>;
 }
@@ -130,19 +130,21 @@ interface ScoreTarget {
 }
 
 /**
- * The repositories whose scores gitlib keeps current, under `scope`: favorited clones, or every clone. With
- * `uncloned`, and only under "all" (a repo that isn't cloned can't be favorited), also the GitHub repos the
- * catalog lists that have no clone.
+ * The repositories whose scores gitlib keeps current, under `scope`: favorited clones, or every clone. A GitHub
+ * repo with no clone has its own star, so a starred one counts as a favorite too. With `uncloned`, and only under
+ * "all", the rest of the GitHub repos the catalog lists that have no clone are included as well.
  */
 async function scoredRepos(scope: CommunityScope, uncloned: boolean): Promise<ScoreTarget[]> {
   const local = await groupReposByGitHubSlug();
   const targets = local.filter(({ favorite }) => scope === "all" || favorite).map(({ ref, paths }) => ({ ref, paths }));
-  if (!uncloned || scope !== "all") return targets;
 
   const seen = new Set(local.map(({ ref }) => slugKey(ref)));
   for (const entry of (await buildCatalog()).entries) {
+    // An entry with a clone was handled above, by that clone's star.
+    if (entry.locals.length > 0) continue;
     const source = entry.github && sourceOf(entry.github.fullName);
     if (!source || seen.has(slugKey(source))) continue;
+    if (!entry.isFavorite && !(uncloned && scope === "all")) continue;
     seen.add(slugKey(source));
     targets.push({ ref: { owner: source.owner, repo: source.repo }, paths: [] });
   }
@@ -210,7 +212,7 @@ function refreshIfDue(entries: { ref: { owner: string; repo: string } }[], store
   if (interval === null || state.run) return;
   // A failure (usually the rate limit) would repeat on every page load, so give GitHub a rest first.
   if (state.lastError && state.lastAttemptAt !== null && Date.now() - state.lastAttemptAt < RETRY_AFTER_MS) return;
-  // Never covers uncloned repos: that bulk fetch is only ever started by the button.
+  // Covers starred repos with no clone, never the rest of them: that bulk fetch is only ever started by the button.
   if (entries.some(({ ref }) => isStale(stored.get(slugKey(ref))?.fetchedAt, Date.now(), interval))) void startRefresh(false, false);
 }
 
@@ -345,8 +347,8 @@ export async function readCommunityScores(): Promise<CommunityScoresView> {
 /**
  * Starts asking GitHub for every scored repo's profile now, whatever the refresh interval says, and returns at
  * once with `refreshing` set: the scores fill in as it goes and the caller keeps looking until it is done. The
- * bulk job can be hundreds of requests (`uncloned` adds the GitHub repos with no clone, under the "all" setting),
- * too long to hold one request open for.
+ * bulk job can be hundreds of requests (`uncloned` adds every GitHub repo with no clone, starred or not, under the
+ * "all" setting), too long to hold one request open for.
  */
 export async function refreshAllCommunityScores(uncloned: boolean): Promise<CommunityScoresView> {
   try {

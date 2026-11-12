@@ -254,12 +254,15 @@ describe("which repositories get a score", () => {
     const server = await startServer(github);
     const setting = await import("../src/server/community-scope.server");
     const { getApp, loadAndIndexRepositories } = await import("../src/server/gitlib.server");
+    const { setCatalogFavorite } = await import("../src/server/catalog.server");
     const repo = (await loadAndIndexRepositories()).find((candidate) => candidate.name === "app")!;
     return {
       ...server,
       ...setting,
       relativePath: repo.relativePath,
       favorite: (on: boolean) => void getApp().saveRepositoryFavorite(repo.relativePath, on),
+      /** Stars `me/remote-only`, the GitHub repo with no clone. */
+      star: (on: boolean) => setCatalogFavorite({ provider: "github", fullName: "me/remote-only" }, on),
       /** Resolves once no refresh is running (looking may start one, as the page does). */
       idle: () => vi.waitFor(async () => expect((await server.readCommunityScores()).refreshing).toBe(false)),
       appHome: path.join(base, "home"),
@@ -330,14 +333,50 @@ describe("which repositories get a score", () => {
     expect(hidden.bySlug).toEqual({});
   });
 
-  it("does not score repositories that are not cloned, because they cannot be favorites", async () => {
+  it("leaves a repository with no clone unscored until it is starred, even when the button asks for uncloned ones", async () => {
     const github = fakeGitHub();
     const { refreshAllCommunityScores, favorite, idle } = await scoring(github);
     favorite(true);
 
+    // `uncloned` only means something under the "all" setting.
     await refreshAllCommunityScores(true);
     await idle();
     expect(github.calls).toEqual([APP_PATH]);
+  });
+
+  it("scores a starred repository with no clone like a favorite, and stops once it is unstarred", async () => {
+    const github = fakeGitHub();
+    const { readCommunityScores, star, idle } = await scoring(github);
+    await readCommunityScores();
+    await idle();
+    expect(github.calls).toHaveLength(0);
+
+    await star(true);
+    expect((await readCommunityScores()).refreshing).toBe(true); // its score is missing, so a refresh starts
+    await idle();
+    expect(github.calls).toEqual([REMOTE_PATH]);
+
+    const view = await readCommunityScores();
+    expect(view.scope).toBe("favorites");
+    expect(Object.keys(view.bySlug)).toEqual(["me/remote-only"]);
+    expect(view.bySlug["me/remote-only"]).toMatchObject({ score: 57, fetchedAt: expect.any(String) });
+    // Scores by path are for clones only.
+    expect(view.scores).toEqual({});
+
+    await star(false);
+    expect((await readCommunityScores()).bySlug).toEqual({});
+  });
+
+  it("keeps a starred repository with no clone current in the background under \"all\" too", async () => {
+    const github = fakeGitHub();
+    const { readCommunityScores, writeCommunityScope, star, idle } = await scoring(github);
+    writeCommunityScope("all");
+    await star(true);
+
+    await readCommunityScores();
+    await idle();
+    // The clone and the starred repo, but not the rest of the uncloned repos (there are none here besides it).
+    expect([...github.calls].sort()).toEqual([APP_PATH, REMOTE_PATH]);
   });
 
   it("scores every clone under the \"all\" setting, but not the uncloned ones unless the button asks", async () => {

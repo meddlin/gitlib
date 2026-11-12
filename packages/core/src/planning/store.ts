@@ -16,6 +16,7 @@ import type {
   MilestoneChanges,
   NewLocalIssue,
   Project,
+  ProjectRemote,
 } from "./types.js";
 
 // Loaded via getBuiltinModule for the same bundler reason as in store.ts.
@@ -93,12 +94,24 @@ interface ProjectRow {
   updated_at: string;
 }
 
-const toProject = (row: ProjectRow, repoPaths: string[]): Project => ({
+const toProject = (row: ProjectRow, repoPaths: string[], remotes: ProjectRemote[]): Project => ({
   id: Number(row.id),
   name: row.name,
   repoPaths,
+  remotes,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
+});
+
+interface RemoteRow {
+  project_id: number;
+  provider: string;
+  full_name: string;
+}
+
+const toRemote = (row: RemoteRow): ProjectRemote => ({
+  provider: row.provider === "gitlab" ? "gitlab" : "github",
+  fullName: row.full_name,
 });
 
 const isUniqueViolation = (error: unknown): boolean =>
@@ -366,7 +379,16 @@ export class PlanningStore {
         list.push(repo_path);
         members.set(Number(project_id), list);
       }
-      return rows.map((row) => toProject(row, members.get(Number(row.id)) ?? []));
+      const hosted = new Map<number, ProjectRemote[]>();
+      const remoteRows = db
+        .prepare("SELECT project_id, provider, full_name FROM project_remotes ORDER BY provider, full_name")
+        .all() as unknown as RemoteRow[];
+      for (const row of remoteRows) {
+        const list = hosted.get(Number(row.project_id)) ?? [];
+        list.push(toRemote(row));
+        hosted.set(Number(row.project_id), list);
+      }
+      return rows.map((row) => toProject(row, members.get(Number(row.id)) ?? [], hosted.get(Number(row.id)) ?? []));
     });
   }
 
@@ -396,6 +418,33 @@ export class PlanningStore {
       const { changes } = db
         .prepare("INSERT OR IGNORE INTO project_repos (project_id, repo_path, added_at) VALUES (?, ?, ?)")
         .run(id, repoPath, now);
+      if (Number(changes) > 0) db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(now, id);
+      return this.requireProject(db, id);
+    });
+  }
+
+  /** Adds several clones and hosted repos in one step; any already there are skipped. */
+  addReposToProject(id: number, repoPaths: readonly string[], remotes: readonly ProjectRemote[], now: string): Project {
+    return this.transaction((db) => {
+      this.requireProject(db, id);
+      let changed = 0;
+      const insertRepo = db.prepare("INSERT OR IGNORE INTO project_repos (project_id, repo_path, added_at) VALUES (?, ?, ?)");
+      for (const repoPath of repoPaths) changed += Number(insertRepo.run(id, repoPath, now).changes);
+      const insertRemote = db.prepare(
+        "INSERT OR IGNORE INTO project_remotes (project_id, provider, full_name, added_at) VALUES (?, ?, ?, ?)",
+      );
+      for (const remote of remotes) changed += Number(insertRemote.run(id, remote.provider, remote.fullName, now).changes);
+      if (changed > 0) db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(now, id);
+      return this.requireProject(db, id);
+    });
+  }
+
+  removeRemoteFromProject(id: number, remote: ProjectRemote, now: string): Project {
+    return this.transaction((db) => {
+      this.requireProject(db, id);
+      const { changes } = db
+        .prepare("DELETE FROM project_remotes WHERE project_id = ? AND provider = ? AND full_name = ?")
+        .run(id, remote.provider, remote.fullName);
       if (Number(changes) > 0) db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(now, id);
       return this.requireProject(db, id);
     });
@@ -505,7 +554,14 @@ export class PlanningStore {
     const repos = db
       .prepare("SELECT repo_path FROM project_repos WHERE project_id = ? ORDER BY repo_path")
       .all(id) as unknown as { repo_path: string }[];
-    return toProject(row, repos.map((repo) => repo.repo_path));
+    const remotes = db
+      .prepare("SELECT project_id, provider, full_name FROM project_remotes WHERE project_id = ? ORDER BY provider, full_name")
+      .all(id) as unknown as RemoteRow[];
+    return toProject(
+      row,
+      repos.map((repo) => repo.repo_path),
+      remotes.map(toRemote),
+    );
   }
 
   private requireProject(db: DatabaseSync, id: number): Project {

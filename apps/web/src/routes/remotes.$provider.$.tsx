@@ -1,13 +1,15 @@
-import { Link, createFileRoute, notFound, useNavigate } from "@tanstack/react-router";
+import { Link, createFileRoute, notFound, useNavigate, useRouter } from "@tanstack/react-router";
 import { ArrowLeft, Download, ExternalLink, LoaderCircle } from "lucide-react";
 import { useState } from "react";
+import { CatalogFavoriteButton } from "#/components/catalog-table";
+import { RemoteReadme } from "#/components/remote-readme";
 import { RemoteRepoCommunity } from "#/components/repo-community";
 import { TechBadge } from "#/components/tech-badge";
 import { Button } from "#/components/ui/button";
 import type { RemoteProvider } from "#/lib/catalog";
 import { useLibraryState } from "#/lib/library-state";
 import { useRepoTabs } from "#/lib/repo-tabs";
-import { cloneRepo, getRemoteRepo } from "#/server/catalog";
+import { cloneRepo, getRemoteRepo, setCatalogEntryFavorite } from "#/server/catalog";
 
 const LABELS: Record<RemoteProvider, string> = { github: "GitHub", gitlab: "GitLab" };
 
@@ -54,6 +56,7 @@ function RemoteRepoDetail() {
   const { provider, entry } = Route.useLoaderData();
   const link = entry[provider]!;
   const navigate = useNavigate();
+  const router = useRouter();
   // The Settings switch for the Community tab also covers this page, so a user who turned it off makes no requests for it.
   const [visibleTabs] = useRepoTabs();
   const [cloning, setCloning] = useState(false);
@@ -77,7 +80,17 @@ function RemoteRepoDetail() {
       <BackLink />
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="truncate text-2xl font-semibold tracking-tight">{entry.name}</h1>
+          <div className="flex items-center gap-1">
+            <h1 className="truncate text-2xl font-semibold tracking-tight">{entry.name}</h1>
+            <CatalogFavoriteButton
+              name={entry.name}
+              isFavorite={entry.isFavorite}
+              onToggle={async (favorite) => {
+                await setCatalogEntryFavorite({ data: { provider, fullName: link.fullName, favorite } });
+                await router.invalidate();
+              }}
+            />
+          </div>
           <p className="truncate font-mono text-xs text-muted-foreground" title={link.fullName}>
             {link.fullName}
           </p>
@@ -117,6 +130,7 @@ function RemoteRepoDetail() {
           <RemoteRepoCommunity fullName={link.fullName} />
         </section>
       ) : null}
+      <RemoteReadme provider={provider} fullName={link.fullName} />
     </div>
   );
 }

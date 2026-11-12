@@ -175,8 +175,8 @@ export const TONE_CLASSES: Record<ScoreTone, { bar: string; text: string }> = {
 /**
  * Which repositories get a community score: only the ones you've favorited, or all of them. A repo you haven't
  * favorited is one you're probably not investing in, so by default gitlib neither fetches nor shows its score.
- * Repos that aren't cloned can't be favorited, so they are only scored under "all". Opening a repo's own page
- * always shows its score, whatever this says, since that is asking for it.
+ * A GitHub repo you haven't cloned counts as a favorite when it is starred. Opening a repo's own page always
+ * shows its score, whatever this says, since that is asking for it.
  */
 export const COMMUNITY_SCOPES = ["favorites", "all"] as const;
 export type CommunityScope = (typeof COMMUNITY_SCOPES)[number];

@@ -1,12 +1,13 @@
 import { createFileRoute, useRouter, useRouterState } from "@tanstack/react-router";
 import { RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CatalogTable } from "#/components/catalog-table";
+import { CatalogTable, favoriteTarget } from "#/components/catalog-table";
 import { ContributionGraph, type ContributionSource } from "#/components/contribution-graph";
 import { RepoPreview } from "#/components/repo-preview";
 import {
   RepoTable,
   sortRepos,
+  type BehindUpstream,
   type CommunityScores,
   type IssueCounts,
   type RepoHighlights,
@@ -17,17 +18,18 @@ import {
 import { SearchBar } from "#/components/search-bar";
 import { TechBadge } from "#/components/tech-badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
-import { CATALOG_SOURCES, entriesForSource, matchesQuery, type CatalogSource } from "#/lib/catalog";
+import { CATALOG_SOURCES, entriesForSource, matchesQuery, type CatalogEntry, type CatalogSource } from "#/lib/catalog";
 import { DEFAULT_COMMUNITY_SCOPE, oldestFetchedAt } from "#/lib/community";
 import { formatAgo } from "#/lib/format";
 import { saveLibraryState, type LibraryTableState } from "#/lib/library-state";
 import { cn } from "#/lib/utils";
-import { getCatalog, refreshCatalog, type CatalogView, type ProviderStatus } from "#/server/catalog";
+import { getCatalog, refreshCatalog, setCatalogEntryFavorite, type CatalogView, type ProviderStatus } from "#/server/catalog";
 import { getCommunityScores, refreshCommunityScores, type CommunityScoresView } from "#/server/community";
 import { getContributions, type ContributionsView } from "#/server/contributions";
 import { getIssueCounts, type IssueCountsView } from "#/server/issues";
 import { getRepos, rescanRepos, type RepoView } from "#/server/repos";
 import { searchRepos } from "#/server/search";
+import { getSyncStatus, type SyncStatusView } from "#/server/sync";
 
 interface IndexSearch extends LibraryTableState {
   /** relativePath of the repo shown in the preview pane. */
@@ -100,6 +102,7 @@ function useBackgroundView<T>(load: () => Promise<T>, onError: (message: string)
 }
 
 const issueCountsFailed = (error: string): IssueCountsView => ({ status: "error", counts: {}, error });
+const syncStatusFailed = (error: string): SyncStatusView => ({ behind: {}, failed: 0, error, checkedAt: null });
 const communityScoresFailed = (error: string): CommunityScoresView => ({
   status: "error",
   scope: DEFAULT_COMMUNITY_SCOPE,
@@ -224,7 +227,14 @@ function useCatalog(refreshKey: unknown) {
     }
   }, []);
 
-  return { view, error, refresh, busy: requesting || refreshing };
+  /** Stars or unstars an entry; the server answers with the catalog as it is now, so the order updates too. */
+  const setFavorite = useCallback(async (entry: CatalogEntry, favorite: boolean) => {
+    const target = favoriteTarget(entry);
+    if (!target) return;
+    setView(await setCatalogEntryFavorite({ data: { ...target, favorite } }));
+  }, []);
+
+  return { view, error, refresh, setFavorite, busy: requesting || refreshing };
 }
 
 const CONTRIBUTION_SOURCE_KEY = "gitlib-contribution-source";
@@ -277,6 +287,8 @@ function RepoLibrary() {
   const contributions = useContributions(allRepos);
   const issueCountsResult = useBackgroundView(getIssueCounts, issueCountsFailed, allRepos);
   const issueCounts: IssueCounts = issueCountsResult?.counts;
+  const syncResult = useBackgroundView(getSyncStatus, syncStatusFailed, allRepos);
+  const behindUpstream: BehindUpstream = syncResult?.behind;
   const community = useCommunityScores(allRepos);
   const catalog = useCatalog(allRepos);
   const communityResult = community.view;
@@ -530,6 +542,14 @@ function RepoLibrary() {
                   </p>
                 ) : null}
 
+                {syncResult && (syncResult.failed > 0 || (syncResult.checkedAt === null && syncResult.error)) ? (
+                  <p className="text-xs text-muted-foreground" role="status">
+                    {syncResult.checkedAt === null
+                      ? `Couldn't check for new upstream commits: ${syncResult.error}`
+                      : `Couldn't check ${syncResult.failed} ${syncResult.failed === 1 ? "repository" : "repositories"} for new upstream commits (the first: ${syncResult.error}). Git needs access to each remote from the server.`}
+                  </p>
+                ) : null}
+
                 {communityResult && communityResult.status !== "ok" ? (
                   <p className="text-xs text-muted-foreground" role="status">
                     Some GitHub community scores couldn't be refreshed: {communityResult.error}
@@ -605,6 +625,7 @@ function RepoLibrary() {
                       issueCounts={issueCounts}
                       communityScores={communityScores}
                       communityScope={communityResult?.scope}
+                      behindUpstream={behindUpstream}
                       selectedPath={selected?.relativePath}
                       onSelect={(repo) => setSearch({ repo: repo.relativePath })}
                     />
@@ -623,6 +644,7 @@ function RepoLibrary() {
                 reposByPath={reposByPath}
                 community={communityResult}
                 query={q}
+                onToggleFavorite={catalog.setFavorite}
               />
             )}
           </TabsContent>
@@ -673,8 +695,8 @@ function refreshScoresTitle(scope: CommunityScoresView["scope"] | undefined, unc
     return "Ask GitHub for every favorited repository's community profile now. Scores are otherwise refreshed daily. Change which repositories are scored in Settings.";
   }
   return uncloned
-    ? "Ask GitHub for the community profile of every GitHub repository in the list now, cloned or not: one request each, so a long list takes a while. Scores of cloned repositories are otherwise refreshed daily."
-    : "Ask GitHub for every cloned repository's community profile now. Scores are otherwise refreshed daily.";
+    ? "Ask GitHub for the community profile of every GitHub repository in the list now, cloned or not: one request each, so a long list takes a while. Scores of cloned and starred repositories are otherwise refreshed daily."
+    : "Ask GitHub for every cloned or starred repository's community profile now. Scores are otherwise refreshed daily.";
 }
 
 /** What to say about the scores in a catalog table: a failed refresh, and how old the ones shown are. */
@@ -698,6 +720,7 @@ function SourceBody({
   reposByPath,
   community,
   query,
+  onToggleFavorite,
 }: {
   source: Exclude<CatalogSource, "local">;
   rows: ReturnType<typeof entriesForSource> | undefined;
@@ -707,6 +730,7 @@ function SourceBody({
   reposByPath: ReadonlyMap<string, RepoView>;
   community: CommunityScoresView | undefined;
   query: string | undefined;
+  onToggleFavorite: (entry: CatalogEntry, favorite: boolean) => Promise<unknown>;
 }) {
   if (error) return <EmptyState>Couldn't load repositories: {error}</EmptyState>;
   if (!rows) return <EmptyState>Loading repositories…</EmptyState>;
@@ -749,7 +773,14 @@ function SourceBody({
               : (hostNotice ?? "No repositories found.")}
         </EmptyState>
       ) : (
-        <CatalogTable entries={rows} reposByPath={reposByPath} github={github} gitlab={gitlab} community={community} />
+        <CatalogTable
+          entries={rows}
+          reposByPath={reposByPath}
+          github={github}
+          gitlab={gitlab}
+          community={community}
+          onToggleFavorite={onToggleFavorite}
+        />
       )}
     </>
   );

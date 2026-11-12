@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Star } from "lucide-react";
+import { useState } from "react";
 import { CommunityMeter, NOT_FAVORITED_HINT, describeScore } from "#/components/community-score";
 import { TechBadge } from "#/components/tech-badge";
 import { formatAgo } from "#/lib/format";
@@ -40,32 +41,70 @@ function RemoteChip({ label, link, listed }: { label: string; link: RemoteLink |
   );
 }
 
-const UNCLONED_HINT =
-  "Repositories that aren't cloned can't be favorited, so they are only scored when Settings says to score all repositories. Open it to see its score.";
+/** The star in front of a row. `onToggle` rejects when the server refuses, which the button just reports. */
+export function CatalogFavoriteButton({
+  name,
+  isFavorite,
+  onToggle,
+}: {
+  name: string;
+  isFavorite: boolean;
+  onToggle: (favorite: boolean) => Promise<unknown>;
+}) {
+  const [pending, setPending] = useState(false);
+
+  async function toggle() {
+    setPending(true);
+    try {
+      await onToggle(!isFavorite);
+    } catch {
+      // The star stays as it was; the next refresh shows what the server holds.
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      disabled={pending}
+      aria-pressed={isFavorite}
+      aria-label={`${isFavorite ? "Remove" : "Add"} ${name} ${isFavorite ? "from" : "to"} favorites`}
+      title={isFavorite ? "Remove from favorites" : "Add to favorites"}
+      className={cn(
+        "inline-flex size-7 items-center justify-center outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+        isFavorite ? "text-amber-500" : "text-muted-foreground/50 hover:text-foreground",
+      )}
+    >
+      <Star className={cn("size-3.5", isFavorite && "fill-current")} aria-hidden />
+    </button>
+  );
+}
+
+/** What `setCatalogEntryFavorite` needs to name the entry: a clone if there is one, else its host. */
+export function favoriteTarget(entry: CatalogEntry) {
+  const local = entry.locals[0];
+  if (local) return { relativePath: local };
+  if (entry.github) return { provider: "github" as const, fullName: entry.github.fullName };
+  if (entry.gitlab) return { provider: "gitlab" as const, fullName: entry.gitlab.fullName };
+  return null;
+}
 
 /**
  * GitHub's community score for a row, from what gitlib has stored: cloned or not, since the score belongs to the
  * GitHub repository. A dash says why when the Settings page is the reason there isn't one.
  */
-function CommunityCell({
-  entry,
-  favorite,
-  community,
-}: {
-  entry: CatalogEntry;
-  /** Whether any clone of the repo is a favorite. */
-  favorite: boolean;
-  community: CommunityScoresView | undefined;
-}) {
+function CommunityCell({ entry, community }: { entry: CatalogEntry; community: CommunityScoresView | undefined }) {
   const link = entry.github;
   if (!link) return <span className="text-muted-foreground">—</span>;
   if (!community) return <span aria-label="Loading community score">…</span>;
 
   const found = community.bySlug[link.fullName.toLowerCase()];
   if (!found) {
-    const outOfScope = community.scope === "favorites" && !favorite;
+    const outOfScope = community.scope === "favorites" && !entry.isFavorite;
     return (
-      <span className="text-muted-foreground" title={outOfScope ? (entry.locals.length === 0 ? UNCLONED_HINT : NOT_FAVORITED_HINT) : "No score stored yet."}>
+      <span className="text-muted-foreground" title={outOfScope ? NOT_FAVORITED_HINT : "No score stored yet."}>
         —
       </span>
     );
@@ -104,9 +143,12 @@ export function CatalogTable({
   github,
   gitlab,
   community,
+  onToggleFavorite,
 }: {
   entries: CatalogEntry[];
-  /** Local repos by relativePath, for the stack detected in a clone and whether it is a favorite. */
+  /** Stars or unstars the entry; the table shows the new state when `entries` changes. */
+  onToggleFavorite: (entry: CatalogEntry, favorite: boolean) => Promise<unknown>;
+  /** Local repos by relativePath, for the stack detected in a clone. */
   reposByPath: ReadonlyMap<string, RepoView>;
   github: ProviderStatus | undefined;
   gitlab: ProviderStatus | undefined;
@@ -115,12 +157,15 @@ export function CatalogTable({
 }) {
   return (
     <div className="overflow-x-auto border-y">
-      <table className="w-full min-w-192 table-fixed border-collapse text-sm" data-testid="catalog-table">
+      <table className="w-full min-w-200 table-fixed border-collapse text-sm" data-testid="catalog-table">
         <thead className="border-b">
           <tr className="h-9 text-left text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            <th scope="col" className="w-[24%] px-3">Repository</th>
-            <th scope="col" className="w-[24%] px-3">Description</th>
-            <th scope="col" className="w-[20%] px-3">Where</th>
+            <th scope="col" className="w-10 px-3">
+              <span className="sr-only">Favorite</span>
+            </th>
+            <th scope="col" className="w-[23%] px-3">Repository</th>
+            <th scope="col" className="w-[23%] px-3">Description</th>
+            <th scope="col" className="w-[19%] px-3">Where</th>
             <th scope="col" className="w-[10%] px-3">Stack</th>
             <th scope="col" className="w-[12%] px-3" title="GitHub community profile score">Community</th>
             <th scope="col" className="w-[10%] px-3">Updated</th>
@@ -138,6 +183,13 @@ export function CatalogTable({
             const flags = flagsOf(entry);
             return (
               <tr key={entry.id} data-testid="catalog-row" className="align-top">
+                <td className="px-3 py-2">
+                  <CatalogFavoriteButton
+                    name={entry.name}
+                    isFavorite={entry.isFavorite}
+                    onToggle={(favorite) => onToggleFavorite(entry, favorite)}
+                  />
+                </td>
                 <td className="px-3 py-3">
                   {local ? (
                     <Link
@@ -210,11 +262,7 @@ export function CatalogTable({
                   )}
                 </td>
                 <td className="px-3 py-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
-                  <CommunityCell
-                    entry={entry}
-                    favorite={entry.locals.some((path) => reposByPath.get(path)?.isFavorite)}
-                    community={community}
-                  />
+                  <CommunityCell entry={entry} community={community} />
                 </td>
                 <td className="px-3 py-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
                   {entry.updatedAt ? formatAgo(entry.updatedAt) : "—"}

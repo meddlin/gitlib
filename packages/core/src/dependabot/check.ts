@@ -1,5 +1,6 @@
 import type { RepoRecord } from "../models.js";
 import { loadGitRemotes, selectGitHubRepo, type GitHubRepoRef } from "../remotes.js";
+import type { RemoteFavorite } from "../store.js";
 import { defaultSystemDeps, type SystemDeps } from "../system.js";
 import { classify } from "./classify.js";
 import { isValidOwner, isValidRepoName } from "./github-backend.js";
@@ -18,7 +19,7 @@ export interface GitHubRepoGroup {
   ref: GitHubRepoRef;
   /** `owner/repo` as the first checkout spelled it. */
   slug: string;
-  /** `relativePath` of each checkout. */
+  /** `relativePath` of each checkout; empty for a repository that is starred on GitHub without being cloned. */
   paths: string[];
 }
 
@@ -73,6 +74,36 @@ export function groupReposByGitHubSlug(
   return { groups: [...bySlug.values()].sort((a, b) => a.slug.localeCompare(b.slug)), unresolved };
 }
 
+/**
+ * Adds the repositories starred on a host without a clone to `groups`: GitHub ones become watched groups with no
+ * checkouts (unless a starred clone already covers them). Ones on any other host, or with a name GitHub cannot
+ * have, are reported in `skipped` with the reason, like a clone with no GitHub remote.
+ */
+export function addRemoteFavorites(
+  groups: readonly GitHubRepoGroup[],
+  unresolved: readonly UnresolvedRepo[],
+  favorites: readonly RemoteFavorite[],
+): { groups: GitHubRepoGroup[]; unresolved: UnresolvedRepo[] } {
+  const bySlug = new Map(groups.map((group) => [group.slug.toLowerCase(), group]));
+  const skipped = [...unresolved];
+
+  for (const favorite of favorites) {
+    if (favorite.provider !== "github") {
+      skipped.push({ relativePath: favorite.key, reason: `it is only on ${favorite.provider === "gitlab" ? "GitLab" : favorite.provider}, and only GitHub is checked` });
+      continue;
+    }
+    const [owner, repo, ...rest] = favorite.fullName.split("/");
+    if (!owner || !repo || rest.length > 0 || !isValidOwner(owner) || !isValidRepoName(repo)) {
+      skipped.push({ relativePath: favorite.key, reason: `"${favorite.fullName}" is not a valid GitHub name` });
+      continue;
+    }
+    const slug = `${owner}/${repo}`;
+    if (!bySlug.has(slug.toLowerCase())) bySlug.set(slug.toLowerCase(), { ref: { owner, repo }, slug, paths: [] });
+  }
+
+  return { groups: [...bySlug.values()].sort((a, b) => a.slug.localeCompare(b.slug)), unresolved: skipped };
+}
+
 export interface WatchedRepo extends GitHubRepoGroup {
   /**
    * "checked": GitHub was asked and could see it. "unreachable": the token cannot see it, so an empty list would be
@@ -85,7 +116,7 @@ export interface WatchedRepo extends GitHubRepoGroup {
 export interface DependabotReport {
   /** ISO-8601 UTC time the check started. */
   checkedAt: string;
-  /** Every favorite with a GitHub remote, once per GitHub repository. */
+  /** Every favorite with a GitHub remote (or starred on GitHub without a clone), once per GitHub repository. */
   watched: WatchedRepo[];
   /** Favorites that were left out, with why. */
   skipped: UnresolvedRepo[];
@@ -104,6 +135,8 @@ export interface DependabotReport {
 export interface DependabotCheckOptions {
   /** Every repository gitlib knows; only the favorites are watched. */
   repositories: readonly RepoRecord[];
+  /** Repositories starred on GitHub or GitLab without a clone; the GitHub ones are watched too. */
+  remoteFavorites?: readonly RemoteFavorite[];
   backend: DependabotBackend;
   system?: SystemDeps;
   now?: Date;
@@ -118,10 +151,11 @@ export interface DependabotCheckOptions {
  */
 export async function checkDependabot(options: DependabotCheckOptions): Promise<DependabotReport> {
   const { backend, signal } = options;
-  const { groups, unresolved } = groupReposByGitHubSlug(
+  const local = groupReposByGitHubSlug(
     options.repositories.filter((repo) => repo.isFavorite),
     options.system,
   );
+  const { groups, unresolved } = addRemoteFavorites(local.groups, local.unresolved, options.remoteFavorites ?? []);
 
   const byOwner = new Map<string, GitHubRepoGroup[]>();
   for (const group of groups) {
