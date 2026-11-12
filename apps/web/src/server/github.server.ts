@@ -17,6 +17,12 @@ export interface GitHubSource {
   slug: string;
 }
 
+/** The source for an `owner/repo` full name; null for anything else (a nested path, a missing half). */
+export function sourceOf(fullName: string): GitHubSource | null {
+  const [owner, repo, ...rest] = fullName.split("/");
+  return owner && repo && rest.length === 0 ? { provider: "github", owner, repo, slug: fullName } : null;
+}
+
 /** The GitHub repository behind a repo gitlib knows about; never an arbitrary one. Throws if the repo is unknown. */
 export function resolveGitHubSource(relativePath: string): { source: GitHubSource | null; error: string | null } {
   const app = getApp();
@@ -31,17 +37,20 @@ export function resolveGitHubSource(relativePath: string): { source: GitHubSourc
 /**
  * Every GitHub repository behind the repos gitlib knows about, with the relativePaths that share it.
  * Linked worktrees share a remote with their main repo, so callers can ask GitHub about each repository once.
+ * `favorite` is true when any of those paths is a favorite.
  */
-export async function groupReposByGitHubSlug(): Promise<{ ref: GitHubRepoRef; paths: string[] }[]> {
+export async function groupReposByGitHubSlug(): Promise<{ ref: GitHubRepoRef; paths: string[]; favorite: boolean }[]> {
   const app = getApp();
-  const bySlug = new Map<string, { ref: GitHubRepoRef; paths: string[] }>();
+  const bySlug = new Map<string, { ref: GitHubRepoRef; paths: string[]; favorite: boolean }>();
   for (const repo of await loadAndIndexRepositories()) {
     const { remotes, error } = loadGitRemotes(repo.absolutePath, app.system);
     const ref = error ? null : selectGitHubRepo(remotes);
     if (!ref) continue;
     const key = `${ref.owner}/${ref.repo}`.toLowerCase();
-    const entry = bySlug.get(key) ?? { ref, paths: [] };
+    const entry = bySlug.get(key) ?? { ref, paths: [], favorite: false };
     entry.paths.push(repo.relativePath);
+    // A repo counts as a favorite when any clone or worktree of it is.
+    entry.favorite ||= repo.isFavorite;
     bySlug.set(key, entry);
   }
   return [...bySlug.values()];

@@ -1,11 +1,13 @@
 import { Link } from "@tanstack/react-router";
 import { ExternalLink, Star } from "lucide-react";
 import { useState } from "react";
+import { CommunityMeter, NOT_FAVORITED_HINT, describeScore } from "#/components/community-score";
 import { TechBadge } from "#/components/tech-badge";
 import { formatAgo } from "#/lib/format";
 import type { CatalogEntry, RemoteLink } from "#/lib/catalog";
 import { cn } from "#/lib/utils";
 import type { ProviderStatus } from "#/server/catalog";
+import type { CommunityScoresView } from "#/server/community";
 import type { RepoView } from "#/server/repos";
 
 const chip = "inline-flex h-5 items-center gap-1 border px-1.5 text-xs whitespace-nowrap";
@@ -89,6 +91,39 @@ export function favoriteTarget(entry: CatalogEntry) {
   return null;
 }
 
+/**
+ * GitHub's community score for a row, from what gitlib has stored: cloned or not, since the score belongs to the
+ * GitHub repository. A dash says why when the Settings page is the reason there isn't one.
+ */
+function CommunityCell({ entry, community }: { entry: CatalogEntry; community: CommunityScoresView | undefined }) {
+  const link = entry.github;
+  if (!link) return <span className="text-muted-foreground">—</span>;
+  if (!community) return <span aria-label="Loading community score">…</span>;
+
+  const found = community.bySlug[link.fullName.toLowerCase()];
+  if (!found) {
+    const outOfScope = community.scope === "favorites" && !entry.isFavorite;
+    return (
+      <span className="text-muted-foreground" title={outOfScope ? NOT_FAVORITED_HINT : "No score stored yet."}>
+        —
+      </span>
+    );
+  }
+
+  const { label, title } = describeScore(entry.name, found);
+  const className = "flex w-fit flex-col gap-1 outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring";
+  const local = entry.locals[0];
+  return local ? (
+    <Link to="/repos/$" params={{ _splat: local }} search={{ tab: "community" }} aria-label={label} title={title} className={className}>
+      <CommunityMeter entry={found} />
+    </Link>
+  ) : (
+    <Link to="/remotes/$provider/$" params={{ provider: "github", _splat: link.fullName }} aria-label={label} title={title} className={className}>
+      <CommunityMeter entry={found} />
+    </Link>
+  );
+}
+
 function flagsOf(entry: CatalogEntry): string[] {
   const links = [entry.github, entry.gitlab].filter((link): link is RemoteLink => link !== null);
   return [
@@ -107,6 +142,7 @@ export function CatalogTable({
   reposByPath,
   github,
   gitlab,
+  community,
   onToggleFavorite,
 }: {
   entries: CatalogEntry[];
@@ -116,19 +152,22 @@ export function CatalogTable({
   reposByPath: ReadonlyMap<string, RepoView>;
   github: ProviderStatus | undefined;
   gitlab: ProviderStatus | undefined;
+  /** GitHub community scores; undefined while they are still loading. */
+  community: CommunityScoresView | undefined;
 }) {
   return (
     <div className="overflow-x-auto border-y">
-      <table className="w-full min-w-184 table-fixed border-collapse text-sm" data-testid="catalog-table">
+      <table className="w-full min-w-200 table-fixed border-collapse text-sm" data-testid="catalog-table">
         <thead className="border-b">
           <tr className="h-9 text-left text-xs font-medium tracking-wide text-muted-foreground uppercase">
             <th scope="col" className="w-10 px-3">
               <span className="sr-only">Favorite</span>
             </th>
-            <th scope="col" className="w-[27%] px-3">Repository</th>
-            <th scope="col" className="w-[27%] px-3">Description</th>
-            <th scope="col" className="w-[22%] px-3">Where</th>
+            <th scope="col" className="w-[23%] px-3">Repository</th>
+            <th scope="col" className="w-[23%] px-3">Description</th>
+            <th scope="col" className="w-[19%] px-3">Where</th>
             <th scope="col" className="w-[10%] px-3">Stack</th>
+            <th scope="col" className="w-[12%] px-3" title="GitHub community profile score">Community</th>
             <th scope="col" className="w-[10%] px-3">Updated</th>
           </tr>
         </thead>
@@ -221,6 +260,9 @@ export function CatalogTable({
                   ) : (
                     <span className="text-muted-foreground">—</span>
                   )}
+                </td>
+                <td className="px-3 py-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+                  <CommunityCell entry={entry} community={community} />
                 </td>
                 <td className="px-3 py-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
                   {entry.updatedAt ? formatAgo(entry.updatedAt) : "—"}

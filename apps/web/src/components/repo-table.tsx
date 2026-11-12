@@ -4,7 +4,8 @@ import { ArrowDown, ArrowUp, ArrowUpDown, Pencil, Star } from "lucide-react";
 import { DescriptionDialog } from "#/components/description-dialog";
 import { Highlighted } from "#/components/highlighted";
 import { TechBadge } from "#/components/tech-badge";
-import { COMMUNITY_ITEMS, TONE_CLASSES, scoreTone } from "#/lib/community";
+import { CommunityMeter, NOT_FAVORITED_HINT, describeScore } from "#/components/community-score";
+import type { CommunityScope } from "#/lib/community";
 import { cn } from "#/lib/utils";
 import type { CommunityScoresView } from "#/server/community";
 import { setFavorite, type RepoView } from "#/server/repos";
@@ -152,34 +153,25 @@ function IssueCount({ repo, counts }: { repo: RepoView; counts: IssueCounts }) {
   );
 }
 
-/** A score with one square per checklist item, so what is missing shows without opening the repo. */
-function CommunityScore({ repo, scores }: { repo: RepoView; scores: CommunityScores }) {
+function CommunityScore({ repo, scores, scope }: { repo: RepoView; scores: CommunityScores; scope: CommunityScope | undefined }) {
   if (!scores) return <span aria-label="Loading community score">…</span>;
   const entry = scores[repo.relativePath];
-  if (!entry) return <span>—</span>;
+  if (!entry) {
+    // Say why a repo has none when it is the Settings page's doing, rather than leaving a bare dash.
+    return scope === "favorites" && !repo.isFavorite ? <span title={NOT_FAVORITED_HINT}>—</span> : <span>—</span>;
+  }
 
-  const missing = COMMUNITY_ITEMS.filter((item) => entry.missing.includes(item.id));
-  const tone = TONE_CLASSES[scoreTone(entry.score)];
+  const { label, title } = describeScore(repo.name, entry);
   return (
     <Link
       to="/repos/$"
       params={{ _splat: repo.relativePath }}
       search={{ tab: "community" }}
-      aria-label={`Community profile score ${entry.score}% for ${repo.name}${
-        missing.length > 0 ? `; missing ${missing.map((item) => item.label).join(", ")}` : ""
-      }`}
-      title={missing.length > 0 ? `Missing: ${missing.map((item) => item.label).join(", ")}` : "Nothing missing"}
+      aria-label={label}
+      title={title}
       className="flex w-fit flex-col gap-1 outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring"
     >
-      <span className={cn("text-sm font-medium", tone.text)}>{entry.score}%</span>
-      <span className="flex gap-[3px]" aria-hidden>
-        {COMMUNITY_ITEMS.map((item) => (
-          <span
-            key={item.id}
-            className={cn("size-2", entry.missing.includes(item.id) ? "border border-muted-foreground/70" : tone.bar)}
-          />
-        ))}
-      </span>
+      <CommunityMeter entry={entry} />
     </Link>
   );
 }
@@ -244,6 +236,7 @@ export function RepoTable({
   onToggleTech,
   issueCounts,
   communityScores,
+  communityScope,
   behindUpstream,
   selectedPath,
   onSelect,
@@ -258,6 +251,8 @@ export function RepoTable({
   onToggleTech: (name: string) => void;
   issueCounts: IssueCounts;
   communityScores: CommunityScores;
+  /** Which repos are scored (Settings); undefined while the scores are still loading. */
+  communityScope: CommunityScope | undefined;
   behindUpstream: BehindUpstream;
   selectedPath: string | undefined;
   onSelect: (repo: RepoView) => void;
@@ -387,7 +382,7 @@ export function RepoTable({
                   <IssueCount repo={repo} counts={issueCounts} />
                 </td>
                 <td className="px-3 py-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
-                  <CommunityScore repo={repo} scores={communityScores} />
+                  <CommunityScore repo={repo} scores={communityScores} scope={communityScope} />
                 </td>
                 <td className="px-3 py-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
                   {formatScanned(repo.lastScannedAt)}

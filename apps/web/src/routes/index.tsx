@@ -19,6 +19,7 @@ import { SearchBar } from "#/components/search-bar";
 import { TechBadge } from "#/components/tech-badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
 import { CATALOG_SOURCES, entriesForSource, matchesQuery, type CatalogEntry, type CatalogSource } from "#/lib/catalog";
+import { DEFAULT_COMMUNITY_SCOPE, oldestFetchedAt } from "#/lib/community";
 import { formatAgo } from "#/lib/format";
 import { saveLibraryState, type LibraryTableState } from "#/lib/library-state";
 import { cn } from "#/lib/utils";
@@ -104,7 +105,9 @@ const issueCountsFailed = (error: string): IssueCountsView => ({ status: "error"
 const syncStatusFailed = (error: string): SyncStatusView => ({ behind: {}, failed: 0, error, checkedAt: null });
 const communityScoresFailed = (error: string): CommunityScoresView => ({
   status: "error",
+  scope: DEFAULT_COMMUNITY_SCOPE,
   scores: {},
+  bySlug: {},
   error,
   updatedAt: null,
   refreshing: false,
@@ -149,10 +152,12 @@ function useCommunityScores(refreshKey: unknown) {
     };
   }, [view, refreshing]);
 
-  const refresh = useCallback(async () => {
+  // Starts the refresh and returns at once; the polling above keeps `busy` on until the server has finished.
+  // `uncloned` adds GitHub repos with no clone, which the repository tabs that list them ask for.
+  const refresh = useCallback(async (uncloned: boolean) => {
     setRequesting(true);
     try {
-      setView(await refreshCommunityScores());
+      setView(await refreshCommunityScores({ data: { uncloned } }));
     } catch (caught) {
       setView(communityScoresFailed(caught instanceof Error ? caught.message : "Something went wrong."));
     } finally {
@@ -458,9 +463,9 @@ function RepoLibrary() {
               </button>
               <button
                 type="button"
-                onClick={community.refresh}
+                onClick={() => community.refresh(false)}
                 disabled={community.busy}
-                title="Ask GitHub for every repo's community profile now. Scores are otherwise refreshed daily."
+                title={refreshScoresTitle(communityResult?.scope, false)}
                 className="inline-flex h-8 items-center gap-1.5 border px-3 text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
               >
                 <RefreshCw className={cn("size-3.5", community.busy && "animate-spin")} aria-hidden />
@@ -468,6 +473,19 @@ function RepoLibrary() {
               </button>
               </>
             ) : (
+              <>
+              {source === "gitlab" ? null : (
+                <button
+                  type="button"
+                  onClick={() => community.refresh(true)}
+                  disabled={community.busy}
+                  title={refreshScoresTitle(communityResult?.scope, true)}
+                  className="inline-flex h-8 items-center gap-1.5 border px-3 text-sm outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+                >
+                  <RefreshCw className={cn("size-3.5", community.busy && "animate-spin")} aria-hidden />
+                  {community.busy ? "Refreshing scores…" : "Refresh scores"}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={catalog.refresh}
@@ -478,6 +496,7 @@ function RepoLibrary() {
                 <RefreshCw className={cn("size-3.5", catalog.busy && "animate-spin")} aria-hidden />
                 {catalog.busy ? "Refreshing…" : "Refresh"}
               </button>
+              </>
             )}
           </div>
         </header>
@@ -605,6 +624,7 @@ function RepoLibrary() {
                       onToggleTech={toggleTech}
                       issueCounts={issueCounts}
                       communityScores={communityScores}
+                      communityScope={communityResult?.scope}
                       behindUpstream={behindUpstream}
                       selectedPath={selected?.relativePath}
                       onSelect={(repo) => setSearch({ repo: repo.relativePath })}
@@ -622,6 +642,7 @@ function RepoLibrary() {
                 github={catalog.view?.github}
                 gitlab={catalog.view?.gitlab}
                 reposByPath={reposByPath}
+                community={communityResult}
                 query={q}
                 onToggleFavorite={catalog.setFavorite}
               />
@@ -668,6 +689,27 @@ function isChecking(source: Exclude<CatalogSource, "local">, github: ProviderSta
   return source === "github" ? waiting(github) : source === "gitlab" ? waiting(gitlab) : waiting(github) || waiting(gitlab);
 }
 
+/** The hover text for a Refresh scores button, which covers whatever the Settings page says is scored. */
+function refreshScoresTitle(scope: CommunityScoresView["scope"] | undefined, uncloned: boolean): string {
+  if (scope !== "all") {
+    return "Ask GitHub for every favorited repository's community profile now. Scores are otherwise refreshed daily. Change which repositories are scored in Settings.";
+  }
+  return uncloned
+    ? "Ask GitHub for the community profile of every GitHub repository in the list now, cloned or not: one request each, so a long list takes a while. Scores of cloned and starred repositories are otherwise refreshed daily."
+    : "Ask GitHub for every cloned or starred repository's community profile now. Scores are otherwise refreshed daily.";
+}
+
+/** What to say about the scores in a catalog table: a failed refresh, and how old the ones shown are. */
+function communityNoticesFor(rows: ReturnType<typeof entriesForSource>, community: CommunityScoresView | undefined): string[] {
+  if (!community) return [];
+  const notices: string[] = [];
+  if (community.status !== "ok" && community.error) notices.push(`Some GitHub community scores couldn't be refreshed: ${community.error}`);
+  const slugs = rows.flatMap((entry) => (entry.github ? [entry.github.fullName] : []));
+  const oldest = oldestFetchedAt(slugs, community.bySlug);
+  if (oldest) notices.push(`Community scores last fetched from GitHub ${formatAgo(oldest)}.`);
+  return notices;
+}
+
 /** The Combined, GitHub and GitLab tabs: one catalog table, plus what is missing when a host can't be listed. */
 function SourceBody({
   source,
@@ -676,6 +718,7 @@ function SourceBody({
   github,
   gitlab,
   reposByPath,
+  community,
   query,
   onToggleFavorite,
 }: {
@@ -685,6 +728,7 @@ function SourceBody({
   github: ProviderStatus | undefined;
   gitlab: ProviderStatus | undefined;
   reposByPath: ReadonlyMap<string, RepoView>;
+  community: CommunityScoresView | undefined;
   query: string | undefined;
   onToggleFavorite: (entry: CatalogEntry, favorite: boolean) => Promise<unknown>;
 }) {
@@ -699,12 +743,13 @@ function SourceBody({
         )
       : [];
   const checked = checkedNotice(source, github, gitlab);
+  const communityNotices = source === "gitlab" ? [] : communityNoticesFor(rows, community);
   const hostNotice =
     source === "github" ? statusNotice("GitHub", github) : source === "gitlab" ? statusNotice("GitLab", gitlab) : null;
 
   return (
     <>
-      {notices.length > 0 || checked ? (
+      {notices.length > 0 || checked || communityNotices.length > 0 ? (
         <div className="flex flex-col gap-1">
           {notices.map((notice) => (
             <p key={notice} className="text-xs text-muted-foreground" role="status">
@@ -712,6 +757,11 @@ function SourceBody({
             </p>
           ))}
           {checked ? <p className="text-xs text-muted-foreground">{checked}</p> : null}
+          {communityNotices.map((notice) => (
+            <p key={notice} className="text-xs text-muted-foreground">
+              {notice}
+            </p>
+          ))}
         </div>
       ) : null}
       {rows.length === 0 ? (
@@ -723,7 +773,14 @@ function SourceBody({
               : (hostNotice ?? "No repositories found.")}
         </EmptyState>
       ) : (
-        <CatalogTable entries={rows} reposByPath={reposByPath} github={github} gitlab={gitlab} onToggleFavorite={onToggleFavorite} />
+        <CatalogTable
+          entries={rows}
+          reposByPath={reposByPath}
+          github={github}
+          gitlab={gitlab}
+          community={community}
+          onToggleFavorite={onToggleFavorite}
+        />
       )}
     </>
   );
