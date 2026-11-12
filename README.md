@@ -250,7 +250,8 @@ several repos. A project page has two parts that are kept apart on purpose:
 - **Repositories** and **Gitlib issues** are gitlib's own data, stored in `planning.db`. You can add, remove and
   edit them, and nothing in them is ever sent to GitHub.
 - **Milestones** are goals within a project, each with a title, an optional due date and an optional Markdown
-  description. Pick an issue's milestone from its row on the project page or from the issue's own page; the
+  description. They show as cards at the top of the project page, each with its due date and how many of its
+  issues are closed. Pick an issue's milestone from its row on the project page or from the issue's own page; the
   project page groups its issues by milestone and shows how many of each are closed. An issue can only be in a
   milestone of its own project, so moving it to another project (or out of its project) takes it out of its
   milestone, and deleting a milestone leaves its issues in the project. A due date is a calendar day with no time
