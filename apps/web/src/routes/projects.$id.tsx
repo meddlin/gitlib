@@ -77,7 +77,6 @@ function ProjectDetailPage() {
 
   const self = { id: project.id, name: project.name };
   const repoTotal = project.repos.length + project.remotes.length;
-  const canAddRepos = project.availableRepos.length + project.availableRemotes.length > 0;
 
   // Without milestones the issues are one plain list. With them, each milestone gets a heading so it is clear
   // which issues count toward which, and issues in none come last.
@@ -147,17 +146,15 @@ function ProjectDetailPage() {
               <h2 id="project-repos" className="text-lg font-semibold">
                 Repositories <span className="text-sm font-normal text-muted-foreground">{repoTotal}</span>
               </h2>
-              {canAddRepos ? (
-                <AddReposDialog
-                  projectId={project.id}
-                  localRepos={project.availableRepos}
-                  remoteRepos={project.availableRemotes}
-                >
-                  <Button variant="outline" disabled={busy}>
-                    <Plus aria-hidden /> Add repositories
-                  </Button>
-                </AddReposDialog>
-              ) : null}
+              <AddReposDialog
+                projectId={project.id}
+                localRepos={project.availableRepos}
+                remoteRepos={project.availableRemotes}
+              >
+                <Button variant="outline" disabled={busy}>
+                  <Plus aria-hidden /> Add repositories
+                </Button>
+              </AddReposDialog>
             </div>
             {repoTotal === 0 ? (
               <p className="border-y py-6 text-center text-sm text-muted-foreground">

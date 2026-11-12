@@ -154,7 +154,13 @@ export function AddReposDialog({
           </div>
 
           <div className="max-h-80 overflow-y-auto border-y" data-testid="add-repos-list">
-            {groups.length === 0 ? (
+            {localRepos.length + remoteRepos.length === 0 ? (
+              <p className="py-6 text-center text-sm text-muted-foreground">
+                There are no repositories left to add. Gitlib lists the repos it finds under your scan roots and, for
+                ones you have not cloned, those GitHub or GitLab list for your account (set GITLIB_GITHUB_TOKEN or
+                GITLIB_GITLAB_TOKEN).
+              </p>
+            ) : groups.length === 0 ? (
               <p className="py-6 text-center text-sm text-muted-foreground">No matching repositories.</p>
             ) : (
               groups.map((group) => (
