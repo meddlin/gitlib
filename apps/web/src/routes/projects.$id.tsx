@@ -1,9 +1,8 @@
 import { Link, createFileRoute, notFound, useRouter } from "@tanstack/react-router";
-import { ArrowLeft, CircleCheck, CircleDot, Flag, Pencil, Plus, Trash2, X } from "lucide-react";
+import { ArrowLeft, CircleCheck, CircleDot, Pencil, Trash2, X } from "lucide-react";
 import { useState } from "react";
-import { DeleteMilestoneDialog } from "#/components/delete-milestone-dialog";
 import { DeleteProjectDialog } from "#/components/delete-project-dialog";
-import { MilestoneFormDialog } from "#/components/milestone-form-dialog";
+import { MilestoneCards } from "#/components/milestone-cards";
 import { ProjectGitHubPreview } from "#/components/project-github-preview";
 import { ProjectNameDialog } from "#/components/project-name-dialog";
 import { Button } from "#/components/ui/button";
@@ -11,11 +10,10 @@ import { NativeSelect } from "#/components/ui/native-select";
 import { SearchSelect } from "#/components/ui/search-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
 import { statusLabel } from "#/lib/issue-status";
-import { formatDueDate, isOverdue, milestoneProgress } from "#/lib/milestones";
 import { setIssueMilestone } from "#/server/milestones";
 import { addProjectRepo, getProjectDetail, removeProjectRepo, setIssueProject } from "#/server/projects";
 
-const TABS = ["repositories", "milestones", "issues", "github"] as const;
+const TABS = ["repositories", "issues", "github"] as const;
 type ProjectTab = (typeof TABS)[number];
 
 export const Route = createFileRoute("/projects/$id")({
@@ -122,6 +120,8 @@ function ProjectDetailPage() {
         </p>
       ) : null}
 
+      <MilestoneCards projectId={project.id} milestones={project.milestones} limits={project.milestoneLimits} />
+
       <Tabs
         value={tab}
         onValueChange={(next) =>
@@ -131,9 +131,6 @@ function ProjectDetailPage() {
         <TabsList aria-label="Project sections">
           <TabsTrigger value="repositories">
             Repositories <span className="font-normal text-muted-foreground">{project.repos.length}</span>
-          </TabsTrigger>
-          <TabsTrigger value="milestones">
-            Milestones <span className="font-normal text-muted-foreground">{project.milestones.length}</span>
           </TabsTrigger>
           <TabsTrigger value="issues">
             Gitlib issues <span className="font-normal text-muted-foreground">{project.issues.length}</span>
@@ -204,95 +201,6 @@ function ProjectDetailPage() {
                     </Button>
                   </li>
                 ))}
-              </ul>
-            )}
-          </section>
-        </TabsContent>
-
-        <TabsContent value="milestones">
-          <section aria-labelledby="project-milestones" className="grid gap-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 id="project-milestones" className="text-lg font-semibold">
-                  Milestones{" "}
-                  <span className="text-sm font-normal text-muted-foreground">{project.milestones.length}</span>
-                </h2>
-                <p className="text-sm text-muted-foreground">
-                  Goals to group this project's issues under, optionally with a due date.
-                </p>
-              </div>
-              <MilestoneFormDialog mode="create" projectId={project.id} limits={project.milestoneLimits}>
-                <Button variant="outline">
-                  <Plus aria-hidden /> New milestone
-                </Button>
-              </MilestoneFormDialog>
-            </div>
-            {project.milestones.length === 0 ? (
-              <p className="border-y py-6 text-center text-sm text-muted-foreground">
-                No milestones in this project yet.
-              </p>
-            ) : (
-              <ul className="divide-y border-y" data-testid="project-milestone-list">
-                {project.milestones.map((milestone) => {
-                  const progress = milestoneProgress(milestone.issueCount, milestone.closedCount);
-                  const overdue = isOverdue(milestone.dueDate, progress);
-                  return (
-                    <li key={milestone.id} className="flex items-start gap-3 py-3">
-                      <Flag
-                        className={
-                          progress.complete
-                            ? "mt-0.5 size-4 shrink-0 text-primary"
-                            : "mt-0.5 size-4 shrink-0 text-muted-foreground"
-                        }
-                        aria-hidden
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="font-medium break-words">{milestone.title}</p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">
-                          {milestone.dueDate ? (
-                            <span className={overdue ? "font-medium text-destructive" : undefined}>
-                              {overdue ? "Overdue · " : "Due "}
-                              {formatDueDate(milestone.dueDate)}
-                            </span>
-                          ) : (
-                            "No due date"
-                          )}
-                          {" · "}
-                          {progress.total === 0
-                            ? "No issues"
-                            : `${progress.closed} of ${progress.total} ${progress.total === 1 ? "issue" : "issues"} closed`}
-                        </p>
-                        {milestone.description ? (
-                          <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{milestone.description}</p>
-                        ) : null}
-                        {progress.total > 0 ? (
-                          <div
-                            role="progressbar"
-                            aria-label={`${milestone.title} progress`}
-                            aria-valuemin={0}
-                            aria-valuemax={100}
-                            aria-valuenow={progress.percent}
-                            className="mt-2 h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-muted"
-                          >
-                            <div className="h-full rounded-full bg-primary" style={{ width: `${progress.percent}%` }} />
-                          </div>
-                        ) : null}
-                      </div>
-                      <div className="flex items-center">
-                        <MilestoneFormDialog mode="edit" milestone={milestone} limits={project.milestoneLimits}>
-                          <Button variant="ghost" size="icon" aria-label={`Edit ${milestone.title}`}>
-                            <Pencil aria-hidden />
-                          </Button>
-                        </MilestoneFormDialog>
-                        <DeleteMilestoneDialog milestone={milestone} issueCount={milestone.issueCount}>
-                          <Button variant="ghost" size="icon" aria-label={`Delete ${milestone.title}`}>
-                            <Trash2 aria-hidden />
-                          </Button>
-                        </DeleteMilestoneDialog>
-                      </div>
-                    </li>
-                  );
-                })}
               </ul>
             )}
           </section>
