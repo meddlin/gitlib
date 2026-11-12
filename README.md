@@ -334,6 +334,15 @@ npm run build -w @gitlib/web && npm run preview -w @gitlib/web   # production bu
   next run carries on. Set `GITLIB_GITHUB_TOKEN` to refresh everything.
   Each missing item on the Community tab has an **Add to planning** button that files a gitlib
   [planning](#planning) issue for it (stored in gitlib only); once filed, the row links to that issue.
+- A **blue dot** beside a repo's name means the branch it has checked out is behind the remote branch it
+  tracks (`origin/main` and so on): the remote has commits the clone lacks, so it needs a `git pull`. Hover
+  for the branch. Gitlib asks each remote with `git ls-remote`, which only reads, so it works on the
+  read-only Docker mount, and it never fetches or pulls for you. A clone that has diverged counts as behind
+  (a pull still has something to bring in); one that is only ahead, up to date, on a detached HEAD, on a
+  branch with no upstream, or a linked worktree shows no dot. Answers are cached for five minutes;
+  **Rescan** asks again at once, so run it after pulling. The server needs its own access to each remote
+  (see Troubleshooting in [the runbook](docs/runbook.md)); repos it could not reach are counted in a note
+  above the table.
 - The **Planning** page (`/planning`) holds gitlib's own issues; see [Planning](#planning).
 - The **Dependabot** page (`/dependabot`) shows the newest saved check of your starred repositories' Dependabot PRs,
   with a **Check now** button and a count badge in the top bar; see [Dependabot watch](#dependabot-watch).
