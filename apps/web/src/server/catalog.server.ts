@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
-import { classifyProvider, loadGitRemotes, selectPreferredRemote, utcNow } from "@gitlib/core";
+import { classifyProvider, loadGitRemotes, selectPreferredRemote, utcNow, type RemoteFavorite } from "@gitlib/core";
 import {
   cloneFolderName,
   cloneUrlOf,
@@ -10,6 +10,7 @@ import {
   mergeCatalog,
   parseLandingPage,
   parseStoredListing,
+  remoteFavoriteId,
   type CatalogEntry,
   type ListingPage,
   type LocalClone,
@@ -105,6 +106,7 @@ async function loadClones(): Promise<LocalClone[]> {
       relativePath: repo.relativePath,
       name: repo.name,
       description: repo.description,
+      isFavorite: repo.isFavorite,
       remotes: localRemotes(repo.absolutePath),
     }));
 }
@@ -207,10 +209,19 @@ function statusOf(provider: RemoteProvider, stored: StoredHost | null): Provider
 export async function buildCatalog(): Promise<CatalogView> {
   ensureScheduler();
   checkIfDue();
-  const clones = await (cachedClones ??= loadClones().catch((caught: unknown) => {
+  const cloned = await (cachedClones ??= loadClones().catch((caught: unknown) => {
     cachedClones = undefined;
     throw caught;
   }));
+
+  // The clones are cached until a rescan, but a star can change at any time (here or in the local table).
+  const starred = new Set(
+    getApp()
+      .loadRepositories()
+      .filter((repo) => repo.isFavorite)
+      .map((repo) => repo.relativePath),
+  );
+  const clones = cloned.map((clone) => ({ ...clone, isFavorite: starred.has(clone.relativePath) }));
 
   const repos: Record<RemoteProvider, RemoteRepo[]> = { github: [], gitlab: [] };
   const stored: Record<RemoteProvider, StoredHost | null> = { github: null, gitlab: null };
@@ -219,11 +230,48 @@ export async function buildCatalog(): Promise<CatalogView> {
     stored[provider] = isConfigured(provider) ? storedHost(provider) : null;
     repos[provider] = (stored[provider]?.listing.pages ?? []).flatMap((page: ListingPage) => page.repos);
   }
+  const remoteFavorites = new Set(
+    getApp()
+      .store.listRemoteFavorites()
+      .filter((fav): fav is RemoteFavorite & { provider: RemoteProvider } => PROVIDERS.some((provider) => provider === fav.provider))
+      .map((fav) => remoteFavoriteId(fav.provider, fav.key)),
+  );
   return {
-    entries: mergeCatalog(clones, repos.github, repos.gitlab),
+    entries: mergeCatalog(clones, repos.github, repos.gitlab, remoteFavorites),
     github: statusOf("github", stored.github),
     gitlab: statusOf("gitlab", stored.gitlab),
   };
+}
+
+/** Stars or unstars the clones of an entry, or its remote repos when it has no clone. */
+function applyFavorite(entry: CatalogEntry, favorite: boolean): void {
+  const app = getApp();
+  if (entry.locals.length > 0) {
+    for (const relativePath of entry.locals) app.saveRepositoryFavorite(relativePath, favorite);
+    return;
+  }
+  for (const provider of PROVIDERS) {
+    const link = entry[provider];
+    if (link) app.store.setRemoteFavorite({ provider, key: link.key, fullName: link.fullName }, favorite);
+  }
+}
+
+/** What identifies the repo to star: one of its clones, or (for a repo with no clone) its name on a host. */
+export type FavoriteTarget = { relativePath: string } | { provider: RemoteProvider; fullName: string };
+
+/**
+ * Stars or unstars a catalog entry and returns the catalog as it is now. A cloned repo uses the same star as the
+ * local table; one that only GitHub or GitLab has is starred without cloning it.
+ */
+export async function setCatalogFavorite(target: FavoriteTarget, favorite: boolean): Promise<CatalogView> {
+  const { entries } = await buildCatalog();
+  const entry =
+    "relativePath" in target
+      ? entries.find((candidate) => candidate.locals.includes(target.relativePath))
+      : findRemoteOnly(entries, target.provider, target.fullName);
+  if (!entry) throw new Error("That repository is not in the catalog, or it has been cloned since the list was loaded.");
+  applyFavorite(entry, favorite);
+  return buildCatalog();
 }
 
 /** Asks both configured hosts for their complete listings now (ignoring ETags), and rereads every clone's remotes. */
@@ -271,5 +319,11 @@ export async function cloneRemoteRepo(provider: RemoteProvider, fullName: string
   cachedClones = undefined;
   const repo = (await loadAndIndexRepositories(true)).find((candidate) => path.resolve(candidate.absolutePath) === path.resolve(destination));
   if (!repo) throw new Error(`Cloned to ${destination}, but it is not under a scanned root.`);
+  // A starred repo stays starred once it has a clone: the star moves from the remote to the clone, which is where
+  // a cloned repo's star is kept.
+  if (entry.isFavorite) {
+    getApp().saveRepositoryFavorite(repo.relativePath, true);
+    applyFavorite(entry, false);
+  }
   return { relativePath: repo.relativePath };
 }

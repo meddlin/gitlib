@@ -89,6 +89,54 @@ const hoursLater = (hours: number) => {
 const settled = (load: () => Promise<{ github: { refreshing: boolean } }>) =>
   vi.waitFor(async () => expect((await load()).github.refreshing).toBe(false));
 
+describe("catalog favorites", () => {
+  async function listed() {
+    vi.stubGlobal("fetch", fakeGitHub().fetchMock);
+    const load = await startServer();
+    await load();
+    await settled(load);
+    const { setCatalogFavorite } = await import("../src/server/catalog.server");
+    return { load, setCatalogFavorite };
+  }
+
+  it("stars a repo that is only on GitHub, keeps it across a restart, and unstars it", async () => {
+    const { load, setCatalogFavorite } = await listed();
+    const target = { provider: "github", fullName: "me/remote-only" } as const;
+
+    const starred = await setCatalogFavorite(target, true);
+    // Starred repos list first.
+    expect(starred.entries.map((entry) => [entry.fullName, entry.isFavorite])).toEqual([
+      ["me/remote-only", true],
+      ["me/app", false],
+    ]);
+
+    const restarted = await startServer();
+    expect((await restarted()).entries.find((entry) => entry.fullName === "me/remote-only")?.isFavorite).toBe(true);
+    expect((await load()).entries.length).toBe(2);
+
+    const { setCatalogFavorite: again } = await import("../src/server/catalog.server");
+    const cleared = await again(target, false);
+    expect(cleared.entries.every((entry) => !entry.isFavorite)).toBe(true);
+  });
+
+  it("stars a cloned repo through the local favorite, which the local table shares", async () => {
+    const { setCatalogFavorite } = await listed();
+    const view = await setCatalogFavorite({ relativePath: "app" }, true);
+    expect(view.entries.find((entry) => entry.fullName === "me/app")?.isFavorite).toBe(true);
+
+    const { getApp } = await import("../src/server/gitlib.server");
+    expect(getApp().loadRepositories().find((repo) => repo.relativePath === "app")?.isFavorite).toBe(true);
+    // Nothing is written for the remote side of a cloned repo.
+    expect(getApp().store.listRemoteFavorites()).toEqual([]);
+  });
+
+  it("refuses a repo the catalog does not have, or one that has been cloned (named by its host)", async () => {
+    const { setCatalogFavorite } = await listed();
+    await expect(setCatalogFavorite({ provider: "github", fullName: "nobody/nothing" }, true)).rejects.toThrow(/not in the catalog/);
+    await expect(setCatalogFavorite({ provider: "github", fullName: "me/app" }, true)).rejects.toThrow(/not in the catalog/);
+  });
+});
+
 describe("catalog listings", () => {
   it("lists in the background the first time, then serves the stored list without asking GitHub", async () => {
     const github = fakeGitHub();

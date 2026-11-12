@@ -154,7 +154,7 @@ reasonable start; check with `ollama ps` on that machine that the model is fully
 
 `gitlib dependabot check` reports which open [Dependabot](https://docs.github.com/code-security/dependabot) pull
 requests on your **starred** repositories can be merged and which need work. "Starred" is the Star toggle in gitlib
-(`repo_favorites`), not GitHub stars, and only favorites with a github.com remote can be watched; the report says
+(`repo_favorites`, or `remote_favorites` for a repo starred on GitHub without a clone), not GitHub stars, and only favorites on github.com can be watched; the report says
 how many were skipped and why. Nothing is ever written to GitHub, and the verdict comes only from fields GitHub
 returns (never from the PR text, which quotes third-party release notes). The research and the reasoning behind it
 are in [`docs/dependabot-watch.md`](docs/dependabot-watch.md).
@@ -305,7 +305,11 @@ npm run build -w @gitlib/web && npm run preview -w @gitlib/web   # production bu
   half an hour. A host that isn't configured is noted on the page and the rest still works, and clones link
   to GitHub or GitLab from their remotes either way. The **Local** tab is the full table (favorites, descriptions, issue
   counts, community scores, preview pane); the other tabs list repos with links out, and clones open their
-  detail page. The tab is kept in the URL (`?source=`).
+  detail page. The tab is kept in the URL (`?source=`). Every row has a star, so a repo that is only on GitHub
+  or GitLab can be a favorite without being cloned (stored in the `remote_favorites` table, and also on the
+  repo's own page). A cloned repo uses the same star as the Local tab, and cloning a starred repo carries the
+  star over to the clone. Starred rows are listed first. Dependabot checks (below) also watch repos starred on
+  GitHub without a clone; ones starred only on GitLab are reported as skipped.
 - Each repo has a detail page (click its name) with Overview, **Issues** and **Pull requests** tabs; the
   last two list open GitHub items and say so in a banner. Public repos work as-is; set
   `GITLIB_GITHUB_TOKEN` (or `GITHUB_TOKEN`) for private repos and a higher rate limit. The web server
