@@ -10,6 +10,7 @@ import type { CommunityScoresView } from "#/server/community";
 import { setFavorite, type RepoView } from "#/server/repos";
 import type { IssueCountsView } from "#/server/issues";
 import type { SearchHitView } from "#/server/search";
+import type { SyncStatusView } from "#/server/sync";
 
 export type RepoHighlights = ReadonlyMap<number, SearchHitView["highlights"]>;
 
@@ -24,7 +25,10 @@ export type IssueCounts = IssueCountsView["counts"] | undefined;
 /** GitHub community scores by repo relativePath; undefined while they are still loading. */
 export type CommunityScores = CommunityScoresView["scores"] | undefined;
 
-export type SortKey = "name" | "description" | "stack" | "issues" | "community" | "scanned";
+/** Repos that need a `git pull`, by relativePath, each with the branch it tracks (`origin/main`); undefined while still checking. */
+export type BehindUpstream = SyncStatusView["behind"] | undefined;
+
+export type SortKey ="name" | "description" | "stack" | "issues" | "community" | "scanned";
 export type SortDir = "asc" | "desc";
 
 export interface Sort {
@@ -180,6 +184,25 @@ function CommunityScore({ repo, scores }: { repo: RepoView; scores: CommunitySco
   );
 }
 
+/**
+ * A blue dot for a clone whose upstream branch has commits it lacks; the tooltip says what to run. It hangs in the
+ * name cell's left padding, so flagged repos' names still line up with the rest.
+ */
+function BehindDot({ upstream }: { upstream: string }) {
+  const label = `${upstream} has new commits. Run git pull to get them.`;
+  return (
+    <span
+      role="img"
+      aria-label={label}
+      title={label}
+      data-testid="behind-dot"
+      className="absolute top-4 -left-0.5 inline-flex size-3 items-center justify-center"
+    >
+      <span className="size-2 rounded-full bg-blue-500" aria-hidden />
+    </span>
+  );
+}
+
 function FavoriteButton({ repo }: { repo: RepoView }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -221,6 +244,7 @@ export function RepoTable({
   onToggleTech,
   issueCounts,
   communityScores,
+  behindUpstream,
   selectedPath,
   onSelect,
 }: {
@@ -234,6 +258,7 @@ export function RepoTable({
   onToggleTech: (name: string) => void;
   issueCounts: IssueCounts;
   communityScores: CommunityScores;
+  behindUpstream: BehindUpstream;
   selectedPath: string | undefined;
   onSelect: (repo: RepoView) => void;
 }) {
@@ -291,7 +316,8 @@ export function RepoTable({
                 <td className="px-3 py-2">
                   <FavoriteButton repo={repo} />
                 </td>
-                <td className="px-3 py-3">
+                <td className="relative px-3 py-3">
+                  {behindUpstream?.[repo.relativePath] ? <BehindDot upstream={behindUpstream[repo.relativePath]!} /> : null}
                   <Link
                     to="/repos/$"
                     params={{ _splat: repo.relativePath }}

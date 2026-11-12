@@ -4,6 +4,7 @@ import { getApp, loadAndIndexRepositories } from "./gitlib.server";
 import { clearCatalogClones } from "./catalog.server";
 import { clearContributions } from "./contributions";
 import { clearIssueCounts } from "./issues";
+import { clearSyncStatus } from "./sync";
 
 export interface TechnologyView {
   name: string;
@@ -67,6 +68,7 @@ export const getRepo = createServerFn({ method: "GET" })
 
 export const rescanRepos = createServerFn({ method: "POST" }).handler(async () => {
   clearIssueCounts();
+  clearSyncStatus();
   clearContributions();
   clearCatalogClones();
   return listing(true);

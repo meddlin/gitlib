@@ -7,6 +7,7 @@ import { RepoPreview } from "#/components/repo-preview";
 import {
   RepoTable,
   sortRepos,
+  type BehindUpstream,
   type CommunityScores,
   type IssueCounts,
   type RepoHighlights,
@@ -27,6 +28,7 @@ import { getContributions, type ContributionsView } from "#/server/contributions
 import { getIssueCounts, type IssueCountsView } from "#/server/issues";
 import { getRepos, rescanRepos, type RepoView } from "#/server/repos";
 import { searchRepos } from "#/server/search";
+import { getSyncStatus, type SyncStatusView } from "#/server/sync";
 
 interface IndexSearch extends LibraryTableState {
   /** relativePath of the repo shown in the preview pane. */
@@ -99,6 +101,7 @@ function useBackgroundView<T>(load: () => Promise<T>, onError: (message: string)
 }
 
 const issueCountsFailed = (error: string): IssueCountsView => ({ status: "error", counts: {}, error });
+const syncStatusFailed = (error: string): SyncStatusView => ({ behind: {}, failed: 0, error, checkedAt: null });
 const communityScoresFailed = (error: string): CommunityScoresView => ({
   status: "error",
   scores: {},
@@ -272,6 +275,8 @@ function RepoLibrary() {
   const contributions = useContributions(allRepos);
   const issueCountsResult = useBackgroundView(getIssueCounts, issueCountsFailed, allRepos);
   const issueCounts: IssueCounts = issueCountsResult?.counts;
+  const syncResult = useBackgroundView(getSyncStatus, syncStatusFailed, allRepos);
+  const behindUpstream: BehindUpstream = syncResult?.behind;
   const community = useCommunityScores(allRepos);
   const catalog = useCatalog(allRepos);
   const communityResult = community.view;
@@ -511,6 +516,14 @@ function RepoLibrary() {
                   </p>
                 ) : null}
 
+                {syncResult && (syncResult.failed > 0 || (syncResult.checkedAt === null && syncResult.error)) ? (
+                  <p className="text-xs text-muted-foreground" role="status">
+                    {syncResult.checkedAt === null
+                      ? `Couldn't check for new upstream commits: ${syncResult.error}`
+                      : `Couldn't check ${syncResult.failed} ${syncResult.failed === 1 ? "repository" : "repositories"} for new upstream commits (the first: ${syncResult.error}). Git needs access to each remote from the server.`}
+                  </p>
+                ) : null}
+
                 {communityResult && communityResult.status !== "ok" ? (
                   <p className="text-xs text-muted-foreground" role="status">
                     Some GitHub community scores couldn't be refreshed: {communityResult.error}
@@ -585,6 +598,7 @@ function RepoLibrary() {
                       onToggleTech={toggleTech}
                       issueCounts={issueCounts}
                       communityScores={communityScores}
+                      behindUpstream={behindUpstream}
                       selectedPath={selected?.relativePath}
                       onSelect={(repo) => setSearch({ repo: repo.relativePath })}
                     />
