@@ -1,6 +1,7 @@
 import { Link, createFileRoute, notFound, useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Download, ExternalLink, LoaderCircle } from "lucide-react";
 import { useState } from "react";
+import { RemoteReadme } from "#/components/remote-readme";
 import { TechBadge } from "#/components/tech-badge";
 import { Button } from "#/components/ui/button";
 import type { RemoteProvider } from "#/lib/catalog";
@@ -105,6 +106,7 @@ function RemoteRepoDetail() {
         {flags.length > 0 ? ` (${flags.join(", ")})` : ""}. Cloning puts a copy in the clone directory set on the Settings page.
       </p>
       {entry.description ? <p className="text-sm leading-relaxed">{entry.description}</p> : null}
+      <RemoteReadme provider={provider} fullName={link.fullName} />
     </div>
   );
 }

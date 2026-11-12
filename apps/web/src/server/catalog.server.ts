@@ -19,9 +19,10 @@ import {
   type StoredListing,
 } from "#/lib/catalog";
 import { isStale, refreshIntervalMs } from "#/lib/community";
-import { githubToken, listGitHubRepos } from "./github.server";
+import type { RemoteReadme } from "#/lib/readme";
+import { fetchGitHubReadme, githubToken, listGitHubRepos } from "./github.server";
 import { getApp, loadAndIndexRepositories } from "./gitlib.server";
-import { gitlabHost, gitlabScope, gitlabToken, gitlabUsername, listGitLabProjects } from "./gitlab.server";
+import { fetchGitLabReadme, gitlabHost, gitlabScope, gitlabToken, gitlabUsername, listGitLabProjects } from "./gitlab.server";
 import { ProviderSetupError } from "./provider-errors";
 
 export interface ProviderStatus {
@@ -231,6 +232,25 @@ export async function refreshAllListings(): Promise<CatalogView> {
   cachedClones = undefined;
   await Promise.all(PROVIDERS.filter(isConfigured).map((provider) => startCheck(provider, true)));
   return buildCatalog();
+}
+
+/**
+ * The README of a repo that only a host has, read from the host when asked. Like cloning, it only answers for a repo the
+ * catalog lists with no local clone, never for a name the caller made up, so the configured tokens can't be pointed at
+ * an arbitrary repository. Failures come back as `error` for the page to show.
+ */
+export async function loadRemoteReadme(provider: RemoteProvider, fullName: string): Promise<RemoteReadme> {
+  const link = findRemoteOnly((await buildCatalog()).entries, provider, fullName)?.[provider];
+  if (!link) {
+    return { fileName: null, markdown: null, error: "That repository is not on a host gitlib lists, or it is already cloned." };
+  }
+  try {
+    return await (provider === "github" ? fetchGitHubReadme(link.fullName) : fetchGitLabReadme(link.fullName));
+  } catch (caught) {
+    const timedOut = caught instanceof Error && caught.name === "TimeoutError";
+    const error = timedOut ? "The host took too long to answer." : caught instanceof Error ? caught.message : "Could not load the README.";
+    return { fileName: null, markdown: null, error };
+  }
 }
 
 export interface CloneResult {

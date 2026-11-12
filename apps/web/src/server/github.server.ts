@@ -1,5 +1,6 @@
 import { loadGitRemotes, selectGitHubRepo, type GitHubRepoRef } from "@gitlib/core";
 import { remoteKey, type ListingPage } from "#/lib/catalog";
+import { MAX_README_LENGTH, NO_README, isMarkdownFileName, type RemoteReadme } from "#/lib/readme";
 import { getApp, loadAndIndexRepositories } from "./gitlib.server";
 import type { Provider } from "./provider";
 import { ProviderSetupError } from "./provider-errors";
@@ -90,6 +91,35 @@ export async function githubGet<T>(
     error: null,
     rateRemaining: remaining !== null && Number.isFinite(Number(remaining)) ? Number(remaining) : null,
   };
+}
+
+/**
+ * The README GitHub picks for `owner/repo`. A repository without one is `NO_README`, not an error (GitHub answers 404
+ * for both, and callers only ask about repos the account's listing already shows). A README in another format than
+ * Markdown comes back with its name but no text.
+ */
+export async function fetchGitHubReadme(fullName: string): Promise<RemoteReadme> {
+  const [owner, repo, ...extra] = fullName.split("/");
+  if (!owner || !repo || extra.length > 0) {
+    return { fileName: null, markdown: null, error: `${fullName} is not a GitHub owner/repo name.` };
+  }
+
+  const result = await githubGet<{ name: string; content: string; encoding: string }>(
+    { provider: "github", owner, repo, slug: `${owner}/${repo}` },
+    "/readme",
+    {},
+  );
+  if (result.error !== null) {
+    return result.status === 404 ? NO_README : { fileName: null, markdown: null, error: result.error };
+  }
+
+  const { name, content, encoding } = result.data;
+  if (!isMarkdownFileName(name)) return { fileName: name, markdown: null, error: null };
+  // GitHub leaves the content out of this response for files over 1 MB.
+  if (encoding !== "base64") {
+    return { fileName: name, markdown: null, error: `${name} is too large for GitHub to send; open it on GitHub instead.` };
+  }
+  return { fileName: name, markdown: Buffer.from(content, "base64").toString("utf-8").slice(0, MAX_README_LENGTH), error: null };
 }
 
 interface GitHubAccountRepo {
