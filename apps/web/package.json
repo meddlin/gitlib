@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@gitlib/core": "*",
-    "@tailwindcss/vite": "^4.1.18",
+    "@tailwindcss/vite": "^4.3.5",
     "@tanstack/react-router": "1.170.45",
     "@tanstack/react-start": "1.169.4",
     "class-variance-authority": "^0.7.1",
