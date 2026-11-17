@@ -1,4 +1,5 @@
 import { GitLibError } from "../errors.js";
+import type { ProjectRemote } from "./types.js";
 
 export const MAX_ISSUE_TITLE_LENGTH = 200;
 export const MAX_ISSUE_BODY_LENGTH = 50_000;
@@ -60,6 +61,18 @@ export function normalizeMilestoneDueDate(dueDate: string | null | undefined): s
 }
 
 export const MAX_PROJECT_NAME_LENGTH = 100;
+
+/** Checks a hosted repo before it is stored: a known provider and a full name of plain path segments. */
+export function normalizeProjectRemote(remote: ProjectRemote): ProjectRemote {
+  const fullName = typeof remote?.fullName === "string" ? remote.fullName.trim().replace(/^\/+|\/+$/g, "") : "";
+  if ((remote?.provider !== "github" && remote?.provider !== "gitlab") || !fullName.includes("/")) {
+    throw new ProjectValidationError("A hosted repository needs a provider and a name like owner/repo.");
+  }
+  if (fullName.split("/").some((segment) => !segment || segment === "." || segment === ".." || /[\s\\:\0]/.test(segment))) {
+    throw new ProjectValidationError(`"${fullName}" is not a valid repository name.`);
+  }
+  return { provider: remote.provider, fullName };
+}
 
 export class ProjectValidationError extends GitLibError {}
 

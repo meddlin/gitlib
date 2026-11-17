@@ -28,8 +28,8 @@ ENV NODE_ENV=production \
     GITLIB_HOME=/data
 
 # git: the web app shells out to it for remotes (GitHub tabs, community scores) and the contribution graph.
-# safe.directory: the mounted repos are owned by whoever owns them on the host, not by the container user,
-# and git refuses to read those without it. The mount is read-only, so this cannot be abused to write.
+# safe.directory: repos that were already on the host are owned by whoever owns them there, not by the container
+# user, and git refuses to read those without it. Only your own repositories are mounted.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
@@ -46,8 +46,10 @@ COPY --from=build --chown=node:node /app/apps/cli/package.json apps/cli/package.
 COPY --from=build --chown=node:node /app/apps/cli/dist apps/cli/dist
 RUN ln -s /app/apps/cli/dist/bin.js /usr/local/bin/gitlib
 
-# Config + SQLite live in /data (a volume); repositories are mounted at /home/node/git,
-# which is the default scan root (~/git) for the node user. /backups is where `gitlib backup` writes.
+# Config + SQLite live in /data (a volume); repositories are bind-mounted from the host at /home/node/git,
+# which is the default scan root (~/git) for the node user and where "Clone locally" writes. Nothing is
+# cloned into the image or a container layer: with no mount, clones would vanish with the container.
+# /backups is where `gitlib backup` writes.
 RUN mkdir -p /data /backups /home/node/git && chown node:node /data /backups /home/node/git
 USER node
 WORKDIR /app/apps/web

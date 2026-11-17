@@ -1,5 +1,6 @@
 import { loadGitRemotes, selectGitHubRepo, type GitHubRepoRef } from "@gitlib/core";
 import { remoteKey, type ListingPage } from "#/lib/catalog";
+import { MAX_README_LENGTH, NO_README, isMarkdownFileName, type RemoteReadme } from "#/lib/readme";
 import { getApp, loadAndIndexRepositories } from "./gitlib.server";
 import type { Provider } from "./provider";
 import { ProviderSetupError } from "./provider-errors";
@@ -16,6 +17,12 @@ export interface GitHubSource {
   slug: string;
 }
 
+/** The source for an `owner/repo` full name; null for anything else (a nested path, a missing half). */
+export function sourceOf(fullName: string): GitHubSource | null {
+  const [owner, repo, ...rest] = fullName.split("/");
+  return owner && repo && rest.length === 0 ? { provider: "github", owner, repo, slug: fullName } : null;
+}
+
 /** The GitHub repository behind a repo gitlib knows about; never an arbitrary one. Throws if the repo is unknown. */
 export function resolveGitHubSource(relativePath: string): { source: GitHubSource | null; error: string | null } {
   const app = getApp();
@@ -30,17 +37,20 @@ export function resolveGitHubSource(relativePath: string): { source: GitHubSourc
 /**
  * Every GitHub repository behind the repos gitlib knows about, with the relativePaths that share it.
  * Linked worktrees share a remote with their main repo, so callers can ask GitHub about each repository once.
+ * `favorite` is true when any of those paths is a favorite.
  */
-export async function groupReposByGitHubSlug(): Promise<{ ref: GitHubRepoRef; paths: string[] }[]> {
+export async function groupReposByGitHubSlug(): Promise<{ ref: GitHubRepoRef; paths: string[]; favorite: boolean }[]> {
   const app = getApp();
-  const bySlug = new Map<string, { ref: GitHubRepoRef; paths: string[] }>();
+  const bySlug = new Map<string, { ref: GitHubRepoRef; paths: string[]; favorite: boolean }>();
   for (const repo of await loadAndIndexRepositories()) {
     const { remotes, error } = loadGitRemotes(repo.absolutePath, app.system);
     const ref = error ? null : selectGitHubRepo(remotes);
     if (!ref) continue;
     const key = `${ref.owner}/${ref.repo}`.toLowerCase();
-    const entry = bySlug.get(key) ?? { ref, paths: [] };
+    const entry = bySlug.get(key) ?? { ref, paths: [], favorite: false };
     entry.paths.push(repo.relativePath);
+    // A repo counts as a favorite when any clone or worktree of it is.
+    entry.favorite ||= repo.isFavorite;
     bySlug.set(key, entry);
   }
   return [...bySlug.values()];
@@ -90,6 +100,35 @@ export async function githubGet<T>(
     error: null,
     rateRemaining: remaining !== null && Number.isFinite(Number(remaining)) ? Number(remaining) : null,
   };
+}
+
+/**
+ * The README GitHub picks for `owner/repo`. A repository without one is `NO_README`, not an error (GitHub answers 404
+ * for both, and callers only ask about repos the account's listing already shows). A README in another format than
+ * Markdown comes back with its name but no text.
+ */
+export async function fetchGitHubReadme(fullName: string): Promise<RemoteReadme> {
+  const [owner, repo, ...extra] = fullName.split("/");
+  if (!owner || !repo || extra.length > 0) {
+    return { fileName: null, markdown: null, error: `${fullName} is not a GitHub owner/repo name.` };
+  }
+
+  const result = await githubGet<{ name: string; content: string; encoding: string }>(
+    { provider: "github", owner, repo, slug: `${owner}/${repo}` },
+    "/readme",
+    {},
+  );
+  if (result.error !== null) {
+    return result.status === 404 ? NO_README : { fileName: null, markdown: null, error: result.error };
+  }
+
+  const { name, content, encoding } = result.data;
+  if (!isMarkdownFileName(name)) return { fileName: name, markdown: null, error: null };
+  // GitHub leaves the content out of this response for files over 1 MB.
+  if (encoding !== "base64") {
+    return { fileName: name, markdown: null, error: `${name} is too large for GitHub to send; open it on GitHub instead.` };
+  }
+  return { fileName: name, markdown: Buffer.from(content, "base64").toString("utf-8").slice(0, MAX_README_LENGTH), error: null };
 }
 
 interface GitHubAccountRepo {

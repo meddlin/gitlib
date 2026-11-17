@@ -21,6 +21,7 @@ import type {
   PlanningRepo,
   Project,
   ProjectRepo,
+  ProjectRemote,
 } from "./types.js";
 
 // Loaded via getBuiltinModule for the same bundler reason as in store.ts.
@@ -184,7 +185,7 @@ interface ProjectRow {
 /** A membership row: the repo, and whether it was taken out of the project. */
 type Membership = ProjectRepo & { projectId: number; removed: boolean };
 
-const toProject = (row: ProjectRow, members: Membership[]): Project => {
+const toProject = (row: ProjectRow, members: Membership[], remotes: ProjectRemote[]): Project => {
   const strip = ({ projectId: _, removed: __, ...repo }: Membership): ProjectRepo => repo;
   const repos = members.filter((member) => !member.removed).map(strip);
   return {
@@ -193,6 +194,7 @@ const toProject = (row: ProjectRow, members: Membership[]): Project => {
     repos,
     repoPaths: repos.map((repo) => repo.path),
     removedRepos: members.filter((member) => member.removed).map(strip),
+    remotes,
     archivedAt: row.archived_at || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -207,6 +209,17 @@ const ARCHIVABLE = {
   epic: { table: "epics", noun: "epic", name: "title" },
 } as const;
 export type Archivable = keyof typeof ARCHIVABLE;
+
+interface RemoteRow {
+  project_id: number;
+  provider: string;
+  full_name: string;
+}
+
+const toRemote = (row: RemoteRow): ProjectRemote => ({
+  provider: row.provider === "gitlab" ? "gitlab" : "github",
+  fullName: row.full_name,
+});
 
 const isUniqueViolation = (error: unknown): boolean =>
   error instanceof Error && /UNIQUE constraint failed/i.test(error.message);
@@ -570,7 +583,16 @@ export class PlanningStore {
         list.push(member);
         members.set(member.projectId, list);
       }
-      return rows.map((row) => toProject(row, members.get(Number(row.id)) ?? []));
+      const hosted = new Map<number, ProjectRemote[]>();
+      const remoteRows = db
+        .prepare("SELECT project_id, provider, full_name FROM project_remotes ORDER BY provider, full_name")
+        .all() as unknown as RemoteRow[];
+      for (const row of remoteRows) {
+        const list = hosted.get(Number(row.project_id)) ?? [];
+        list.push(toRemote(row));
+        hosted.set(Number(row.project_id), list);
+      }
+      return rows.map((row) => toProject(row, members.get(Number(row.id)) ?? [], hosted.get(Number(row.id)) ?? []));
     });
   }
 
@@ -601,16 +623,51 @@ export class PlanningStore {
   addRepoToProject(id: number, repoPath: string, now: string): Project {
     return this.transaction((db) => {
       this.requireLive(db, "project", id, "add repos to it");
-      const repo = this.ensureRepo(db, repoPath, now);
-      if (repo.archivedAt) {
-        throw new PlanningArchivedError(`The repo "${repo.slug}" is archived. Restore it before adding it to a project.`);
-      }
+      if (this.addMember(db, id, repoPath, now) > 0) db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(now, id);
+      return this.requireProject(db, id);
+    });
+  }
+
+  /** Puts the repo at `repoPath` in the project, or brings it back if it was taken out; 1 when anything changed. */
+  private addMember(db: DatabaseSync, id: number, repoPath: string, now: string): number {
+    const repo = this.ensureRepo(db, repoPath, now);
+    if (repo.archivedAt) {
+      throw new PlanningArchivedError(`The repo "${repo.slug}" is archived. Restore it before adding it to a project.`);
+    }
+    const { changes } = db
+      .prepare(
+        `INSERT INTO project_repos (project_id, repo_id, added_at) VALUES (?, ?, ?)
+         ON CONFLICT (project_id, repo_id) DO UPDATE SET archived_at = NULL WHERE project_repos.archived_at IS NOT NULL`,
+      )
+      .run(id, repo.id, now);
+    return Number(changes);
+  }
+
+  /**
+   * Adds several clones (by `relativePath`) and hosted repos in one step. Clones already in the project are skipped,
+   * and ones taken out before come back, as with `addRepoToProject`.
+   */
+  addReposToProject(id: number, repoPaths: readonly string[], remotes: readonly ProjectRemote[], now: string): Project {
+    return this.transaction((db) => {
+      this.requireLive(db, "project", id, "add repos to it");
+      let changed = 0;
+      for (const repoPath of repoPaths) changed += this.addMember(db, id, repoPath, now);
+      const insertRemote = db.prepare(
+        "INSERT OR IGNORE INTO project_remotes (project_id, provider, full_name, added_at) VALUES (?, ?, ?, ?)",
+      );
+      for (const remote of remotes) changed += Number(insertRemote.run(id, remote.provider, remote.fullName, now).changes);
+      if (changed > 0) db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(now, id);
+      return this.requireProject(db, id);
+    });
+  }
+
+  /** Takes a hosted repo that has no clone out of the project. It has no issues of its own, so it is simply removed. */
+  removeRemoteFromProject(id: number, remote: ProjectRemote, now: string): Project {
+    return this.transaction((db) => {
+      this.requireProject(db, id);
       const { changes } = db
-        .prepare(
-          `INSERT INTO project_repos (project_id, repo_id, added_at) VALUES (?, ?, ?)
-           ON CONFLICT (project_id, repo_id) DO UPDATE SET archived_at = NULL WHERE project_repos.archived_at IS NOT NULL`,
-        )
-        .run(id, repo.id, now);
+        .prepare("DELETE FROM project_remotes WHERE project_id = ? AND provider = ? AND full_name = ?")
+        .run(id, remote.provider, remote.fullName);
       if (Number(changes) > 0) db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(now, id);
       return this.requireProject(db, id);
     });
@@ -812,7 +869,10 @@ export class PlanningStore {
   private findProject(db: DatabaseSync, id: number): Project | null {
     const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(id) as unknown as ProjectRow | undefined;
     if (!row) return null;
-    return toProject(row, this.memberships(db, id));
+    const remotes = db
+      .prepare("SELECT project_id, provider, full_name FROM project_remotes WHERE project_id = ? ORDER BY provider, full_name")
+      .all(id) as unknown as RemoteRow[];
+    return toProject(row, this.memberships(db, id), remotes.map(toRemote));
   }
 
   /** Repo memberships of one project, or of all of them, sorted by path, including repos taken out. */

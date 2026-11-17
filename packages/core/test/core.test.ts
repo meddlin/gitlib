@@ -265,6 +265,24 @@ describe("application", () => {
     expect(reopened.saveRepositoryFavorite("beta", false).isFavorite).toBe(false);
   });
 
+  it("persists favorites for repos that are only on a host, and is idempotent", () => {
+    fx.writeConfig();
+    const app = createApplication(fx.env());
+    const remote = { provider: "github", key: "github.com/me/server-only", fullName: "me/server-only" };
+
+    expect(app.store.listRemoteFavorites()).toEqual([]);
+    app.store.setRemoteFavorite(remote, true);
+    app.store.setRemoteFavorite(remote, true);
+    app.store.setRemoteFavorite({ provider: "gitlab", key: "gitlab.com/g/p", fullName: "g/p" }, true);
+
+    const reopened = createApplication(fx.env());
+    expect(reopened.store.listRemoteFavorites().map((r) => r.key)).toEqual(["github.com/me/server-only", "gitlab.com/g/p"]);
+
+    reopened.store.setRemoteFavorite(remote, false);
+    reopened.store.setRemoteFavorite(remote, false);
+    expect(reopened.store.listRemoteFavorites().map((r) => r.key)).toEqual(["gitlab.com/g/p"]);
+  });
+
   it("persists notes", () => {
     fx.writeConfig();
     fx.makeRepo("alpha");

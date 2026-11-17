@@ -1,7 +1,8 @@
 import { Pencil } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { DescriptionDialog } from "#/components/description-dialog";
 import { MarkdownBody } from "#/components/markdown-body";
+import { repoAssetUrl } from "#/lib/repo-asset";
 import { getReadme, type ReadmeView, type RepoView } from "#/server/repos";
 
 type ReadmeState = { status: "loading" } | ({ status: "done" } & ReadmeView);
@@ -29,6 +30,8 @@ function useReadme(relativePath: string | undefined): ReadmeState {
 /** The repo's description and rendered README; shared by the preview pane and the detail page. */
 export function RepoOverview({ repo }: { repo: RepoView }) {
   const readme = useReadme(repo.relativePath);
+  // Relative images in the README (docs/logo.png) are files in this repo, served by /api/repo-asset.
+  const resolveImage = useCallback((src: string) => repoAssetUrl(repo.relativePath, src), [repo.relativePath]);
 
   return (
     <div>
@@ -63,7 +66,7 @@ export function RepoOverview({ repo }: { repo: RepoView }) {
         ) : readme.markdown === null ? (
           <p className="text-sm text-muted-foreground">This repository has no README.md.</p>
         ) : (
-          <MarkdownBody>{readme.markdown}</MarkdownBody>
+          <MarkdownBody resolveImage={resolveImage}>{readme.markdown}</MarkdownBody>
         )}
       </section>
     </div>

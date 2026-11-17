@@ -170,6 +170,23 @@ describe("a project's GitHub preview", () => {
     expect(github.requests.every((request) => request.path.startsWith("/repos/me/app/"))).toBe(true);
   });
 
+  it("also reads GitHub repos a project holds without a clone, skipping any a clone already covers", async () => {
+    const github = fakeGitHub();
+    const { readProjectGitHub } = await start(github);
+
+    const view = await readProjectGitHub(["app"], { remotes: ["me/api", "ME/app", "not-a-repo"] });
+
+    expect(view.repos.map((repo) => [repo.relativePath, repo.slug])).toEqual([
+      ["app", "me/app"],
+      ["me/api", "me/api"],
+      ["not-a-repo", null],
+    ]);
+    expect(view.repos[1]).toMatchObject({ url: "https://github.com/me/api", error: null });
+    expect(view.repos[1]?.pulls.items).toHaveLength(2);
+    expect(view.repos[2]?.error).toBe("That is not a GitHub repository name.");
+    expect(new Set(github.requests.map((request) => request.method))).toEqual(new Set(["GET"]));
+  });
+
   it("keeps one failing list from spoiling the rest", async () => {
     const github = fakeGitHub();
     github.control.failIssuesFor = "api";

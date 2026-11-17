@@ -384,6 +384,48 @@ describe("projects", () => {
     expect(app.getProject(a.id).repoPaths).toEqual(["group/beta"]);
   });
 
+  it("adds several repos at once, including hosted ones that are not cloned", () => {
+    const app = appWithRepos();
+    const project = app.createProject("A");
+
+    const added = app.addReposToProject(
+      project.id,
+      ["alpha", "group/beta"],
+      [
+        { provider: "github", fullName: "octo/widgets" },
+        { provider: "gitlab", fullName: "team/sub/service" },
+      ],
+    );
+    expect(added.repoPaths).toEqual(["alpha", "group/beta"]);
+    expect(added.remotes).toEqual([
+      { provider: "github", fullName: "octo/widgets" },
+      { provider: "gitlab", fullName: "team/sub/service" },
+    ]);
+
+    // Adding again, or in another case, changes nothing.
+    app.addReposToProject(project.id, ["alpha"], [{ provider: "github", fullName: "Octo/Widgets" }]);
+    expect(app.getProject(project.id).remotes).toHaveLength(2);
+    expect(app.listProjects()[0]!.remotes).toHaveLength(2);
+
+    app.removeRemoteFromProject(project.id, { provider: "github", fullName: "OCTO/widgets" });
+    expect(app.getProject(project.id).remotes).toEqual([{ provider: "gitlab", fullName: "team/sub/service" }]);
+  });
+
+  it("adds nothing when one of several repos is unknown or malformed", () => {
+    const app = appWithRepos();
+    const project = app.createProject("A");
+
+    expect(() => app.addReposToProject(project.id, ["alpha", "missing"])).toThrow(RepoNotFoundError);
+    expect(() =>
+      app.addReposToProject(project.id, ["alpha"], [{ provider: "github", fullName: "no-slash" }]),
+    ).toThrow(ProjectValidationError);
+    expect(() =>
+      app.addReposToProject(project.id, [], [{ provider: "bitbucket" as "github", fullName: "a/b" }]),
+    ).toThrow(ProjectValidationError);
+    expect(app.getProject(project.id).repoPaths).toEqual([]);
+    expect(() => app.addReposToProject(999, ["alpha"])).toThrow(ProjectNotFoundError);
+  });
+
   it("files issues under a project and keeps them when the project is deleted", () => {
     const app = appWithRepos();
     const project = app.createProject("Launch");
@@ -403,8 +445,10 @@ describe("projects", () => {
     const app = appWithRepos();
     const project = app.createProject("Launch");
     app.addRepoToProject(project.id, "alpha");
+    app.addReposToProject(project.id, [], [{ provider: "github", fullName: "octo/widgets" }]);
     app.deleteProject(project.id);
     expect(app.createProject("Launch").repoPaths).toEqual([]);
+    expect(app.createProject("Launch 2").remotes).toEqual([]);
   });
 });
 
@@ -572,6 +616,7 @@ describe("milestones", () => {
     expect(upgraded.schemaVersion()).toBe(LATEST_SCHEMA_VERSION);
     expect(upgraded.getIssue(issue)).toMatchObject({ projectId: project.id, milestoneId: null });
     expect(upgraded.listMilestones()).toEqual([]);
+    expect(upgraded.getProject(project.id)).toMatchObject({ name: "Launch", repoPaths: [], remotes: [] });
   });
 });
 
@@ -717,7 +762,8 @@ describe("planning repos", () => {
   });
 
   it("migrates repo paths to planning repos, keeping every issue and project membership", () => {
-    const before = MIGRATIONS.slice(0, 6);
+    const before = MIGRATIONS.slice(0, 7);
+    expect(before.at(-1)?.name).toBe("project remote repos");
     new PlanningStore(planningDbPath(), before);
     const alpha1 = insertLegacyIssue(planningDbPath(), { repoPath: "alpha", title: "a1", createdAt: "2026-01-01T00:00:00+00:00" });
     const alpha2 = insertLegacyIssue(planningDbPath(), { repoPath: "alpha", title: "a2" });
@@ -733,6 +779,7 @@ describe("planning repos", () => {
     addRepo.run(projectId, "alpha");
     // A member with no issues still gets a planning repo.
     addRepo.run(projectId, "tools/gone");
+    db.prepare("INSERT INTO project_remotes (project_id, provider, full_name, added_at) VALUES (?, 'github', 'octo/widgets', '')").run(projectId);
     db.close();
 
     const upgraded = new PlanningStore(planningDbPath());
@@ -753,6 +800,10 @@ describe("planning repos", () => {
       milestoneId,
     });
     expect(upgraded.getIssue(work)).toMatchObject({ repoSlug: "work/api", number: 1 });
+    expect(upgraded.getProject(projectId)).toMatchObject({
+      repoPaths: ["alpha", "tools/gone"],
+      remotes: [{ provider: "github", fullName: "octo/widgets" }],
+    });
     expect(upgraded.getIssue(personal)).toMatchObject({ repoSlug: "personal/api", number: 1 });
     expect(upgraded.getProject(projectId)?.repoPaths).toEqual(["alpha", "tools/gone"]);
     expect(upgraded.listIssues()).toHaveLength(4);
@@ -911,8 +962,33 @@ describe("archiving", () => {
     expect(app.resolvePlanningRepo("alpha").path).toBe("alpha");
   });
 
-  it("arrives through migration 8 with nothing archived", () => {
-    const before = MIGRATIONS.slice(0, 7);
+  it("adds several repos with the same archive rules as one", () => {
+    const app = appWithRepos();
+    const project = app.createProject("Launch");
+    app.addReposToProject(project.id, ["alpha", "beta"], [{ provider: "github", fullName: "octo/widgets" }]);
+    app.removeRepoFromProject(project.id, "alpha");
+
+    // Adding a repo that was taken out brings its membership back.
+    const restored = app.addReposToProject(project.id, ["alpha"]);
+    expect(restored.repoPaths).toEqual(["alpha", "beta"]);
+    expect(restored.removedRepos).toEqual([]);
+
+    // An archived repo stops the whole batch.
+    const other = app.createProject("Other");
+    app.archivePlanningRepo("alpha");
+    expect(() => app.addReposToProject(other.id, ["beta", "alpha"])).toThrow(PlanningArchivedError);
+    expect(app.getProject(other.id).repoPaths).toEqual([]);
+
+    // An archived project takes neither clones nor hosted repos, but keeps the ones it has.
+    app.archiveProject(project.id);
+    expect(() => app.addReposToProject(project.id, [], [{ provider: "gitlab", fullName: "team/api" }])).toThrow(
+      PlanningArchivedError,
+    );
+    expect(app.getProject(project.id).remotes).toEqual([{ provider: "github", fullName: "octo/widgets" }]);
+  });
+
+  it("arrives through migration 9 with nothing archived", () => {
+    const before = MIGRATIONS.slice(0, 8);
     expect(before.at(-1)?.name).toBe("planning repos");
     new PlanningStore(planningDbPath(), before);
     const db = new DatabaseSync(planningDbPath());
@@ -1049,8 +1125,10 @@ describe("epics", () => {
     expect(rollUpStatus(["done", "done"])).toBe("done");
   });
 
-  it("arrives through migration 9 without touching existing issues", () => {
-    new PlanningStore(planningDbPath(), MIGRATIONS.slice(0, 8));
+  it("arrives through migration 10 without touching existing issues", () => {
+    const before = MIGRATIONS.slice(0, 9);
+    expect(before.at(-1)?.name).toBe("archiving");
+    new PlanningStore(planningDbPath(), before);
     const db = new DatabaseSync(planningDbPath());
     db.exec("INSERT INTO planning_repos (slug, path, created_at, updated_at) VALUES ('api', 'api', '', '')");
     db.exec("INSERT INTO local_issues (repo_id, number, title, created_at, updated_at) VALUES (1, 1, 'Before epics', '', '')");

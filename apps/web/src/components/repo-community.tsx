@@ -7,10 +7,19 @@ import { TONE_CLASSES, missingItems, planningIssueDraft, scoreTone, type Communi
 import { formatAgo } from "#/lib/format";
 import { cn } from "#/lib/utils";
 import { useServerData } from "#/lib/use-server-data";
-import { getCommunityProfile, refreshCommunityProfile, type CommunityView } from "#/server/community";
+import {
+  getCommunityProfile,
+  getRemoteCommunityProfile,
+  refreshCommunityProfile,
+  refreshRemoteCommunityProfile,
+  type CommunityView,
+} from "#/server/community";
 import { createLocalIssue, getRepoLocalIssues, type LocalIssueView } from "#/server/planning";
 
 const loadCommunity = (relativePath: string) => getCommunityProfile({ data: { relativePath } });
+const refreshCommunity = (relativePath: string) => refreshCommunityProfile({ data: { relativePath } });
+const loadRemoteCommunity = (fullName: string) => getRemoteCommunityProfile({ data: { fullName } });
+const refreshRemoteCommunity = (fullName: string) => refreshRemoteCommunityProfile({ data: { fullName } });
 const communityFailed = (error: string): CommunityView => ({
   provider: null,
   slug: null,
@@ -117,25 +126,39 @@ function Item({ item, action }: { item: CommunityItem; action?: React.ReactNode 
   );
 }
 
-export function RepoCommunity({ relativePath, canPlan }: { relativePath: string; canPlan: boolean }) {
-  const loaded = useServerData(relativePath, loadCommunity, communityFailed);
-  // A profile fetched from GitHub on request; it replaces the stored one the tab opened with.
-  const [fresh, setFresh] = useState<{ path: string; view: CommunityView } | null>(null);
+type Draft = { title: string; body: string };
+
+/**
+ * One repository's community profile: the score, what is missing and what is in place, with a Refresh button.
+ * `id` names the repository to `load` and `askAgain`, which must be module-level functions (the profile is
+ * loaded again only when `id` changes). `action` puts something beside each missing item, such as a button.
+ */
+function CommunityPanel({
+  id,
+  load,
+  askAgain,
+  action,
+}: {
+  id: string;
+  load: (id: string) => Promise<CommunityView>;
+  askAgain: (id: string) => Promise<CommunityView>;
+  action?: (item: CommunityItem, draft: Draft) => React.ReactNode;
+}) {
+  const loaded = useServerData(id, load, communityFailed);
+  // A profile fetched from GitHub on request; it replaces the stored one the panel opened with.
+  const [fresh, setFresh] = useState<{ id: string; view: CommunityView } | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const existing = useServerData(relativePath, loadPlanned, () => []);
-  // Issues filed from this tab; the server copy above was read when the tab opened.
-  const [filed, setFiled] = useState<{ path: string; issues: LocalIssueView[] }>({ path: relativePath, issues: [] });
 
   if (loaded.status === "loading") return <p className="text-sm text-muted-foreground">Loading community profile…</p>;
 
-  const view = fresh?.path === relativePath ? fresh.view : loaded.value;
+  const view = fresh?.id === id ? fresh.view : loaded.value;
 
   async function refresh() {
     setRefreshing(true);
     try {
-      setFresh({ path: relativePath, view: await refreshCommunityProfile({ data: { relativePath } }) });
+      setFresh({ id, view: await askAgain(id) });
     } catch (caught) {
-      setFresh({ path: relativePath, view: communityFailed(caught instanceof Error ? caught.message : "Could not refresh the profile.") });
+      setFresh({ id, view: communityFailed(caught instanceof Error ? caught.message : "Could not refresh the profile.") });
     } finally {
       setRefreshing(false);
     }
@@ -184,8 +207,6 @@ export function RepoCommunity({ relativePath, canPlan }: { relativePath: string;
   const missing = missingItems(view.profile);
   const present = items.filter((item) => item.present);
   const tone = TONE_CLASSES[scoreTone(score)];
-  const planned = [...(filed.path === relativePath ? filed.issues : []), ...(existing.status === "done" ? existing.value : [])];
-  const plannedFor = (title: string) => planned.find((issue) => issue.state === "open" && issue.title === title);
 
   return (
     <section aria-label={`Community profile from ${provider.label}`}>
@@ -230,31 +251,13 @@ export function RepoCommunity({ relativePath, canPlan }: { relativePath: string;
         <>
           <h3 className="mt-4 text-xs font-medium tracking-wide text-muted-foreground uppercase">Missing ({missing.length})</h3>
           <ul className="divide-y" data-testid="community-missing">
-            {missing.map((item) => {
-              const draft = planningIssueDraft(item, { slug: view.slug!, score });
-              return (
-                <Item
-                  key={item.id}
-                  item={item}
-                  action={
-                    canPlan && existing.status === "done" ? (
-                      <PlanAction
-                        item={item}
-                        relativePath={relativePath}
-                        draft={draft}
-                        planned={plannedFor(draft.title)}
-                        onFiled={(issue) =>
-                          setFiled((prev) => ({
-                            path: relativePath,
-                            issues: [issue, ...(prev.path === relativePath ? prev.issues : [])],
-                          }))
-                        }
-                      />
-                    ) : null
-                  }
-                />
-              );
-            })}
+            {missing.map((item) => (
+              <Item
+                key={item.id}
+                item={item}
+                action={action?.(item, planningIssueDraft(item, { slug: view.slug!, score }))}
+              />
+            ))}
           </ul>
         </>
       ) : null}
@@ -279,4 +282,49 @@ export function RepoCommunity({ relativePath, canPlan }: { relativePath: string;
       </p>
     </section>
   );
+}
+
+/** A cloned repository's community profile, with a button to plan each missing item as a gitlib issue. */
+export function RepoCommunity({ relativePath, canPlan }: { relativePath: string; canPlan: boolean }) {
+  const existing = useServerData(relativePath, loadPlanned, () => []);
+  // Issues filed from this tab; the server copy above was read when the tab opened.
+  const [filed, setFiled] = useState<{ path: string; issues: LocalIssueView[] }>({ path: relativePath, issues: [] });
+
+  const planned = [...(filed.path === relativePath ? filed.issues : []), ...(existing.status === "done" ? existing.value : [])];
+  const plannedFor = (title: string) => planned.find((issue) => issue.state === "open" && issue.title === title);
+
+  return (
+    <CommunityPanel
+      id={relativePath}
+      load={loadCommunity}
+      askAgain={refreshCommunity}
+      action={
+        canPlan && existing.status === "done"
+          ? (item, draft) => (
+              <PlanAction
+                item={item}
+                relativePath={relativePath}
+                draft={draft}
+                planned={plannedFor(draft.title)}
+                onFiled={(issue) =>
+                  setFiled((prev) => ({
+                    path: relativePath,
+                    issues: [issue, ...(prev.path === relativePath ? prev.issues : [])],
+                  }))
+                }
+              />
+            )
+          : undefined
+      }
+    />
+  );
+}
+
+/**
+ * The community profile of a GitHub repository that is not cloned, by its `owner/repo`: how far it is from
+ * GitHub's recommended files, without cloning it first. There is no "Add to planning" here, since a planning
+ * issue belongs to a repository in the library.
+ */
+export function RemoteRepoCommunity({ fullName }: { fullName: string }) {
+  return <CommunityPanel id={fullName} load={loadRemoteCommunity} askAgain={refreshRemoteCommunity} />;
 }

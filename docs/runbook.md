@@ -140,8 +140,17 @@ git clone <remote> ...             # or rsync from your Mac, or mount NFS/SMB at
 Keep the **same folder layout as on your Mac** (`/srv/git/team/api` where it was `~/git/team/api`): notes and
 descriptions are tied to each repo's path *relative to the scan root*.
 
-The container reads them through a read-only mount as a non-root user, so they need to be world-readable
-(the default for normal clones). The image already tells git to trust the mount, so differing file owners are fine.
+The container sees this directory through a read-write bind mount as a non-root user (uid 1000). That is what lets
+**Clone locally** in the app put repositories here, on the server's disk rather than inside the container, so they
+survive `docker compose stop/start`, `down` and rebuilds. Two requirements:
+
+- The directory must exist and be **writable by uid 1000**. The first user on Ubuntu/Debian is uid 1000, so
+  `mkdir -p /srv/git` as that user is enough; otherwise run `sudo chown 1000:1000 /srv/git`. If you let Docker create
+  a missing directory it is owned by root and cloning fails with `Permission denied`.
+- Existing repositories only need to be readable. The image already tells git to trust the mount, so differing file
+  owners are fine.
+
+Repositories cloned from the app are owned by uid 1000 on the host.
 
 **4. Configure**
 
@@ -412,6 +421,7 @@ docker compose run --rm gitlib list       # one-off CLI command
 | `port is already allocated` / `address already in use`          | Something else uses the port. Set `GITLIB_PORT` (or `GITLIB_MEILI_PORT`) in `.env` to a free one. `npm run web` also refuses to start on a busy 4000.             |
 | No repositories listed                                          | `GITLIB_REPOS` (default `~/git`) is wrong, not shared with Docker Desktop, or empty. Check `docker compose exec web ls /home/node/git`. Press **Rescan** after fixing.              |
 | Repo pages show no GitHub data / community scores               | Add `GITLIB_GITHUB_TOKEN` to `.env` (anonymous GitHub limit is 60 requests/hour), then `docker compose up -d`. Confirm the repo has a GitHub `origin` remote. Scores are stored and refreshed daily; press **Refresh scores** to fetch now. |
+| No blue "needs `git pull`" dots, or a note says "Couldn't check N repositories for new upstream commits" | The server asks each repo's remote itself (`git ls-remote`), so the remote must be reachable from where it runs, with no prompt. In Docker that means public HTTPS remotes work, but SSH remotes (`git@github.com:…`) and private HTTPS ones fail unless you give the container keys or a credential helper. The note shows git's first error. Answers are cached for five minutes; press **Rescan** to check again. |
 | GitHub / GitLab tab is empty or says "isn't included"           | The Repositories page lists GitHub repos with `GITLIB_GITHUB_TOKEN` and GitLab projects with `GITLIB_GITLAB_TOKEN` (`read_api`; or `GITLIB_GITLAB_USERNAME` for public ones, plus `GITLIB_GITLAB_URL` if self-hosted). Add it to `.env`, run `docker compose up -d`, then press **Refresh**. A rejected token (401) is reported on the page, with the last stored list still shown. The lists are stored in the database and re-checked every `GITLIB_REPO_REFRESH_HOURS` (default 6). |
 | "Search falls back to substring matching"                       | Meilisearch is down or unreachable. `docker compose ps`, `docker compose logs meilisearch`. After changing `GITLIB_MEILI_API_KEY` run `docker compose up -d` so both containers get the new value. |
 | `meilisearch` unhealthy, logs say "database version (X) is incompatible with your current engine version (Y)" | The data volume was written by another Meilisearch version. Compose sets `MEILI_UPGRADE_DB` so this normally migrates itself; if the upgrade fails or you rolled the image back (downgrades are not supported), the index is derived, so reset it: `docker compose down && docker volume rm gitlib_meili-data && docker compose up -d`. Notes and settings in `gitlib-data` are not affected. |
@@ -419,4 +429,7 @@ docker compose run --rm gitlib list       # one-off CLI command
 | Ask panel says "Cannot reach Ollama at …"                       | Inside Docker `localhost` is the container. Set `GITLIB_OLLAMA_HOST` in `.env` to the Ollama machine's address, then `docker compose up -d`. On that machine Ollama must listen beyond loopback (`OLLAMA_HOST=0.0.0.0:11434`) and its firewall must allow the port. Test with `curl http://<host>:11434/api/version`. |
 | Ask panel is slow to answer, or the model reloads between questions | Ollama unloads an idle model after 5 minutes (`OLLAMA_KEEP_ALIVE` on that machine), and reloads it when a request changes the context size, so other tools using the same Ollama with a different context size cause reloads. Check what is loaded with `ollama ps` on that machine. |
 | `permission denied` writing to `/backups`                       | The backups directory is not writable by uid 1000: `sudo chown 1000:1000 "$GITLIB_BACKUPS"`.                                                                      |
+| **Clone locally** fails with `Read-only file system`            | The container still has the old read-only repos mount. Pull the current `docker-compose.yml` and run `docker compose up -d` to recreate it (a restart keeps the old mount). Check with `docker compose exec web touch /home/node/git/.w && docker compose exec web rm /home/node/git/.w`. |
+| **Clone locally** fails with `Permission denied`                | The host directory behind `GITLIB_REPOS` is not writable by uid 1000 (Docker creates a missing one as root). `sudo chown 1000:1000 "$GITLIB_REPOS"`, then try again. |
+| **Clone locally** fails with `could not read Username`          | The repository is private. Cloning uses its plain HTTPS URL with no credentials, so only public repos clone from the app. Clone private ones on the server yourself (`git clone` over SSH or with a credential helper) and press **Rescan**. |
 | Notes missing after moving to a new machine                     | The repos are at a different path under the scan root, or you restored from a non-Docker `~/.git-library` ([Developing](#2-developing)).                          |

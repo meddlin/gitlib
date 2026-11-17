@@ -3,7 +3,7 @@ import type { CatalogEntry } from "#/lib/catalog";
 import { isStale, refreshIntervalMs } from "#/lib/community";
 import { parseSnapshot, parseStoredSnapshot, serializeSnapshot, toSnapshotContext, type RepoSnapshot } from "#/lib/repo-snapshot";
 import { buildCatalog } from "./catalog.server";
-import { githubGet, type GitHubSource } from "./github.server";
+import { githubGet, sourceOf, type GitHubSource } from "./github.server";
 import { getApp } from "./gitlib.server";
 
 /** Where the chat gets GitHub-only repositories from; `handleChat` takes one so tests can supply their own. */
@@ -88,11 +88,6 @@ async function listedEntry(slug: string): Promise<(CatalogEntry & { github: NonN
   const { entries } = await buildCatalog();
   for (const entry of entries) if (entry.github?.listed && entry.github.fullName.toLowerCase() === wanted) return entry as CatalogEntry & { github: NonNullable<CatalogEntry["github"]> };
   return null;
-}
-
-export function sourceOf(fullName: string): GitHubSource | null {
-  const [owner, repo, ...rest] = fullName.split("/");
-  return owner && repo && rest.length === 0 ? { provider: "github", owner, repo, slug: fullName } : null;
 }
 
 /** What the model is told about a repository when the snapshot is missing or may be out of date. */

@@ -1,6 +1,7 @@
 import { Link, createFileRoute, notFound, useRouter } from "@tanstack/react-router";
-import { Archive, ArchiveRestore, ArrowLeft, CircleCheck, CircleDot, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeft, CircleCheck, CircleDot, ExternalLink, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
+import { AddReposDialog } from "#/components/add-repos-dialog";
 import { DeleteProjectDialog } from "#/components/delete-project-dialog";
 import { EpicList } from "#/components/epic-list";
 import { MilestoneCards } from "#/components/milestone-cards";
@@ -15,8 +16,9 @@ import { statusLabel } from "#/lib/issue-status";
 import { setIssueEpic } from "#/server/epics";
 import { setIssueMilestone } from "#/server/milestones";
 import {
-  addProjectRepo,
+  addProjectRepos,
   getProjectDetail,
+  removeProjectRemote,
   removeProjectRepo,
   setIssueProject,
   setProjectArchived,
@@ -87,6 +89,8 @@ function ProjectDetailPage() {
   const editable = !project.archived;
   const activeMilestones = project.milestones.filter((milestone) => !milestone.archived);
   const activeEpics = project.epics.filter((epic) => !epic.archived);
+  const repoTotal = project.repos.length + project.remotes.length;
+  const canAddRepos = project.availableRepos.length + project.availableRemotes.length > 0;
 
   // Without milestones the issues are one plain list. With them, each milestone gets a heading so it is clear
   // which issues count toward which, and issues in none come last. Archived milestones keep their issues, so
@@ -178,7 +182,7 @@ function ProjectDetailPage() {
       >
         <TabsList aria-label="Project sections">
           <TabsTrigger value="repositories">
-            Repositories <span className="font-normal text-muted-foreground">{project.repos.length}</span>
+            Repositories <span className="font-normal text-muted-foreground">{repoTotal}</span>
           </TabsTrigger>
           <TabsTrigger value="issues">
             Gitlib issues <span className="font-normal text-muted-foreground">{project.issues.length}</span>
@@ -193,27 +197,21 @@ function ProjectDetailPage() {
           <section aria-labelledby="project-repos" className="grid gap-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <h2 id="project-repos" className="text-lg font-semibold">
-                Repositories <span className="text-sm font-normal text-muted-foreground">{project.repos.length}</span>
+                Repositories <span className="text-sm font-normal text-muted-foreground">{repoTotal}</span>
               </h2>
-              {editable && project.availableRepos.length > 0 ? (
-                <SearchSelect
-                  aria-label="Add a repository"
-                  placeholder="Add a repository…"
-                  searchPlaceholder="Search repositories…"
-                  emptyText="No matching repositories."
-                  disabled={busy}
-                  options={project.availableRepos.map((repo) => ({
-                    value: repo.relativePath,
-                    label: repo.relativePath,
-                  }))}
-                  onSelect={(repo) =>
-                    void run(() => addProjectRepo({ data: { id: project.id, repo } }), "Could not add the repository.")
-                  }
-                  className="sm:w-72"
-                />
+              {editable && canAddRepos ? (
+                <AddReposDialog
+                  projectId={project.id}
+                  localRepos={project.availableRepos}
+                  remoteRepos={project.availableRemotes}
+                >
+                  <Button variant="outline" disabled={busy}>
+                    <Plus aria-hidden /> Add repositories
+                  </Button>
+                </AddReposDialog>
               ) : null}
             </div>
-            {project.repos.length === 0 ? (
+            {repoTotal === 0 ? (
               <p className="border-y py-6 text-center text-sm text-muted-foreground">
                 No repositories in this project yet.
               </p>
@@ -257,6 +255,55 @@ function ProjectDetailPage() {
                     </Button>
                   </li>
                 ))}
+                {project.remotes.map((remote) => {
+                  const host = remote.provider === "github" ? "GitHub" : "GitLab";
+                  return (
+                    <li key={`${remote.provider}:${remote.fullName}`} className="flex items-center gap-3 py-2.5">
+                      <div className="min-w-0 flex-1">
+                        {remote.clonedAs ? (
+                          <Link
+                            to="/repos/$"
+                            params={{ _splat: remote.clonedAs }}
+                            className="font-mono text-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                          >
+                            {remote.fullName}
+                          </Link>
+                        ) : remote.url ? (
+                          <a
+                            href={remote.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 font-mono text-sm outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                          >
+                            {remote.fullName} <ExternalLink className="size-3" aria-label={`Open on ${host}`} />
+                          </a>
+                        ) : (
+                          <span className="font-mono text-sm">{remote.fullName}</span>
+                        )}
+                        <p className="text-xs text-muted-foreground">
+                          {host} · {remote.clonedAs ? `cloned as ${remote.clonedAs}` : "not cloned"}
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`Remove ${remote.fullName} from this project`}
+                        disabled={busy}
+                        onClick={() =>
+                          void run(
+                            () =>
+                              removeProjectRemote({
+                                data: { id: project.id, provider: remote.provider, fullName: remote.fullName },
+                              }),
+                            "Could not remove the repository.",
+                          )
+                        }
+                      >
+                        <X aria-hidden />
+                      </Button>
+                    </li>
+                  );
+                })}
               </ul>
             )}
             {project.removedRepos.length > 0 ? (
@@ -283,7 +330,7 @@ function ProjectDetailPage() {
                           disabled={busy}
                           onClick={() =>
                             void run(
-                              () => addProjectRepo({ data: { id: project.id, repo: repo.relativePath } }),
+                              () => addProjectRepos({ data: { id: project.id, repos: [repo.relativePath], remotes: [] } }),
                               "Could not add the repository back.",
                             )
                           }
@@ -463,7 +510,13 @@ function ProjectDetailPage() {
         </TabsContent>
 
         <TabsContent value="github">
-          <ProjectGitHubPreview projectId={project.id} repoPaths={project.repos.map((repo) => repo.relativePath)} />
+          <ProjectGitHubPreview
+            projectId={project.id}
+            repoPaths={[
+              ...project.repos.map((repo) => repo.relativePath),
+              ...project.remotes.filter((remote) => remote.provider === "github").map((remote) => remote.fullName),
+            ]}
+          />
         </TabsContent>
       </Tabs>
     </div>

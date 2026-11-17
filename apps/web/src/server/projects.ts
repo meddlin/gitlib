@@ -1,5 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
-import { MAX_PROJECT_NAME_LENGTH, type ProjectRepo, type RepoRecord } from "@gitlib/core";
+import { MAX_PROJECT_NAME_LENGTH, type ProjectRemote, type ProjectRepo, type RepoRecord } from "@gitlib/core";
+import type { CatalogEntry, RemoteProvider } from "#/lib/catalog";
+import { buildCatalog } from "./catalog.server";
 import { getApp, loadRepositories } from "./gitlib.server";
 import type { EpicLimits, EpicView } from "./epics";
 import { epicLimits, epicViews } from "./epics.server";
@@ -18,6 +20,23 @@ export interface ProjectRepoView {
   known: boolean;
   /** The repo itself is archived in planning, so its issues are hidden from the planning lists. */
   archived: boolean;
+}
+
+/** A hosted repo a project holds, whether or not it is cloned. */
+export interface ProjectRemoteView {
+  provider: RemoteProvider;
+  fullName: string;
+  /** Its page on the host, when gitlib can tell where that is. */
+  url: string | null;
+  /** `relativePath` of a local clone, once the repo has been cloned. */
+  clonedAs: string | null;
+}
+
+/** A hosted repo that no local clone covers and the project does not hold yet. */
+export interface AvailableRemote {
+  provider: RemoteProvider;
+  fullName: string;
+  description: string;
 }
 
 export interface ProjectSummary {
@@ -42,8 +61,12 @@ export interface ProjectDetail {
   repos: ProjectRepoView[];
   /** Repos taken out of the project. Their issues stay filed under it; adding a repo again brings it back. */
   removedRepos: ProjectRepoView[];
+  /** Hosted repos added without a local clone. */
+  remotes: ProjectRemoteView[];
   /** Known repos not yet in the project. */
   availableRepos: PlanningRepoOption[];
+  /** Repos GitHub or GitLab list that are not cloned and not yet in the project. */
+  availableRemotes: AvailableRemote[];
   issues: LocalIssueView[];
   /** Issues in no project, which can be added. */
   unassignedIssues: LocalIssueView[];
@@ -82,7 +105,7 @@ export const getProjects = createServerFn({ method: "GET" }).handler(async (): P
         id: project.id,
         name: project.name,
         archived: project.archivedAt !== null,
-        repoCount: project.repoPaths.length,
+        repoCount: project.repoPaths.length + project.remotes.length,
         issueCount: inProject.length,
         openIssueCount: inProject.filter((issue) => issue.state === "open").length,
       };
@@ -94,6 +117,23 @@ export const getProjects = createServerFn({ method: "GET" }).handler(async (): P
 export const getProjectOptions = createServerFn({ method: "GET" }).handler(
   async (): Promise<ProjectOption[]> => getApp().listProjects().map(({ id, name }) => ({ id, name })),
 );
+
+const PROVIDERS: readonly RemoteProvider[] = ["github", "gitlab"];
+
+const sameRemote = (a: ProjectRemote, b: ProjectRemote): boolean =>
+  a.provider === b.provider && a.fullName.toLowerCase() === b.fullName.toLowerCase();
+
+/** The catalog is a convenience here: when it cannot be built the project page still works, without hosted repos. */
+async function catalogEntries(): Promise<CatalogEntry[]> {
+  try {
+    return (await buildCatalog()).entries;
+  } catch {
+    return [];
+  }
+}
+
+const hostedBy = (entry: CatalogEntry, remote: ProjectRemote) =>
+  entry[remote.provider]?.fullName.toLowerCase() === remote.fullName.toLowerCase();
 
 export const getProjectDetail = createServerFn({ method: "GET" })
   .validator((input: { id: number }) => {
@@ -107,12 +147,31 @@ export const getProjectDetail = createServerFn({ method: "GET" })
     const repos = loadRepositories();
     // The project page shows everything filed under it, including issues of archived repos (labelled as such).
     const issues = app.listLocalIssues({ includeArchived: true });
+    const entries = await catalogEntries();
+    const availableRemotes: AvailableRemote[] = [];
+    for (const entry of entries) {
+      if (entry.locals.length > 0) continue;
+      for (const provider of PROVIDERS) {
+        const link = entry[provider];
+        if (!link?.listed || project.remotes.some((held) => sameRemote(held, { provider, fullName: link.fullName }))) continue;
+        availableRemotes.push({ provider, fullName: link.fullName, description: entry.description });
+      }
+    }
     return {
       id: project.id,
       name: project.name,
       archived: project.archivedAt !== null,
       repos: project.repos.map((repo) => repoView(repo, repos)),
       removedRepos: project.removedRepos.map((repo) => repoView(repo, repos)),
+      remotes: project.remotes.map((remote) => {
+        const entry = entries.find((candidate) => hostedBy(candidate, remote));
+        return {
+          ...remote,
+          url: entry?.[remote.provider]?.url ?? (remote.provider === "github" ? `https://github.com/${remote.fullName}` : null),
+          clonedAs: entry?.locals[0] ?? null,
+        };
+      }),
+      availableRemotes,
       availableRepos: repos
         .filter((repo) => !repo.isWorktree && !project.repoPaths.includes(repo.relativePath))
         .map(({ relativePath, name }) => ({ relativePath, name })),
@@ -162,13 +221,47 @@ export const deleteProject = createServerFn({ method: "POST" })
     getApp().deleteProject(data.id);
   });
 
-export const addProjectRepo = createServerFn({ method: "POST" })
-  .validator((input: { id: number; repo: string }) => {
-    if (!isId(input?.id) || typeof input?.repo !== "string") throw new Error("Invalid project payload.");
+interface AddReposInput {
+  id: number;
+  /** `relativePath` of local clones. */
+  repos: string[];
+  remotes: ProjectRemote[];
+}
+
+/** Puts several repos in a project at once: local clones and hosted ones that are not cloned. */
+export const addProjectRepos = createServerFn({ method: "POST" })
+  .validator((input: AddReposInput) => {
+    const valid =
+      isId(input?.id) &&
+      Array.isArray(input.repos) &&
+      input.repos.every((repo) => typeof repo === "string") &&
+      Array.isArray(input.remotes) &&
+      input.remotes.every((remote) => PROVIDERS.includes(remote?.provider) && typeof remote?.fullName === "string");
+    if (!valid || input.repos.length + input.remotes.length === 0) throw new Error("Invalid project payload.");
     return input;
   })
   .handler(async ({ data }): Promise<void> => {
-    getApp().addRepoToProject(data.id, data.repo);
+    if (data.remotes.length > 0) {
+      // Only repos a host lists (or a clone's remote names) may be added, never an arbitrary name.
+      const entries = await catalogEntries();
+      for (const remote of data.remotes) {
+        if (!entries.some((entry) => hostedBy(entry, remote))) {
+          throw new Error(`Gitlib does not list ${remote.fullName} on ${remote.provider === "github" ? "GitHub" : "GitLab"}.`);
+        }
+      }
+    }
+    getApp().addReposToProject(data.id, data.repos, data.remotes);
+  });
+
+export const removeProjectRemote = createServerFn({ method: "POST" })
+  .validator((input: { id: number; provider: RemoteProvider; fullName: string }) => {
+    if (!isId(input?.id) || !PROVIDERS.includes(input?.provider) || typeof input?.fullName !== "string") {
+      throw new Error("Invalid project payload.");
+    }
+    return input;
+  })
+  .handler(async ({ data }): Promise<void> => {
+    getApp().removeRemoteFromProject(data.id, { provider: data.provider, fullName: data.fullName });
   });
 
 /** Archives (`archived: true`) or restores a project. */

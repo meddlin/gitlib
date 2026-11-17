@@ -1,10 +1,13 @@
 import { Link } from "@tanstack/react-router";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Star } from "lucide-react";
+import { useState } from "react";
+import { CommunityMeter, NOT_FAVORITED_HINT, describeScore } from "#/components/community-score";
 import { TechBadge } from "#/components/tech-badge";
 import { formatAgo } from "#/lib/format";
 import type { CatalogEntry, RemoteLink } from "#/lib/catalog";
 import { cn } from "#/lib/utils";
 import type { ProviderStatus } from "#/server/catalog";
+import type { CommunityScoresView } from "#/server/community";
 import type { RepoView } from "#/server/repos";
 
 const chip = "inline-flex h-5 items-center gap-1 border px-1.5 text-xs whitespace-nowrap";
@@ -38,6 +41,89 @@ function RemoteChip({ label, link, listed }: { label: string; link: RemoteLink |
   );
 }
 
+/** The star in front of a row. `onToggle` rejects when the server refuses, which the button just reports. */
+export function CatalogFavoriteButton({
+  name,
+  isFavorite,
+  onToggle,
+}: {
+  name: string;
+  isFavorite: boolean;
+  onToggle: (favorite: boolean) => Promise<unknown>;
+}) {
+  const [pending, setPending] = useState(false);
+
+  async function toggle() {
+    setPending(true);
+    try {
+      await onToggle(!isFavorite);
+    } catch {
+      // The star stays as it was; the next refresh shows what the server holds.
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      disabled={pending}
+      aria-pressed={isFavorite}
+      aria-label={`${isFavorite ? "Remove" : "Add"} ${name} ${isFavorite ? "from" : "to"} favorites`}
+      title={isFavorite ? "Remove from favorites" : "Add to favorites"}
+      className={cn(
+        "inline-flex size-7 items-center justify-center outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50",
+        isFavorite ? "text-amber-500" : "text-muted-foreground/50 hover:text-foreground",
+      )}
+    >
+      <Star className={cn("size-3.5", isFavorite && "fill-current")} aria-hidden />
+    </button>
+  );
+}
+
+/** What `setCatalogEntryFavorite` needs to name the entry: a clone if there is one, else its host. */
+export function favoriteTarget(entry: CatalogEntry) {
+  const local = entry.locals[0];
+  if (local) return { relativePath: local };
+  if (entry.github) return { provider: "github" as const, fullName: entry.github.fullName };
+  if (entry.gitlab) return { provider: "gitlab" as const, fullName: entry.gitlab.fullName };
+  return null;
+}
+
+/**
+ * GitHub's community score for a row, from what gitlib has stored: cloned or not, since the score belongs to the
+ * GitHub repository. A dash says why when the Settings page is the reason there isn't one.
+ */
+function CommunityCell({ entry, community }: { entry: CatalogEntry; community: CommunityScoresView | undefined }) {
+  const link = entry.github;
+  if (!link) return <span className="text-muted-foreground">—</span>;
+  if (!community) return <span aria-label="Loading community score">…</span>;
+
+  const found = community.bySlug[link.fullName.toLowerCase()];
+  if (!found) {
+    const outOfScope = community.scope === "favorites" && !entry.isFavorite;
+    return (
+      <span className="text-muted-foreground" title={outOfScope ? NOT_FAVORITED_HINT : "No score stored yet."}>
+        —
+      </span>
+    );
+  }
+
+  const { label, title } = describeScore(entry.name, found);
+  const className = "flex w-fit flex-col gap-1 outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring";
+  const local = entry.locals[0];
+  return local ? (
+    <Link to="/repos/$" params={{ _splat: local }} search={{ tab: "community" }} aria-label={label} title={title} className={className}>
+      <CommunityMeter entry={found} />
+    </Link>
+  ) : (
+    <Link to="/remotes/$provider/$" params={{ provider: "github", _splat: link.fullName }} aria-label={label} title={title} className={className}>
+      <CommunityMeter entry={found} />
+    </Link>
+  );
+}
+
 function flagsOf(entry: CatalogEntry): string[] {
   const links = [entry.github, entry.gitlab].filter((link): link is RemoteLink => link !== null);
   return [
@@ -56,22 +142,32 @@ export function CatalogTable({
   reposByPath,
   github,
   gitlab,
+  community,
+  onToggleFavorite,
 }: {
   entries: CatalogEntry[];
+  /** Stars or unstars the entry; the table shows the new state when `entries` changes. */
+  onToggleFavorite: (entry: CatalogEntry, favorite: boolean) => Promise<unknown>;
   /** Local repos by relativePath, for the stack detected in a clone. */
   reposByPath: ReadonlyMap<string, RepoView>;
   github: ProviderStatus | undefined;
   gitlab: ProviderStatus | undefined;
+  /** GitHub community scores; undefined while they are still loading. */
+  community: CommunityScoresView | undefined;
 }) {
   return (
     <div className="overflow-x-auto border-y">
-      <table className="w-full min-w-176 table-fixed border-collapse text-sm" data-testid="catalog-table">
+      <table className="w-full min-w-200 table-fixed border-collapse text-sm" data-testid="catalog-table">
         <thead className="border-b">
           <tr className="h-9 text-left text-xs font-medium tracking-wide text-muted-foreground uppercase">
-            <th scope="col" className="w-[28%] px-3">Repository</th>
-            <th scope="col" className="w-[28%] px-3">Description</th>
-            <th scope="col" className="w-[24%] px-3">Where</th>
+            <th scope="col" className="w-10 px-3">
+              <span className="sr-only">Favorite</span>
+            </th>
+            <th scope="col" className="w-[23%] px-3">Repository</th>
+            <th scope="col" className="w-[23%] px-3">Description</th>
+            <th scope="col" className="w-[19%] px-3">Where</th>
             <th scope="col" className="w-[10%] px-3">Stack</th>
+            <th scope="col" className="w-[12%] px-3" title="GitHub community profile score">Community</th>
             <th scope="col" className="w-[10%] px-3">Updated</th>
           </tr>
         </thead>
@@ -87,6 +183,13 @@ export function CatalogTable({
             const flags = flagsOf(entry);
             return (
               <tr key={entry.id} data-testid="catalog-row" className="align-top">
+                <td className="px-3 py-2">
+                  <CatalogFavoriteButton
+                    name={entry.name}
+                    isFavorite={entry.isFavorite}
+                    onToggle={(favorite) => onToggleFavorite(entry, favorite)}
+                  />
+                </td>
                 <td className="px-3 py-3">
                   {local ? (
                     <Link
@@ -157,6 +260,9 @@ export function CatalogTable({
                   ) : (
                     <span className="text-muted-foreground">—</span>
                   )}
+                </td>
+                <td className="px-3 py-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+                  <CommunityCell entry={entry} community={community} />
                 </td>
                 <td className="px-3 py-3 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
                   {entry.updatedAt ? formatAgo(entry.updatedAt) : "—"}

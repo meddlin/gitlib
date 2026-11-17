@@ -62,12 +62,16 @@ export interface LocalClone {
   relativePath: string;
   name: string;
   description: string;
+  /** Starred in gitlib's local table. */
+  isFavorite?: boolean;
   /** Preferred remote first; only the first remote per provider is used to link the clone. */
   remotes: LocalRemote[];
 }
 
 /** One repo's presence on one hosting service. */
 export interface RemoteLink {
+  /** `remoteKey` of the repo on this host; what a remote favorite is stored under. */
+  key: string;
   fullName: string;
   url: string;
   /** True when the provider's listing for the configured account contains it; false when only a clone's remote names it. */
@@ -88,9 +92,17 @@ export interface CatalogEntry {
   locals: string[];
   github: RemoteLink | null;
   gitlab: RemoteLink | null;
+  /**
+   * Starred. A cloned repo is starred through its clones (the same flag as the local table); a repo that only a
+   * host has is starred through its remote favorite.
+   */
+  isFavorite: boolean;
   updatedAt: string | null;
   language: string | null;
 }
+
+/** How a remote favorite is identified in the set `mergeCatalog` takes. */
+export const remoteFavoriteId = (provider: RemoteProvider, key: string): string => `${provider}:${key}`;
 
 /** `host/path`, lowercased and without a trailing `.git`: the identity two sources must share to be one repo. */
 export function remoteKey(host: string, path: string): string {
@@ -133,6 +145,7 @@ const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: tr
 
 function linkFromRemote(remote: RemoteRepo): RemoteLink {
   return {
+    key: remote.key,
     fullName: remote.fullName,
     url: remote.url,
     listed: true,
@@ -146,11 +159,14 @@ function linkFromRemote(remote: RemoteRepo): RemoteLink {
  * Joins local clones with the repos each hosting service lists. A clone belongs with the remote repos its
  * preferred GitHub and GitLab remotes name, and clones that share a remote repo collapse into one entry. Remote
  * repos nobody has cloned stand alone. Linked worktrees must be left out of `locals` by the caller.
+ * `remoteFavorites` holds `remoteFavoriteId`s; they star only entries with no clone, since a clone's own star wins.
+ * Starred entries come first.
  */
 export function mergeCatalog(
   locals: readonly LocalClone[],
   github: readonly RemoteRepo[],
   gitlab: readonly RemoteRepo[],
+  remoteFavorites: ReadonlySet<string> = new Set(),
 ): CatalogEntry[] {
   const remotes = new Map<string, RemoteRepo>();
   for (const remote of [...github, ...gitlab]) remotes.set(`${remote.provider}:${remote.key}`, remote);
@@ -199,6 +215,7 @@ export function mergeCatalog(
       const named = clones.map((clone) => cloneRemotes.get(`local:${clone.relativePath}`)?.[provider]).find(Boolean);
       if (named) {
         links[provider] = {
+          key: named.key,
           fullName: named.fullName,
           url: named.url,
           listed: false,
@@ -212,6 +229,13 @@ export function mergeCatalog(
     const primary = clones[0];
     const remote = listed.github ?? listed.gitlab;
     const hosted = links.github ?? links.gitlab;
+    const isFavorite =
+      clones.length > 0
+        ? clones.some((clone) => clone.isFavorite)
+        : (["github", "gitlab"] as const).some((provider) => {
+            const link = links[provider];
+            return link !== null && remoteFavorites.has(remoteFavoriteId(provider, link.key));
+          });
     entries.push({
       id: root,
       name: primary?.name ?? remote?.name ?? root,
@@ -220,12 +244,18 @@ export function mergeCatalog(
       locals: clones.map((clone) => clone.relativePath).sort(collator.compare),
       github: links.github,
       gitlab: links.gitlab,
+      isFavorite,
       updatedAt: [listed.github?.updatedAt, listed.gitlab?.updatedAt].filter(Boolean).sort().at(-1) ?? null,
       language: remote?.language ?? null,
     });
   }
 
-  return entries.sort((a, b) => collator.compare(a.fullName, b.fullName) || collator.compare(a.id, b.id));
+  return entries.sort(
+    (a, b) =>
+      Number(b.isFavorite) - Number(a.isFavorite) ||
+      collator.compare(a.fullName, b.fullName) ||
+      collator.compare(a.id, b.id),
+  );
 }
 
 export type CatalogSource = "combined" | "local" | "github" | "gitlab";

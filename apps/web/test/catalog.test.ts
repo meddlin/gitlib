@@ -7,6 +7,7 @@ import {
   mergeCatalog,
   parseLandingPage,
   parseStoredListing,
+  remoteFavoriteId,
   remoteKey,
   type LocalClone,
   type RemoteRepo,
@@ -154,6 +155,39 @@ describe("mergeCatalog", () => {
       [],
     );
     expect(entry!.github?.listed).toBe(true);
+  });
+});
+
+describe("favorites", () => {
+  it("stars a repo that only a host has through its remote favorite, and lists starred repos first", () => {
+    const starred = github("me/zeta");
+    const entries = mergeCatalog([], [github("me/alpha"), starred], [], new Set([remoteFavoriteId("github", starred.key)]));
+    expect(entries.map((e) => [e.fullName, e.isFavorite])).toEqual([
+      ["me/zeta", true],
+      ["me/alpha", false],
+    ]);
+  });
+
+  it("matches a remote favorite on the provider as well as the key", () => {
+    const repo = gitlab("me/app");
+    const [entry] = mergeCatalog([], [], [repo], new Set([remoteFavoriteId("github", repo.key)]));
+    expect(entry!.isFavorite).toBe(false);
+    const [starred] = mergeCatalog([], [], [repo], new Set([remoteFavoriteId("gitlab", repo.key)]));
+    expect(starred!.isFavorite).toBe(true);
+  });
+
+  it("uses the clone's own star for a cloned repo and ignores a leftover remote favorite", () => {
+    const repo = github("me/app");
+    const favorites = new Set([remoteFavoriteId("github", repo.key)]);
+    const [plain] = mergeCatalog([clone("app", [remoteOf(repo)])], [repo], [], favorites);
+    expect(plain!.isFavorite).toBe(false);
+    const [starred] = mergeCatalog([{ ...clone("app", [remoteOf(repo)]), isFavorite: true }], [repo], []);
+    expect(starred!.isFavorite).toBe(true);
+  });
+
+  it("stars a repo with no host through its clone", () => {
+    const [entry] = mergeCatalog([{ ...clone("scratch"), isFavorite: true }], [], []);
+    expect(entry!.isFavorite).toBe(true);
   });
 });
 

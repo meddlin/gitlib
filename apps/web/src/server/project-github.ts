@@ -59,5 +59,8 @@ export const getProjectGitHub = createServerFn({ method: "GET" })
     loadRepositories();
     const project = getApp().planning.getProject(data.id);
     if (!project) throw new Error("Gitlib doesn't have that project.");
-    return readProjectGitHub(project.repoPaths, { refresh: data.refresh });
+    return readProjectGitHub(project.repoPaths, {
+      refresh: data.refresh,
+      remotes: project.remotes.filter((remote) => remote.provider === "github").map((remote) => remote.fullName),
+    });
   });

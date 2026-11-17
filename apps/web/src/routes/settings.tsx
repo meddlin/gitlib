@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Check } from "lucide-react";
 import { CloneDirectorySettings } from "#/components/clone-directory-settings";
+import { CommunityScoreSettings } from "#/components/community-score-settings";
 import { OllamaSettings } from "#/components/ollama-settings";
 import { cn } from "#/lib/utils";
 import { OPTIONAL_REPO_TABS, useRepoTabs } from "#/lib/repo-tabs";
@@ -64,6 +65,8 @@ function Settings() {
           ))}
         </ul>
       </section>
+
+      <CommunityScoreSettings />
 
       <CloneDirectorySettings />
 

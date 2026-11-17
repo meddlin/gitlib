@@ -120,6 +120,21 @@ export const MIGRATIONS: readonly Migration[] = [
   },
   {
     version: 7,
+    name: "project remote repos",
+    sql: `
+      -- A repo in a project that is hosted on GitHub or GitLab but not cloned here. full_name is as the host
+      -- writes it (owner/repo, or group/subgroup/project); the project keeps it whether or not it is cloned later.
+      CREATE TABLE project_remotes (
+        project_id INTEGER NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+        provider TEXT NOT NULL CHECK (provider IN ('github', 'gitlab')),
+        full_name TEXT NOT NULL COLLATE NOCASE,
+        added_at TEXT NOT NULL,
+        PRIMARY KEY (project_id, provider, full_name)
+      );
+    `,
+  },
+  {
+    version: 8,
     name: "planning repos",
     sql: `
       -- A repository as planning data knows it. id never changes, so issues and projects keep pointing at the
@@ -158,7 +173,7 @@ export const MIGRATIONS: readonly Migration[] = [
       DROP TABLE used_paths;
 
       -- Issues point at the planning repo instead of a path. RESTRICT: a repo with issues cannot be deleted.
-      CREATE TABLE local_issues_v7 (
+      CREATE TABLE local_issues_v8 (
         id INTEGER PRIMARY KEY,
         repo_id INTEGER NOT NULL REFERENCES planning_repos (id) ON DELETE RESTRICT,
         number INTEGER NOT NULL,
@@ -173,34 +188,34 @@ export const MIGRATIONS: readonly Migration[] = [
         closed_at TEXT,
         UNIQUE (repo_id, number)
       );
-      INSERT INTO local_issues_v7
+      INSERT INTO local_issues_v8
         (id, repo_id, number, title, body, state, status, project_id, milestone_id, created_at, updated_at, closed_at)
         SELECT issue.id, repo.id, issue.number, issue.title, issue.body, issue.state, issue.status, issue.project_id,
                issue.milestone_id, issue.created_at, issue.updated_at, issue.closed_at
         FROM local_issues issue JOIN planning_repos repo ON repo.path = issue.repo_path;
       DROP TABLE local_issues;
-      ALTER TABLE local_issues_v7 RENAME TO local_issues;
+      ALTER TABLE local_issues_v8 RENAME TO local_issues;
       CREATE INDEX local_issues_by_state ON local_issues (state, updated_at DESC);
       CREATE INDEX local_issues_by_status ON local_issues (status, updated_at DESC);
       CREATE INDEX local_issues_by_project ON local_issues (project_id);
       CREATE INDEX local_issues_by_milestone ON local_issues (milestone_id);
 
-      CREATE TABLE project_repos_v7 (
+      CREATE TABLE project_repos_v8 (
         project_id INTEGER NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
         repo_id INTEGER NOT NULL REFERENCES planning_repos (id) ON DELETE RESTRICT,
         added_at TEXT NOT NULL,
         PRIMARY KEY (project_id, repo_id)
       );
-      INSERT INTO project_repos_v7 (project_id, repo_id, added_at)
+      INSERT INTO project_repos_v8 (project_id, repo_id, added_at)
         SELECT member.project_id, repo.id, member.added_at
         FROM project_repos member JOIN planning_repos repo ON repo.path = member.repo_path;
       DROP TABLE project_repos;
-      ALTER TABLE project_repos_v7 RENAME TO project_repos;
+      ALTER TABLE project_repos_v8 RENAME TO project_repos;
       CREATE INDEX project_repos_by_repo ON project_repos (repo_id);
     `,
   },
   {
-    version: 8,
+    version: 9,
     name: "archiving",
     sql: `
       -- When the user put it away, or NULL while it is in use. Archiving hides without deleting: an archived
@@ -214,7 +229,7 @@ export const MIGRATIONS: readonly Migration[] = [
     `,
   },
   {
-    version: 9,
+    version: 10,
     name: "epics",
     sql: `
       -- A body of work within one project: what is being built, where a milestone is when. Epics and

@@ -83,6 +83,13 @@ export interface LocalIssueChanges {
   body?: string;
 }
 
+/** A repo hosted on GitHub or GitLab that a project holds without a local clone. */
+export interface ProjectRemote {
+  provider: "github" | "gitlab";
+  /** As the host writes it: `owner/repo`, or `group/subgroup/project` on GitLab. */
+  fullName: string;
+}
+
 /**
  * A repository as gitlib's planning data knows it. Issues and projects point at its `id`, which never
  * changes, so they follow the repo when it moves or is renamed on disk. It lives in `planning.db`
@@ -137,6 +144,8 @@ export interface Project {
    * its issues stay filed under the project; adding the repo again restores it.
    */
   removedRepos: ProjectRepo[];
+  /** Hosted repos added without a clone, sorted by provider then name. */
+  remotes: ProjectRemote[];
   /** When the user archived the project, or null. An archived project hides its issues from the default lists. */
   archivedAt: string | null;
   createdAt: string;

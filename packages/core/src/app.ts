@@ -49,6 +49,7 @@ import {
   normalizeMilestoneTitle,
   normalizeProjectName,
   normalizeRepoSlug,
+  normalizeProjectRemote,
   MilestoneNotFoundError,
   EpicNotFoundError,
   normalizeEpicDescription,
@@ -66,6 +67,7 @@ import {
   type PlanningRepo,
   type PlanningRepoStatus,
   type Project,
+  type ProjectRemote,
   type IssueStatus,
   type LocalIssue,
   type LocalIssueChanges,
@@ -372,7 +374,13 @@ export class GitLibApp {
         "Checking Dependabot pull requests needs a GitHub token: set GITLIB_GITHUB_TOKEN or GITHUB_TOKEN.",
       );
     }
-    return checkDependabot({ repositories: this.loadRepositories(), backend: this.dependabot, system: this.system, ...options });
+    return checkDependabot({
+      repositories: this.loadRepositories(),
+      remoteFavorites: this.store.listRemoteFavorites(),
+      backend: this.dependabot,
+      system: this.system,
+      ...options,
+    });
   }
 
   /**
@@ -621,6 +629,27 @@ export class GitLibApp {
     const project = this.planning.addRepoToProject(id, repo.relativePath, utcNow());
     this.fingerprint(this.planning.ensureRepoAt(repo.relativePath, utcNow()), repo);
     return project;
+  }
+
+  /**
+   * Puts several repos into a project at once: clones gitlib has scanned (by selector) and hosted repos that are not
+   * cloned. Nothing is added unless every clone resolves. Repos already in the project are skipped.
+   */
+  addReposToProject(id: number, selectors: readonly string[], remotes: readonly ProjectRemote[] = []): Project {
+    const records = selectors.map((selector) => this.store.resolveRepository(selector));
+    const project = this.planning.addReposToProject(
+      id,
+      records.map((record) => record.relativePath),
+      remotes.map(normalizeProjectRemote),
+      utcNow(),
+    );
+    for (const record of records) this.fingerprint(this.planning.ensureRepoAt(record.relativePath, utcNow()), record);
+    return project;
+  }
+
+  /** Takes a hosted repo that was added without a clone out of a project. */
+  removeRemoteFromProject(id: number, remote: ProjectRemote): Project {
+    return this.planning.removeRemoteFromProject(id, normalizeProjectRemote(remote), utcNow());
   }
 
   /**
