@@ -50,6 +50,12 @@ import {
   normalizeProjectName,
   normalizeRepoSlug,
   MilestoneNotFoundError,
+  EpicNotFoundError,
+  normalizeEpicDescription,
+  normalizeEpicTitle,
+  type Epic,
+  type EpicChanges,
+  type NewEpic,
   AmbiguousPlanningRepoError,
   PlanningRepoNotFoundError,
   ProjectNotFoundError,
@@ -690,6 +696,53 @@ export class GitLibApp {
   /** Puts an issue in a milestone of its project, or pass `null` to take it out. */
   setLocalIssueMilestone(id: number, milestoneId: number | null): LocalIssue {
     return this.planning.setIssueMilestone(id, milestoneId, utcNow());
+  }
+
+  /** Puts an issue in an epic of its project, or pass `null` to take it out. */
+  setLocalIssueEpic(id: number, epicId: number | null): LocalIssue {
+    return this.planning.setIssueEpic(id, epicId, utcNow());
+  }
+
+  /** Epics of one project, or of every project when `projectId` is omitted; archived ones only with `includeArchived`. */
+  listEpics(projectId?: number, filter: ArchiveFilter = {}): Epic[] {
+    return this.planning.listEpics(projectId, filter);
+  }
+
+  getEpic(id: number): Epic {
+    const epic = this.planning.getEpic(id);
+    if (!epic) throw new EpicNotFoundError(`Epic ${id} was not found.`);
+    return epic;
+  }
+
+  createEpic(projectId: number, input: NewEpic): Epic {
+    return this.planning.createEpic(
+      projectId,
+      { title: normalizeEpicTitle(input.title), description: normalizeEpicDescription(input.description ?? "") },
+      utcNow(),
+    );
+  }
+
+  updateEpic(id: number, changes: EpicChanges): Epic {
+    const normalized: EpicChanges = {};
+    if (changes.title !== undefined) normalized.title = normalizeEpicTitle(changes.title);
+    if (changes.description !== undefined) normalized.description = normalizeEpicDescription(changes.description);
+    return this.planning.updateEpic(id, normalized, utcNow());
+  }
+
+  /** Removes the epic; its issues stay in the project. Archiving is the gentler way to put one away. */
+  deleteEpic(id: number): void {
+    this.planning.deleteEpic(id);
+  }
+
+  /** Puts an epic away. Its issues keep it; no other issue can join it until it is restored. */
+  archiveEpic(id: number): Epic {
+    this.planning.setArchived("epic", id, true, utcNow());
+    return this.getEpic(id);
+  }
+
+  restoreEpic(id: number): Epic {
+    this.planning.setArchived("epic", id, false, utcNow());
+    return this.getEpic(id);
   }
 
   /** Milestones of one project, or of every project when `projectId` is omitted; archived ones only with `includeArchived`. */

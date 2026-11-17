@@ -37,6 +37,11 @@ export interface LocalIssue {
    */
   milestoneId: number | null;
   /**
+   * The epic this issue is part of, or null. Like the milestone, it is always one of `projectId`'s epics, so
+   * moving the issue to another project clears it, and deleting the epic sets it back to null.
+   */
+  epicId: number | null;
+  /**
    * True when its repo or its project is archived. Such issues are left out of `listIssues` unless
    * `includeArchived` is set; the issue itself is untouched and comes back when the repo or project is restored.
    */
@@ -56,6 +61,8 @@ export interface LocalIssueQuery {
   projectId?: number;
   /** Only issues in this milestone. */
   milestoneId?: number;
+  /** Only issues in this epic. */
+  epicId?: number;
   /** Also list issues whose repo or project is archived (see `LocalIssue.archived`). */
   includeArchived?: boolean;
 }
@@ -150,6 +157,47 @@ export interface Milestone {
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * A body of work within a project, such as a feature: what is being built, where a milestone is when it is due.
+ * An issue can be in one epic and one milestone of its project, and an epic's issues can come from any of the
+ * project's repos. An epic has no status of its own; see `rollUpStatus`.
+ */
+export interface Epic {
+  id: number;
+  projectId: number;
+  /** Unique within the project, ignoring case. */
+  title: string;
+  /** Markdown. */
+  description: string;
+  /** When the user archived it, or null. Its issues keep it, but no issue can join it until it is restored. */
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewEpic {
+  title: string;
+  description?: string;
+}
+
+export interface EpicChanges {
+  title?: string;
+  description?: string;
+}
+
+/**
+ * Where a group of issues (an epic or a milestone) stands, worked out from its issues: `empty` with none,
+ * `done` when every one is done, `todo` while none has started, and `in_progress` otherwise.
+ */
+export type RollUpStatus = "empty" | "todo" | "in_progress" | "done";
+
+export function rollUpStatus(statuses: readonly IssueStatus[]): RollUpStatus {
+  if (statuses.length === 0) return "empty";
+  if (statuses.every((status) => status === "done")) return "done";
+  if (statuses.every((status) => status === "todo")) return "todo";
+  return "in_progress";
 }
 
 export interface NewMilestone {

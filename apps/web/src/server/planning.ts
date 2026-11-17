@@ -9,6 +9,7 @@ import {
   type RepoRecord,
 } from "@gitlib/core";
 import { getApp, loadRepositories } from "./gitlib.server";
+import type { EpicOption } from "./epics";
 import type { MilestoneOption } from "./milestones";
 
 /** An issue that lives in gitlib's own planning database; nothing here is read from or sent to a forge. */
@@ -46,6 +47,8 @@ export interface LocalIssueDetail {
   projects: { id: number; name: string }[];
   /** Milestones of the issue's project, which are the only ones it can be put in; empty when it has no project. */
   milestones: MilestoneOption[];
+  /** Epics of the issue's project, likewise. */
+  epics: EpicOption[];
 }
 
 // A function, not a constant: client bundles must not keep a runtime import of @gitlib/core.
@@ -104,6 +107,13 @@ export const getLocalIssue = createServerFn({ method: "GET" })
           : app
               .listMilestones(issue.projectId, { includeArchived: true })
               .filter((milestone) => milestone.archivedAt === null || milestone.id === issue.milestoneId)
+              .map(({ id, title, archivedAt }) => ({ id, title: archivedAt ? `${title} (archived)` : title })),
+      epics:
+        issue.projectId === null
+          ? []
+          : app
+              .listEpics(issue.projectId, { includeArchived: true })
+              .filter((epic) => epic.archivedAt === null || epic.id === issue.epicId)
               .map(({ id, title, archivedAt }) => ({ id, title: archivedAt ? `${title} (archived)` : title })),
     };
   });

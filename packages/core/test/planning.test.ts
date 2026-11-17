@@ -19,6 +19,10 @@ import {
   ProjectNotFoundError,
   ProjectValidationError,
   AmbiguousPlanningRepoError,
+  EpicNotFoundError,
+  EpicProjectMismatchError,
+  EpicTitleTakenError,
+  EpicValidationError,
   PlanningArchivedError,
   PlanningRepoNotFoundError,
   RepoNotFoundError,
@@ -26,6 +30,7 @@ import {
   RepoSlugTakenError,
   RepoSlugValidationError,
   createApplication,
+  rollUpStatus,
   loadConfig,
   type Migration,
 } from "../src/index.js";
@@ -920,5 +925,141 @@ describe("archiving", () => {
 
     expect(upgraded.listRepos()[0]?.archivedAt).toBeNull();
     expect(upgraded.listProjects()[0]).toMatchObject({ archivedAt: null, repoPaths: ["alpha"], removedRepos: [] });
+  });
+});
+
+describe("epics", () => {
+  beforeEach(() => {
+    fx.makeRepo("api");
+    fx.makeRepo("web");
+  });
+
+  const setup = () => {
+    const app = createApplication(fx.env());
+    app.refresh();
+    const project = app.createProject("Launch");
+    const file = (repo: string, title: string) => {
+      const issue = app.createLocalIssue(repo, { title });
+      return app.setLocalIssueProject(issue.id, project.id);
+    };
+    return { app, project, file };
+  };
+
+  it("creates, edits, lists and deletes epics within a project", () => {
+    const { app, project } = setup();
+
+    const epic = app.createEpic(project.id, { title: "  Auth rewrite  ", description: " Sign-in, tokens " });
+    expect(epic).toMatchObject({ projectId: project.id, title: "Auth rewrite", description: "Sign-in, tokens", archivedAt: null });
+    app.createEpic(project.id, { title: "Billing" });
+
+    expect(app.listEpics(project.id).map((e) => e.title)).toEqual(["Auth rewrite", "Billing"]);
+    expect(app.updateEpic(epic.id, { title: "Auth" })).toMatchObject({ title: "Auth", description: "Sign-in, tokens" });
+
+    app.deleteEpic(epic.id);
+    expect(app.listEpics(project.id).map((e) => e.title)).toEqual(["Billing"]);
+    expect(() => app.getEpic(epic.id)).toThrow(EpicNotFoundError);
+    expect(() => app.createEpic(999, { title: "x" })).toThrow(ProjectNotFoundError);
+  });
+
+  it("validates titles and keeps them unique per project, ignoring case", () => {
+    const { app, project } = setup();
+    app.createEpic(project.id, { title: "Auth" });
+
+    expect(() => app.createEpic(project.id, { title: "  " })).toThrow(EpicValidationError);
+    expect(() => app.createEpic(project.id, { title: "x".repeat(101) })).toThrow(EpicValidationError);
+    expect(() => app.createEpic(project.id, { title: "AUTH" })).toThrow(EpicTitleTakenError);
+    // Another project can reuse the title.
+    expect(app.createEpic(app.createProject("Other").id, { title: "Auth" }).title).toBe("Auth");
+  });
+
+  it("groups issues from several repos, alongside a milestone", () => {
+    const { app, project, file } = setup();
+    const epic = app.createEpic(project.id, { title: "Auth" });
+    const milestone = app.createMilestone(project.id, { title: "v1" });
+    const api = file("api", "Token endpoint");
+    const web = file("web", "Sign-in page");
+
+    app.setLocalIssueEpic(api.id, epic.id);
+    app.setLocalIssueEpic(web.id, epic.id);
+    // An epic and a milestone are independent: one issue can be in both.
+    app.setLocalIssueMilestone(web.id, milestone.id);
+
+    expect(app.listLocalIssues({ epicId: epic.id }).map((i) => i.repoPath).sort()).toEqual(["api", "web"]);
+    expect(app.getLocalIssue(web.id)).toMatchObject({ epicId: epic.id, milestoneId: milestone.id });
+    expect(app.getLocalIssue(api.id)).toMatchObject({ epicId: epic.id, milestoneId: null });
+  });
+
+  it("puts an issue only in an epic of its own project", () => {
+    const { app, file } = setup();
+    const other = app.createProject("Other");
+    const foreign = app.createEpic(other.id, { title: "Elsewhere" });
+    const issue = file("api", "Mine");
+    const loose = app.createLocalIssue("api", { title: "Loose" });
+
+    expect(() => app.setLocalIssueEpic(issue.id, foreign.id)).toThrow(EpicProjectMismatchError);
+    expect(() => app.setLocalIssueEpic(loose.id, foreign.id)).toThrow(EpicProjectMismatchError);
+    expect(() => app.setLocalIssueEpic(issue.id, 999)).toThrow(EpicNotFoundError);
+    expect(app.getLocalIssue(issue.id).epicId).toBeNull();
+  });
+
+  it("clears the epic when the issue changes project, and frees issues when the epic or project goes", () => {
+    const { app, project, file } = setup();
+    const epic = app.createEpic(project.id, { title: "Auth" });
+    const moved = file("api", "Moves");
+    const stays = file("web", "Stays");
+    for (const issue of [moved, stays]) app.setLocalIssueEpic(issue.id, epic.id);
+
+    expect(app.setLocalIssueProject(moved.id, app.createProject("Other").id).epicId).toBeNull();
+
+    app.deleteEpic(epic.id);
+    expect(app.getLocalIssue(stays.id)).toMatchObject({ projectId: project.id, epicId: null });
+
+    const again = app.createEpic(project.id, { title: "Again" });
+    app.setLocalIssueEpic(stays.id, again.id);
+    app.deleteProject(project.id);
+    expect(app.listEpics(undefined, { includeArchived: true }).some((e) => e.projectId === project.id)).toBe(false);
+    expect(app.getLocalIssue(stays.id)).toMatchObject({ projectId: null, epicId: null });
+  });
+
+  it("archives an epic: its issues keep it, but no other issue can join", () => {
+    const { app, project, file } = setup();
+    const epic = app.createEpic(project.id, { title: "Auth" });
+    const inside = file("api", "Inside");
+    const outside = file("web", "Outside");
+    app.setLocalIssueEpic(inside.id, epic.id);
+
+    app.archiveEpic(epic.id);
+
+    expect(app.listEpics(project.id)).toEqual([]);
+    expect(app.listEpics(project.id, { includeArchived: true }).map((e) => e.title)).toEqual(["Auth"]);
+    expect(app.getLocalIssue(inside.id).epicId).toBe(epic.id);
+    expect(() => app.setLocalIssueEpic(outside.id, epic.id)).toThrow(PlanningArchivedError);
+    expect(() => app.createEpic(app.archiveProject(project.id).id, { title: "Late" })).toThrow(PlanningArchivedError);
+
+    app.restoreProject(project.id);
+    app.restoreEpic(epic.id);
+    expect(app.setLocalIssueEpic(outside.id, epic.id).epicId).toBe(epic.id);
+  });
+
+  it("rolls issue statuses up into a status for the group", () => {
+    expect(rollUpStatus([])).toBe("empty");
+    expect(rollUpStatus(["todo", "todo"])).toBe("todo");
+    expect(rollUpStatus(["todo", "in_review"])).toBe("in_progress");
+    expect(rollUpStatus(["done", "todo"])).toBe("in_progress");
+    expect(rollUpStatus(["done", "done"])).toBe("done");
+  });
+
+  it("arrives through migration 9 without touching existing issues", () => {
+    new PlanningStore(planningDbPath(), MIGRATIONS.slice(0, 8));
+    const db = new DatabaseSync(planningDbPath());
+    db.exec("INSERT INTO planning_repos (slug, path, created_at, updated_at) VALUES ('api', 'api', '', '')");
+    db.exec("INSERT INTO local_issues (repo_id, number, title, created_at, updated_at) VALUES (1, 1, 'Before epics', '', '')");
+    db.close();
+
+    const upgraded = new PlanningStore(planningDbPath());
+
+    expect(upgraded.schemaVersion()).toBe(LATEST_SCHEMA_VERSION);
+    expect(upgraded.listIssues()).toEqual([expect.objectContaining({ title: "Before epics", epicId: null })]);
+    expect(upgraded.listEpics()).toEqual([]);
   });
 });

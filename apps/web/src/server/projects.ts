@@ -1,6 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
 import { MAX_PROJECT_NAME_LENGTH, type ProjectRepo, type RepoRecord } from "@gitlib/core";
 import { getApp, loadRepositories } from "./gitlib.server";
+import type { EpicLimits, EpicView } from "./epics";
+import { epicLimits, epicViews } from "./epics.server";
 import type { MilestoneLimits, MilestoneView } from "./milestones";
 import { milestoneLimits, milestoneViews } from "./milestones.server";
 import { toView, type LocalIssueView, type PlanningRepoOption } from "./planning";
@@ -48,6 +50,9 @@ export interface ProjectDetail {
   /** Soonest due date first, then milestones with no due date; archived ones included (see `MilestoneView.archived`). */
   milestones: MilestoneView[];
   milestoneLimits: MilestoneLimits;
+  /** By title; archived ones included (see `EpicView.archived`). */
+  epics: EpicView[];
+  epicLimits: EpicLimits;
   nameLimit: number;
 }
 
@@ -117,6 +122,8 @@ export const getProjectDetail = createServerFn({ method: "GET" })
         .map((issue) => toView(issue, repos)),
       milestones: milestoneViews(app.listMilestones(project.id, { includeArchived: true }), issues),
       milestoneLimits: milestoneLimits(),
+      epics: epicViews(app.listEpics(project.id, { includeArchived: true }), issues),
+      epicLimits: epicLimits(),
       nameLimit: nameLimit(),
     };
   });

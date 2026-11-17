@@ -7,6 +7,8 @@ import type {
   ArchiveFilter,
   DependabotDismissal,
   DependabotSchedule,
+  Epic,
+  EpicChanges,
   StoredDependabotSchedule,
   IssueStatus,
   LocalIssue,
@@ -44,7 +46,11 @@ export class AmbiguousPlanningRepoError extends GitLibError {}
 export class RepoSlugTakenError extends GitLibError {}
 /** A planning repo was pointed at a path another planning repo already has. */
 export class RepoPathTakenError extends GitLibError {}
-/** Something new was linked to an archived repo, project or milestone; restore it first. */
+export class EpicNotFoundError extends GitLibError {}
+export class EpicTitleTakenError extends GitLibError {}
+/** An issue was put in an epic that belongs to a different project than the issue's own. */
+export class EpicProjectMismatchError extends GitLibError {}
+/** Something new was linked to an archived repo, project, milestone or epic; restore it first. */
 export class PlanningArchivedError extends GitLibError {}
 
 interface LocalIssueRow {
@@ -59,6 +65,7 @@ interface LocalIssueRow {
   status: IssueStatus;
   project_id: number | null;
   milestone_id: number | null;
+  epic_id: number | null;
   archived: number;
   created_at: string;
   updated_at: string;
@@ -77,6 +84,7 @@ const toLocalIssue = (row: LocalIssueRow): LocalIssue => ({
   status: row.status,
   projectId: row.project_id === null || row.project_id === undefined ? null : Number(row.project_id),
   milestoneId: row.milestone_id === null || row.milestone_id === undefined ? null : Number(row.milestone_id),
+  epicId: row.epic_id === null || row.epic_id === undefined ? null : Number(row.epic_id),
   archived: Boolean(row.archived),
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -145,6 +153,26 @@ const toMilestone = (row: MilestoneRow): Milestone => ({
   updatedAt: row.updated_at,
 });
 
+interface EpicRow {
+  id: number;
+  project_id: number;
+  title: string;
+  description: string;
+  archived_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+const toEpic = (row: EpicRow): Epic => ({
+  id: Number(row.id),
+  projectId: Number(row.project_id),
+  title: row.title,
+  description: row.description,
+  archivedAt: row.archived_at || null,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
 interface ProjectRow {
   id: number;
   name: string;
@@ -176,6 +204,7 @@ const ARCHIVABLE = {
   repo: { table: "planning_repos", noun: "repo", name: "slug" },
   project: { table: "projects", noun: "project", name: "name" },
   milestone: { table: "milestones", noun: "milestone", name: "title" },
+  epic: { table: "epics", noun: "epic", name: "title" },
 } as const;
 export type Archivable = keyof typeof ARCHIVABLE;
 
@@ -270,6 +299,10 @@ export class PlanningStore {
       conditions.push("local_issues.milestone_id = ?");
       params.push(query.milestoneId);
     }
+    if (query.epicId !== undefined) {
+      conditions.push("local_issues.epic_id = ?");
+      params.push(query.epicId);
+    }
     if (!query.includeArchived) conditions.push(`NOT ${ISSUE_ARCHIVED}`);
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
@@ -329,15 +362,15 @@ export class PlanningStore {
   }
 
   /**
-   * Files an issue under a project, or takes it out of its project with `null`. A milestone belongs to
-   * one project, so changing the project takes the issue out of its milestone.
+   * Files an issue under a project, or takes it out of its project with `null`. Milestones and epics belong to
+   * one project, so changing the project takes the issue out of its milestone and its epic.
    */
   setIssueProject(id: number, projectId: number | null, now: string): LocalIssue {
     return this.transaction((db) => {
       const current = this.requireIssue(db, id);
       if (current.projectId === projectId) return current;
       if (projectId !== null) this.requireLive(db, "project", projectId, "file issues under it");
-      db.prepare("UPDATE local_issues SET project_id = ?, milestone_id = NULL, updated_at = ? WHERE id = ?").run(
+      db.prepare("UPDATE local_issues SET project_id = ?, milestone_id = NULL, epic_id = NULL, updated_at = ? WHERE id = ?").run(
         projectId,
         now,
         id,
@@ -365,6 +398,86 @@ export class PlanningStore {
       if (current.milestoneId === milestoneId) return current;
       db.prepare("UPDATE local_issues SET milestone_id = ?, updated_at = ? WHERE id = ?").run(milestoneId, now, id);
       return this.requireIssue(db, id);
+    });
+  }
+
+  /**
+   * Puts an issue in an epic, or takes it out with `null`. The epic must belong to the issue's project, so the
+   * issue has to be filed under that project first.
+   */
+  setIssueEpic(id: number, epicId: number | null, now: string): LocalIssue {
+    return this.transaction((db) => {
+      const current = this.requireIssue(db, id);
+      if (epicId !== null) {
+        const epic = this.requireEpic(db, epicId);
+        if (current.epicId !== epicId) this.requireLive(db, "epic", epicId, "put issues in it");
+        if (current.projectId !== epic.projectId) {
+          throw new EpicProjectMismatchError(
+            `Epic "${epic.title}" belongs to a different project. Put the issue in that project first.`,
+          );
+        }
+      }
+      if (current.epicId === epicId) return current;
+      db.prepare("UPDATE local_issues SET epic_id = ?, updated_at = ? WHERE id = ?").run(epicId, now, id);
+      return this.requireIssue(db, id);
+    });
+  }
+
+  createEpic(projectId: number, input: { title: string; description: string }, now: string): Epic {
+    return this.transaction((db) => {
+      this.requireLive(db, "project", projectId, "add epics to it");
+      try {
+        const { lastInsertRowid } = db
+          .prepare("INSERT INTO epics (project_id, title, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)")
+          .run(projectId, input.title, input.description, now, now);
+        return this.requireEpic(db, Number(lastInsertRowid));
+      } catch (error) {
+        throw this.epicTitleTaken(error, input.title);
+      }
+    });
+  }
+
+  getEpic(id: number): Epic | null {
+    return this.withConnection((db) => this.findEpic(db, id));
+  }
+
+  /** By title within each project. Leaves archived ones out unless asked. */
+  listEpics(projectId?: number, { includeArchived = false }: ArchiveFilter = {}): Epic[] {
+    return this.withConnection((db) => {
+      const conditions = [
+        ...(projectId === undefined ? [] : ["project_id = ?"]),
+        ...(includeArchived ? [] : ["archived_at IS NULL"]),
+      ];
+      const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+      const rows = db
+        .prepare(`SELECT * FROM epics ${where} ORDER BY project_id, title, id`)
+        .all(...(projectId === undefined ? [] : [projectId])) as unknown as EpicRow[];
+      return rows.map(toEpic);
+    });
+  }
+
+  updateEpic(id: number, changes: EpicChanges, now: string): Epic {
+    return this.transaction((db) => {
+      const current = this.requireEpic(db, id);
+      try {
+        db.prepare("UPDATE epics SET title = ?, description = ?, updated_at = ? WHERE id = ?").run(
+          changes.title ?? current.title,
+          changes.description ?? current.description,
+          now,
+          id,
+        );
+      } catch (error) {
+        throw this.epicTitleTaken(error, changes.title ?? current.title);
+      }
+      return this.requireEpic(db, id);
+    });
+  }
+
+  /** Removes the epic. Its issues stay in the project, no longer in any epic. */
+  deleteEpic(id: number): void {
+    this.transaction((db) => {
+      this.requireEpic(db, id);
+      db.prepare("DELETE FROM epics WHERE id = ?").run(id);
     });
   }
 
@@ -742,6 +855,7 @@ export class PlanningStore {
   private notFound(kind: Archivable, id: number): GitLibError {
     if (kind === "project") return new ProjectNotFoundError(`Project ${id} was not found.`);
     if (kind === "milestone") return new MilestoneNotFoundError(`Milestone ${id} was not found.`);
+    if (kind === "epic") return new EpicNotFoundError(`Epic ${id} was not found.`);
     return new PlanningRepoNotFoundError(`Repo ${id} is not in the planning data.`);
   }
 
@@ -789,6 +903,21 @@ export class PlanningStore {
     const milestone = this.findMilestone(db, id);
     if (!milestone) throw new MilestoneNotFoundError(`Milestone ${id} was not found.`);
     return milestone;
+  }
+
+  private findEpic(db: DatabaseSync, id: number): Epic | null {
+    const row = db.prepare("SELECT * FROM epics WHERE id = ?").get(id) as unknown as EpicRow | undefined;
+    return row ? toEpic(row) : null;
+  }
+
+  private requireEpic(db: DatabaseSync, id: number): Epic {
+    const epic = this.findEpic(db, id);
+    if (!epic) throw new EpicNotFoundError(`Epic ${id} was not found.`);
+    return epic;
+  }
+
+  private epicTitleTaken(error: unknown, title: string): unknown {
+    return isUniqueViolation(error) ? new EpicTitleTakenError(`This project already has an epic named "${title}".`) : error;
   }
 
   private titleTaken(error: unknown, title: string): unknown {

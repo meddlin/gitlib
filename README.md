@@ -272,11 +272,11 @@ them. Archiving puts something away, and **Restore** brings it back exactly as i
 - **An archived project** moves to the "Archived" section of the Projects page. Its issues leave the Planning list
   and board, and nothing new can be added to it: no repos, issues or milestones. Use **Archive** and **Restore** on
   the project page.
-- **An archived milestone** moves under the cards. Its issues keep it, but no other issue can join it.
+- **An archived milestone or epic** moves under the cards. Its issues keep it, but no other issue can join it.
 - **Taking a repo out of a project** archives the membership rather than deleting it. The repo is listed under
   "Removed" on the project page, its issues stay filed under the project, and **Add back** restores it.
 
-Deleting a project or milestone is still possible, and still only unlinks its issues, but archiving is the
+Deleting a project, milestone or epic is still possible, and still only unlinks its issues, but archiving is the
 normal way to put finished work away.
 
 ### Projects
@@ -294,6 +294,13 @@ several repos. A project page has two parts that are kept apart on purpose:
   milestone, and deleting a milestone leaves its issues in the project. A due date is a calendar day with no time
   zone, and a milestone is flagged overdue only while it still has open (or no) issues after that day. Deleting a
   project deletes its milestones.
+- **Epics** (the project page's **Epics** tab) are bodies of work, such as a feature: what is being built, where a
+  milestone is when it is due. An epic has a title and an optional Markdown description, and its issues can come
+  from any of the project's repos. Epics and milestones are independent, so an issue can be in one of each; pick an
+  issue's epic from its row on the project page or from the issue's own page. An epic's status (not started, in
+  progress, done) and its closed count come from its issues. As with milestones, an issue can only be in an epic of
+  its own project, moving it to another project takes it out of its epic, deleting an epic leaves its issues in the
+  project, and deleting a project deletes its epics.
 - **On GitHub** is a read-only preview: for each repo in the project that has a GitHub remote it shows the open
   pull requests, open issues and the latest commits on the default branch. Every row links out to GitHub and is
   named `owner/repo#12`, so it cannot be mistaken for a gitlib issue (`name#3`). Gitlib never writes to GitHub

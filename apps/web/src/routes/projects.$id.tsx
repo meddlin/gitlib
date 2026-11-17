@@ -2,6 +2,7 @@ import { Link, createFileRoute, notFound, useRouter } from "@tanstack/react-rout
 import { Archive, ArchiveRestore, ArrowLeft, CircleCheck, CircleDot, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { DeleteProjectDialog } from "#/components/delete-project-dialog";
+import { EpicList } from "#/components/epic-list";
 import { MilestoneCards } from "#/components/milestone-cards";
 import { ProjectGitHubPreview } from "#/components/project-github-preview";
 import { ProjectNameDialog } from "#/components/project-name-dialog";
@@ -11,6 +12,7 @@ import { NativeSelect } from "#/components/ui/native-select";
 import { SearchSelect } from "#/components/ui/search-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
 import { statusLabel } from "#/lib/issue-status";
+import { setIssueEpic } from "#/server/epics";
 import { setIssueMilestone } from "#/server/milestones";
 import {
   addProjectRepo,
@@ -20,7 +22,7 @@ import {
   setProjectArchived,
 } from "#/server/projects";
 
-const TABS = ["repositories", "issues", "github"] as const;
+const TABS = ["repositories", "issues", "epics", "github"] as const;
 type ProjectTab = (typeof TABS)[number];
 
 export const Route = createFileRoute("/projects/$id")({
@@ -84,6 +86,7 @@ function ProjectDetailPage() {
   const self = { id: project.id, name: project.name };
   const editable = !project.archived;
   const activeMilestones = project.milestones.filter((milestone) => !milestone.archived);
+  const activeEpics = project.epics.filter((epic) => !epic.archived);
 
   // Without milestones the issues are one plain list. With them, each milestone gets a heading so it is clear
   // which issues count toward which, and issues in none come last. Archived milestones keep their issues, so
@@ -179,6 +182,9 @@ function ProjectDetailPage() {
           </TabsTrigger>
           <TabsTrigger value="issues">
             Gitlib issues <span className="font-normal text-muted-foreground">{project.issues.length}</span>
+          </TabsTrigger>
+          <TabsTrigger value="epics">
+            Epics <span className="font-normal text-muted-foreground">{activeEpics.length}</span>
           </TabsTrigger>
           <TabsTrigger value="github">GitHub</TabsTrigger>
         </TabsList>
@@ -370,6 +376,33 @@ function ProjectDetailPage() {
                                 {issue.archived && !project.archived ? " · repo archived" : ""}
                               </p>
                             </div>
+                            {activeEpics.length > 0 || issue.epicId !== null ? (
+                              <NativeSelect
+                                aria-label={`Epic for ${issue.title}`}
+                                value={issue.epicId ?? ""}
+                                disabled={busy}
+                                onChange={(event) =>
+                                  void run(
+                                    () =>
+                                      setIssueEpic({
+                                        data: { issueId: issue.id, epicId: event.target.value ? Number(event.target.value) : null },
+                                      }),
+                                    "Could not change the issue's epic.",
+                                  )
+                                }
+                                className="w-auto max-w-40"
+                              >
+                                <option value="">No epic</option>
+                                {/* Archived epics take no new issues, but the one an issue is already in stays listed. */}
+                                {project.epics
+                                  .filter((epic) => !epic.archived || epic.id === issue.epicId)
+                                  .map((epic) => (
+                                    <option key={epic.id} value={epic.id}>
+                                      {epic.archived ? `${epic.title} (archived)` : epic.title}
+                                    </option>
+                                  ))}
+                              </NativeSelect>
+                            ) : null}
                             {activeMilestones.length > 0 || issue.milestoneId !== null ? (
                               <NativeSelect
                                 aria-label={`Milestone for ${issue.title}`}
@@ -423,6 +456,10 @@ function ProjectDetailPage() {
               </div>
             )}
           </section>
+        </TabsContent>
+
+        <TabsContent value="epics">
+          <EpicList projectId={project.id} epics={project.epics} limits={project.epicLimits} readOnly={project.archived} />
         </TabsContent>
 
         <TabsContent value="github">

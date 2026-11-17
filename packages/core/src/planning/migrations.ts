@@ -213,6 +213,28 @@ export const MIGRATIONS: readonly Migration[] = [
       ALTER TABLE milestones ADD COLUMN archived_at TEXT;
     `,
   },
+  {
+    version: 9,
+    name: "epics",
+    sql: `
+      -- A body of work within one project: what is being built, where a milestone is when. Epics and
+      -- milestones are siblings, so an issue can be in one of each, and an epic's issues may come from any of
+      -- the project's repos. Deleting the project deletes its epics.
+      CREATE TABLE epics (
+        id INTEGER PRIMARY KEY,
+        project_id INTEGER NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+        title TEXT NOT NULL COLLATE NOCASE,
+        description TEXT NOT NULL DEFAULT '',
+        archived_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (project_id, title)
+      );
+      -- Deleting an epic takes its issues out of it; the issues stay.
+      ALTER TABLE local_issues ADD COLUMN epic_id INTEGER REFERENCES epics (id) ON DELETE SET NULL;
+      CREATE INDEX local_issues_by_epic ON local_issues (epic_id);
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;
