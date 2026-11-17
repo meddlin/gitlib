@@ -15,7 +15,9 @@ import type {
   Milestone,
   MilestoneChanges,
   NewLocalIssue,
+  PlanningRepo,
   Project,
+  ProjectRepo,
 } from "./types.js";
 
 // Loaded via getBuiltinModule for the same bundler reason as in store.ts.
@@ -35,9 +37,17 @@ export class MilestoneNotFoundError extends GitLibError {}
 export class MilestoneTitleTakenError extends GitLibError {}
 /** An issue was put in a milestone that belongs to a different project than the issue's own. */
 export class MilestoneProjectMismatchError extends GitLibError {}
+export class PlanningRepoNotFoundError extends GitLibError {}
+/** A name that is one planning repo's slug and another's path. */
+export class AmbiguousPlanningRepoError extends GitLibError {}
+export class RepoSlugTakenError extends GitLibError {}
+/** A planning repo was pointed at a path another planning repo already has. */
+export class RepoPathTakenError extends GitLibError {}
 
 interface LocalIssueRow {
   id: number;
+  repo_id: number;
+  repo_slug: string;
   repo_path: string;
   number: number;
   title: string;
@@ -53,6 +63,8 @@ interface LocalIssueRow {
 
 const toLocalIssue = (row: LocalIssueRow): LocalIssue => ({
   id: Number(row.id),
+  repoId: Number(row.repo_id),
+  repoSlug: row.repo_slug,
   repoPath: row.repo_path,
   number: Number(row.number),
   title: row.title,
@@ -65,6 +77,39 @@ const toLocalIssue = (row: LocalIssueRow): LocalIssue => ({
   updatedAt: row.updated_at,
   closedAt: row.closed_at || null,
 });
+
+/** Issues with their repo's current slug and path. */
+const ISSUE_SELECT = `
+  SELECT local_issues.*, planning_repos.slug AS repo_slug, planning_repos.path AS repo_path
+  FROM local_issues JOIN planning_repos ON planning_repos.id = local_issues.repo_id`;
+
+interface PlanningRepoRow {
+  id: number;
+  slug: string;
+  path: string;
+  root_commit: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+const toPlanningRepo = (row: PlanningRepoRow): PlanningRepo => ({
+  id: Number(row.id),
+  slug: row.slug,
+  path: row.path,
+  rootCommit: row.root_commit || null,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
+
+/** What a new planning repo is called: its folder name, with anything a slug cannot hold replaced. */
+const slugCandidates = function* (repoPath: string): Generator<string> {
+  const clean = (text: string) => text.replace(/[\s#]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 100);
+  const base = clean(repoPath.split("/").filter(Boolean).pop() ?? "") || "repo";
+  yield base;
+  const whole = clean(repoPath);
+  if (whole && whole !== base) yield whole;
+  for (let n = 2; ; n++) yield `${base}-${n}`;
+};
 
 interface MilestoneRow {
   id: number;
@@ -93,10 +138,11 @@ interface ProjectRow {
   updated_at: string;
 }
 
-const toProject = (row: ProjectRow, repoPaths: string[]): Project => ({
+const toProject = (row: ProjectRow, repos: ProjectRepo[]): Project => ({
   id: Number(row.id),
   name: row.name,
-  repoPaths,
+  repos,
+  repoPaths: repos.map((repo) => repo.path),
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -147,14 +193,16 @@ export class PlanningStore {
     return this.withConnection(schemaVersion);
   }
 
+  /** Files an issue against the repo at `input.repoPath`, creating its planning repo if this is the first time. */
   createIssue(input: NewLocalIssue, now: string): LocalIssue {
     return this.transaction((db) => {
+      const repo = this.ensureRepo(db, input.repoPath, now);
       const { lastInsertRowid } = db
         .prepare(
-          `INSERT INTO local_issues (repo_path, number, title, body, state, created_at, updated_at)
-           VALUES (?, (SELECT COALESCE(MAX(number), 0) + 1 FROM local_issues WHERE repo_path = ?), ?, ?, 'open', ?, ?)`,
+          `INSERT INTO local_issues (repo_id, number, title, body, state, created_at, updated_at)
+           VALUES (?, (SELECT COALESCE(MAX(number), 0) + 1 FROM local_issues WHERE repo_id = ?), ?, ?, 'open', ?, ?)`,
         )
-        .run(input.repoPath, input.repoPath, input.title, input.body, now, now);
+        .run(repo.id, repo.id, input.title, input.body, now, now);
       return this.requireIssue(db, Number(lastInsertRowid));
     });
   }
@@ -168,26 +216,30 @@ export class PlanningStore {
     const conditions: string[] = [];
     const params: (string | number)[] = [];
     if (query.repoPath !== undefined) {
-      conditions.push("repo_path = ?");
+      conditions.push("planning_repos.path = ?");
       params.push(query.repoPath);
     }
+    if (query.repoId !== undefined) {
+      conditions.push("local_issues.repo_id = ?");
+      params.push(query.repoId);
+    }
     if (query.state !== undefined) {
-      conditions.push("state = ?");
+      conditions.push("local_issues.state = ?");
       params.push(query.state);
     }
     if (query.projectId !== undefined) {
-      conditions.push("project_id = ?");
+      conditions.push("local_issues.project_id = ?");
       params.push(query.projectId);
     }
     if (query.milestoneId !== undefined) {
-      conditions.push("milestone_id = ?");
+      conditions.push("local_issues.milestone_id = ?");
       params.push(query.milestoneId);
     }
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
     return this.withConnection((db) => {
       const rows = db
-        .prepare(`SELECT * FROM local_issues ${where} ORDER BY updated_at DESC, id DESC`)
+        .prepare(`${ISSUE_SELECT} ${where} ORDER BY local_issues.updated_at DESC, local_issues.id DESC`)
         .all(...params) as unknown as LocalIssueRow[];
       return rows.map(toLocalIssue);
     });
@@ -357,14 +409,11 @@ export class PlanningStore {
   listProjects(): Project[] {
     return this.withConnection((db) => {
       const rows = db.prepare("SELECT * FROM projects ORDER BY name").all() as unknown as ProjectRow[];
-      const members = new Map<number, string[]>();
-      const memberRows = db
-        .prepare("SELECT project_id, repo_path FROM project_repos ORDER BY repo_path")
-        .all() as unknown as { project_id: number; repo_path: string }[];
-      for (const { project_id, repo_path } of memberRows) {
-        const list = members.get(Number(project_id)) ?? [];
-        list.push(repo_path);
-        members.set(Number(project_id), list);
+      const members = new Map<number, ProjectRepo[]>();
+      for (const { project_id, ...repo } of this.projectRepos(db)) {
+        const list = members.get(project_id) ?? [];
+        list.push(repo);
+        members.set(project_id, list);
       }
       return rows.map((row) => toProject(row, members.get(Number(row.id)) ?? []));
     });
@@ -390,25 +439,102 @@ export class PlanningStore {
     });
   }
 
+  /** Adds the repo at `repoPath`, creating its planning repo if this is the first time it is used. */
   addRepoToProject(id: number, repoPath: string, now: string): Project {
     return this.transaction((db) => {
       this.requireProject(db, id);
+      const repo = this.ensureRepo(db, repoPath, now);
       const { changes } = db
-        .prepare("INSERT OR IGNORE INTO project_repos (project_id, repo_path, added_at) VALUES (?, ?, ?)")
-        .run(id, repoPath, now);
+        .prepare("INSERT OR IGNORE INTO project_repos (project_id, repo_id, added_at) VALUES (?, ?, ?)")
+        .run(id, repo.id, now);
       if (Number(changes) > 0) db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(now, id);
       return this.requireProject(db, id);
     });
   }
 
-  removeRepoFromProject(id: number, repoPath: string, now: string): Project {
+  removeRepoFromProject(id: number, repoId: number, now: string): Project {
     return this.transaction((db) => {
       this.requireProject(db, id);
-      const { changes } = db
-        .prepare("DELETE FROM project_repos WHERE project_id = ? AND repo_path = ?")
-        .run(id, repoPath);
+      const { changes } = db.prepare("DELETE FROM project_repos WHERE project_id = ? AND repo_id = ?").run(id, repoId);
       if (Number(changes) > 0) db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(now, id);
       return this.requireProject(db, id);
+    });
+  }
+
+  /** Every planning repo, by slug. */
+  listRepos(): PlanningRepo[] {
+    return this.withConnection((db) =>
+      (db.prepare("SELECT * FROM planning_repos ORDER BY slug, id").all() as unknown as PlanningRepoRow[]).map(toPlanningRepo),
+    );
+  }
+
+  getRepo(id: number): PlanningRepo | null {
+    return this.withConnection((db) => this.findRepo(db, id));
+  }
+
+  /** The planning repo with this slug, ignoring case. */
+  findRepoBySlug(slug: string): PlanningRepo | null {
+    return this.withConnection((db) => {
+      const row = db.prepare("SELECT * FROM planning_repos WHERE slug = ?").get(slug) as unknown as PlanningRepoRow | undefined;
+      return row ? toPlanningRepo(row) : null;
+    });
+  }
+
+  /** The planning repo last found at this `relativePath`. */
+  findRepoByPath(repoPath: string): PlanningRepo | null {
+    return this.withConnection((db) => {
+      const row = db.prepare("SELECT * FROM planning_repos WHERE path = ?").get(repoPath) as unknown as PlanningRepoRow | undefined;
+      return row ? toPlanningRepo(row) : null;
+    });
+  }
+
+  /** The planning repo for the repo at `repoPath`, creating it if this is the first time it is used. */
+  ensureRepoAt(repoPath: string, now: string): PlanningRepo {
+    return this.transaction((db) => this.ensureRepo(db, repoPath, now));
+  }
+
+  /** Changes the short name issues are shown under. Their links are by id, so nothing else changes. */
+  renameRepo(id: number, slug: string, now: string): PlanningRepo {
+    return this.transaction((db) => {
+      this.requireRepo(db, id);
+      try {
+        db.prepare("UPDATE planning_repos SET slug = ?, updated_at = ? WHERE id = ?").run(slug, now, id);
+      } catch (error) {
+        throw isUniqueViolation(error) ? new RepoSlugTakenError(`Another repo is already called "${slug}".`) : error;
+      }
+      return this.requireRepo(db, id);
+    });
+  }
+
+  /**
+   * Points a planning repo at the path the repo now lives at, with its first commit if known. Its issues and
+   * project memberships follow it. Throws `RepoPathTakenError` if another planning repo has that path.
+   */
+  moveRepo(id: number, repoPath: string, rootCommit: string | null, now: string): PlanningRepo {
+    return this.transaction((db) => {
+      const current = this.requireRepo(db, id);
+      if (current.path === repoPath && (rootCommit === null || current.rootCommit === rootCommit)) return current;
+      try {
+        db.prepare("UPDATE planning_repos SET path = ?, root_commit = COALESCE(?, root_commit), updated_at = ? WHERE id = ?").run(
+          repoPath,
+          rootCommit,
+          now,
+          id,
+        );
+      } catch (error) {
+        if (!isUniqueViolation(error)) throw error;
+        const holder = db.prepare("SELECT slug FROM planning_repos WHERE path = ?").get(repoPath) as { slug: string } | undefined;
+        throw new RepoPathTakenError(`${repoPath} is already linked to the repo "${holder?.slug ?? repoPath}".`);
+      }
+      return this.requireRepo(db, id);
+    });
+  }
+
+  /** Records the repo's first commit, which is how it is recognized after a move. Not a user edit, so no timestamp. */
+  setRepoRootCommit(id: number, rootCommit: string): void {
+    this.transaction((db) => {
+      this.requireRepo(db, id);
+      db.prepare("UPDATE planning_repos SET root_commit = ? WHERE id = ?").run(rootCommit, id);
     });
   }
 
@@ -487,7 +613,7 @@ export class PlanningStore {
   }
 
   private findIssue(db: DatabaseSync, id: number): LocalIssue | null {
-    const row = db.prepare("SELECT * FROM local_issues WHERE id = ?").get(id) as unknown as
+    const row = db.prepare(`${ISSUE_SELECT} WHERE local_issues.id = ?`).get(id) as unknown as
       | LocalIssueRow
       | undefined;
     return row ? toLocalIssue(row) : null;
@@ -502,10 +628,49 @@ export class PlanningStore {
   private findProject(db: DatabaseSync, id: number): Project | null {
     const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(id) as unknown as ProjectRow | undefined;
     if (!row) return null;
-    const repos = db
-      .prepare("SELECT repo_path FROM project_repos WHERE project_id = ? ORDER BY repo_path")
-      .all(id) as unknown as { repo_path: string }[];
-    return toProject(row, repos.map((repo) => repo.repo_path));
+    return toProject(row, this.projectRepos(db, id).map(({ project_id: _, ...repo }) => repo));
+  }
+
+  /** Repo memberships of one project, or of all of them, sorted by path. */
+  private projectRepos(db: DatabaseSync, projectId?: number): (ProjectRepo & { project_id: number })[] {
+    const where = projectId === undefined ? "" : "WHERE member.project_id = ?";
+    const rows = db
+      .prepare(
+        `SELECT member.project_id, repo.id, repo.slug, repo.path
+         FROM project_repos member JOIN planning_repos repo ON repo.id = member.repo_id
+         ${where} ORDER BY repo.path`,
+      )
+      .all(...(projectId === undefined ? [] : [projectId])) as unknown as { project_id: number; id: number; slug: string; path: string }[];
+    return rows.map((row) => ({ project_id: Number(row.project_id), id: Number(row.id), slug: row.slug, path: row.path }));
+  }
+
+  private findRepo(db: DatabaseSync, id: number): PlanningRepo | null {
+    const row = db.prepare("SELECT * FROM planning_repos WHERE id = ?").get(id) as unknown as PlanningRepoRow | undefined;
+    return row ? toPlanningRepo(row) : null;
+  }
+
+  private requireRepo(db: DatabaseSync, id: number): PlanningRepo {
+    const repo = this.findRepo(db, id);
+    if (!repo) throw new PlanningRepoNotFoundError(`Repo ${id} is not in the planning data.`);
+    return repo;
+  }
+
+  /** The planning repo at `repoPath`, created (with a free slug) if there is none yet. */
+  private ensureRepo(db: DatabaseSync, repoPath: string, now: string): PlanningRepo {
+    const existing = db.prepare("SELECT * FROM planning_repos WHERE path = ?").get(repoPath) as unknown as PlanningRepoRow | undefined;
+    if (existing) return toPlanningRepo(existing);
+    const taken = db.prepare("SELECT 1 FROM planning_repos WHERE slug = ?");
+    let slug = "";
+    for (const candidate of slugCandidates(repoPath)) {
+      if (!taken.get(candidate)) {
+        slug = candidate;
+        break;
+      }
+    }
+    const { lastInsertRowid } = db
+      .prepare("INSERT INTO planning_repos (slug, path, created_at, updated_at) VALUES (?, ?, ?, ?)")
+      .run(slug, repoPath, now, now);
+    return this.requireRepo(db, Number(lastInsertRowid));
   }
 
   private requireProject(db: DatabaseSync, id: number): Project {

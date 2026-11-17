@@ -120,3 +120,27 @@ export function fakeSystem(overrides: {
     },
   };
 }
+
+/**
+ * Writes an issue straight into a planning database at schema 1–6, where issues held a repo path. The store
+ * only speaks the newest schema, so tests of older databases set them up this way. Returns the issue's id.
+ */
+export function insertLegacyIssue(
+  dbPath: string,
+  issue: { repoPath: string; title: string; number?: number; createdAt?: string },
+): number {
+  const { DatabaseSync } = process.getBuiltinModule("node:sqlite");
+  const db = new DatabaseSync(dbPath);
+  try {
+    const at = issue.createdAt ?? "2026-01-01T00:00:00+00:00";
+    const number =
+      issue.number ??
+      Number((db.prepare("SELECT COALESCE(MAX(number), 0) + 1 AS n FROM local_issues WHERE repo_path = ?").get(issue.repoPath) as { n: number }).n);
+    const { lastInsertRowid } = db
+      .prepare("INSERT INTO local_issues (repo_path, number, title, body, state, created_at, updated_at) VALUES (?, ?, ?, '', 'open', ?, ?)")
+      .run(issue.repoPath, number, issue.title, at, at);
+    return Number(lastInsertRowid);
+  } finally {
+    db.close();
+  }
+}

@@ -7,6 +7,7 @@ import {
   type ClassifiedPr,
   type DependabotDismissal,
   type DependabotReport,
+  type PlanningRepoStatus,
   type RepoRecord,
   type SearchField,
   type SearchHit,
@@ -60,6 +61,17 @@ export function renderTable(repositories: readonly RepoRecord[]): string {
     widths.map((width) => "-".repeat(width)).join("  "),
     ...rows.map(formatRow),
   ].join("\n");
+}
+
+export function renderPlanningRepos(repos: readonly PlanningRepoStatus[]): string {
+  if (repos.length === 0) return "No planning repos yet. One is added the first time an issue or project uses a repo.";
+
+  const headers = ["name", "path", "status"];
+  const rows = repos.map((repo) => [repo.slug, repo.path, repo.found ? "found" : "not found"]);
+  const widths = headers.map((header, index) => Math.max(header.length, ...rows.map((row) => row[index]!.length)));
+  const formatRow = (cells: string[]) => cells.map((cell, index) => cell.padEnd(widths[index]!)).join("  ").trimEnd();
+
+  return [formatRow(headers), widths.map((width) => "-".repeat(width)).join("  "), ...rows.map(formatRow)].join("\n");
 }
 
 export function renderDetail(repo: RepoRecord): string {

@@ -48,11 +48,16 @@ import {
   normalizeMilestoneDueDate,
   normalizeMilestoneTitle,
   normalizeProjectName,
+  normalizeRepoSlug,
   MilestoneNotFoundError,
+  AmbiguousPlanningRepoError,
+  PlanningRepoNotFoundError,
   ProjectNotFoundError,
   type Milestone,
   type MilestoneChanges,
   type NewMilestone,
+  type PlanningRepo,
+  type PlanningRepoStatus,
   type Project,
   type IssueStatus,
   type LocalIssue,
@@ -190,7 +195,71 @@ export class GitLibApp {
       this.store.replaceTechnologies(repoIds.get(key)!, technologies, seenAt);
     }
 
-    return this.store.listRepositories(false);
+    const repositories = this.store.listRepositories(false);
+    this.reconcilePlanningRepos(repositories);
+    return repositories;
+  }
+
+  /**
+   * Keeps planning repos pointed at their repos after a scan. A planning repo whose path is gone is relinked
+   * to the scanned repo with the same first commit, but only when that match is unambiguous: exactly one
+   * lost planning repo and exactly one unclaimed, non-worktree repo share it (forks and second clones share a
+   * first commit too). Anything else is left for `relinkPlanningRepo`.
+   */
+  private reconcilePlanningRepos(repositories: readonly RepoRecord[]): void {
+    const planned = this.planning.listRepos();
+    if (planned.length === 0) return;
+    const byPath = new Map(repositories.map((repo) => [repo.relativePath, repo]));
+
+    for (const repo of planned) {
+      const record = byPath.get(repo.path);
+      if (record && repo.rootCommit === null) this.fingerprint(repo, record);
+    }
+
+    const lost = planned.filter((repo) => !byPath.has(repo.path) && repo.rootCommit !== null);
+    if (lost.length === 0) return;
+
+    const claimed = new Set(planned.map((repo) => repo.path));
+    const found = new Map<string, RepoRecord[]>();
+    for (const record of repositories) {
+      if (record.isWorktree || claimed.has(record.relativePath)) continue;
+      const root = this.rootCommitOf(record);
+      if (root) found.set(root, [...(found.get(root) ?? []), record]);
+    }
+
+    const now = utcNow();
+    for (const repo of lost) {
+      const matches = found.get(repo.rootCommit!) ?? [];
+      const rivals = lost.filter((other) => other.rootCommit === repo.rootCommit);
+      if (matches.length === 1 && rivals.length === 1) this.planning.moveRepo(repo.id, matches[0]!.relativePath, null, now);
+    }
+  }
+
+  /**
+   * The repo's first commit (the lowest, if unrelated histories were merged), cached in gitlib.db because
+   * walking a long history is slow. Null when git cannot tell, e.g. a repo with no commits yet.
+   */
+  private rootCommitOf(record: RepoRecord): string | null {
+    const cached = this.store.rootCommit(record.id);
+    if (cached) return cached;
+    let result;
+    try {
+      result = this.system.runCommand(["git", "-C", record.absolutePath, "rev-list", "--max-parents=0", "HEAD"]);
+    } catch {
+      return null;
+    }
+    if (result.status !== 0) return null;
+    const root = result.stdout.split("\n").map((line) => line.trim()).filter((line) => /^[0-9a-f]{40,64}$/.test(line)).sort()[0];
+    if (!root) return null;
+    this.store.saveRootCommit(record.id, root);
+    return root;
+  }
+
+  /** Records the first commit of a planning repo that does not have one yet, so a later move can be followed. */
+  private fingerprint(repo: PlanningRepo, record: RepoRecord): void {
+    if (repo.rootCommit !== null) return;
+    const root = this.rootCommitOf(record);
+    if (root) this.planning.setRepoRootCommit(repo.id, root);
   }
 
   loadRepositories(): RepoRecord[] {
@@ -470,7 +539,9 @@ export class GitLibApp {
     const title = normalizeIssueTitle(input.title);
     const body = normalizeIssueBody(input.body ?? "");
     const repo = this.store.resolveRepository(selector);
-    return this.planning.createIssue({ repoPath: repo.relativePath, title, body }, utcNow());
+    const issue = this.planning.createIssue({ repoPath: repo.relativePath, title, body }, utcNow());
+    this.fingerprint(this.planning.getRepo(issue.repoId)!, repo);
+    return issue;
   }
 
   getLocalIssue(id: number): LocalIssue {
@@ -524,12 +595,58 @@ export class GitLibApp {
   /** Puts a repository gitlib has scanned into a project. A repo can belong to several projects. */
   addRepoToProject(id: number, selector: string): Project {
     const repo = this.store.resolveRepository(selector);
-    return this.planning.addRepoToProject(id, repo.relativePath, utcNow());
+    const project = this.planning.addRepoToProject(id, repo.relativePath, utcNow());
+    this.fingerprint(this.planning.ensureRepoAt(repo.relativePath, utcNow()), repo);
+    return project;
   }
 
-  /** Takes a repo out by its `relativePath`, which works even for a repo gitlib no longer finds. */
-  removeRepoFromProject(id: number, repoPath: string): Project {
-    return this.planning.removeRepoFromProject(id, repoPath, utcNow());
+  /**
+   * Takes a repo out by its planning repo id, short name or path, which works even for a repo gitlib no
+   * longer finds.
+   */
+  removeRepoFromProject(id: number, repo: string | number): Project {
+    this.getProject(id);
+    const repoId = typeof repo === "number" ? repo : this.resolvePlanningRepo(repo).id;
+    return this.planning.removeRepoFromProject(id, repoId, utcNow());
+  }
+
+  /** Every repo the planning data refers to, and whether the last scan found it where planning expects it. */
+  listPlanningRepos(): PlanningRepoStatus[] {
+    const present = new Set(this.loadRepositories().map((repo) => repo.relativePath));
+    return this.planning.listRepos().map((repo) => ({ ...repo, found: present.has(repo.path) }));
+  }
+
+  /**
+   * A planning repo by slug (ignoring case) or by the path it was last found at. Throws
+   * `AmbiguousPlanningRepoError` when the slug of one repo is the path of another.
+   */
+  resolvePlanningRepo(selector: string): PlanningRepo {
+    const normalized = selector.trim().replace(/^\.\/|\/+$/g, "");
+    const bySlug = this.planning.findRepoBySlug(normalized);
+    const byPath = this.planning.findRepoByPath(normalized);
+    if (bySlug && byPath && bySlug.id !== byPath.id) {
+      throw new AmbiguousPlanningRepoError(
+        `'${selector}' is the name of the repo at ${bySlug.path} and the path of the repo named ${byPath.slug}; use the other one's name or path.`,
+      );
+    }
+    const repo = bySlug ?? byPath;
+    if (!repo) throw new PlanningRepoNotFoundError(`No planning repo is called or found at '${selector}'.`);
+    return repo;
+  }
+
+  /** Changes the short name a repo's issues are shown under (`slug#3`). */
+  renamePlanningRepo(selector: string, slug: string): PlanningRepo {
+    return this.planning.renameRepo(this.resolvePlanningRepo(selector).id, normalizeRepoSlug(slug), utcNow());
+  }
+
+  /**
+   * Points a planning repo (by slug or old path) at a repo gitlib has scanned, for a move gitlib could not
+   * follow on its own. Its issues and project memberships go with it.
+   */
+  relinkPlanningRepo(selector: string, repoSelector: string): PlanningRepo {
+    const planned = this.resolvePlanningRepo(selector);
+    const record = this.store.resolveRepository(repoSelector);
+    return this.planning.moveRepo(planned.id, record.relativePath, this.rootCommitOf(record), utcNow());
   }
 
   /** Files an issue under a project, or pass `null` to take it out of its project. */

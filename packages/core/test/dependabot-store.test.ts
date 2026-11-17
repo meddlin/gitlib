@@ -19,7 +19,7 @@ import {
   type WatchedRepo,
 } from "../src/index.js";
 import { FakeBackend, commitMessage, pr } from "./dependabot-fixtures.js";
-import { Fixture } from "./fixture.js";
+import { Fixture, insertLegacyIssue } from "./fixture.js";
 
 let fx: Fixture;
 beforeEach(() => {
@@ -369,12 +369,12 @@ describe("dismissals", () => {
 
       const planningDb = path.join(fx.base, "planning.db");
       const old = new PlanningStore(planningDb, MIGRATIONS.slice(0, 3));
-      const issue = old.createIssue({ repoPath: "gitlib", title: "Keep me", body: "" }, "2026-11-01T00:00:00Z");
+      const issue = insertLegacyIssue(planningDb, { repoPath: "gitlib", title: "Keep me" });
       expect(old.schemaVersion()).toBe(3);
 
       const upgraded = new PlanningStore(planningDb);
       expect(upgraded.schemaVersion()).toBe(LATEST_SCHEMA_VERSION);
-      expect(upgraded.getIssue(issue.id)?.title).toBe("Keep me");
+      expect(upgraded.getIssue(issue)?.title).toBe("Keep me");
       upgraded.dismissDependabotPr("a/b", 1, null, "2026-11-02T00:00:00Z");
       expect(upgraded.listDependabotDismissals()).toHaveLength(1);
     });

@@ -13,7 +13,7 @@ import type { MilestoneOption } from "./milestones";
 
 /** An issue that lives in gitlib's own planning database; nothing here is read from or sent to a forge. */
 export interface LocalIssueView extends LocalIssue {
-  /** The repo's display name, or the last segment of its path when gitlib no longer knows the repo. */
+  /** The repo's short name in planning (`LocalIssue.repoSlug`), so the issue reads as `repoName#3`. */
   repoName: string;
   /** False when the repo has moved or been removed since the issue was filed. */
   repoKnown: boolean;
@@ -55,7 +55,7 @@ export function toView(issue: LocalIssue, repos: readonly RepoRecord[]): LocalIs
   const repo = repos.find((candidate) => candidate.relativePath === issue.repoPath);
   return {
     ...issue,
-    repoName: repo?.name ?? issue.repoPath.split("/").pop() ?? issue.repoPath,
+    repoName: issue.repoSlug,
     repoKnown: repo !== undefined,
   };
 }

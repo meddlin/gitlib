@@ -13,13 +13,13 @@ export const isIssueStatus = (value: unknown): value is IssueStatus =>
  */
 export interface LocalIssue {
   id: number;
-  /**
-   * The repo's `relativePath`, the same identifier the CLI and web app use. It is stored as text
-   * rather than a `gitlib.db` row id because that database can be rebuilt by rescanning and
-   * planning data cannot.
-   */
+  /** The planning repo it is filed against (see `PlanningRepo`); stays the same when the repo moves. */
+  repoId: number;
+  /** The repo's short name, so the issue reads as `slug#3`. */
+  repoSlug: string;
+  /** The repo's `relativePath` where gitlib last found it. Follows the repo when it moves. */
   repoPath: string;
-  /** Sequence within the repo, so issues read as `repo#3`. */
+  /** Sequence within the repo, so issues read as `slug#3`. */
   number: number;
   title: string;
   /** Markdown. */
@@ -42,8 +42,10 @@ export interface LocalIssue {
 }
 
 export interface LocalIssueQuery {
-  /** Only issues filed against this repo (its `relativePath`). */
+  /** Only issues filed against the repo now at this `relativePath`. */
   repoPath?: string;
+  /** Only issues filed against this planning repo. */
+  repoId?: number;
   state?: LocalIssueState;
   /** Only issues in this project. */
   projectId?: number;
@@ -63,13 +65,46 @@ export interface LocalIssueChanges {
 }
 
 /**
- * A named group of repositories and issues. Repos are referenced by `relativePath` (see
- * `LocalIssue.repoPath`), so a project can mention a repo gitlib has since lost track of.
+ * A repository as gitlib's planning data knows it. Issues and projects point at its `id`, which never
+ * changes, so they follow the repo when it moves or is renamed on disk. It lives in `planning.db`
+ * rather than `gitlib.db` because that database can be rebuilt by rescanning and planning data cannot.
+ * A planning repo is created the first time an issue or project refers to a repo.
+ */
+export interface PlanningRepo {
+  id: number;
+  /** Short name issues are shown under (`slug#3`). Unique, ignoring case; the user can change it. */
+  slug: string;
+  /** `relativePath` where gitlib last found the repo. */
+  path: string;
+  /** The repo's first commit, used to recognize it at a new path after a move; null until it is known. */
+  rootCommit: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A planning repo plus whether the last scan found it at `path`. */
+export interface PlanningRepoStatus extends PlanningRepo {
+  /** False when nothing is at `path` any more; its issues stay, and it can be relinked to the repo's new path. */
+  found: boolean;
+}
+
+/** A repo in a project, as listed on the project. */
+export interface ProjectRepo {
+  id: number;
+  slug: string;
+  path: string;
+}
+
+/**
+ * A named group of repositories and issues. Repos are planning repos (see `PlanningRepo`), so a project
+ * keeps a repo gitlib has since lost track of.
  */
 export interface Project {
   id: number;
   name: string;
-  /** `relativePath` of every repo in the project, sorted. */
+  /** Every repo in the project, sorted by path. */
+  repos: ProjectRepo[];
+  /** `relativePath` of every repo in the project, sorted; the same repos as `repos`. */
   repoPaths: string[];
   createdAt: string;
   updatedAt: string;

@@ -71,3 +71,18 @@ export function normalizeProjectName(name: string): string {
   }
   return trimmed;
 }
+
+export const MAX_REPO_SLUG_LENGTH = 100;
+
+export class RepoSlugValidationError extends GitLibError {}
+
+/** A repo's short name: no spaces and no `#`, because issues are written `slug#3`. */
+export function normalizeRepoSlug(slug: string): string {
+  const trimmed = slug.trim();
+  if (!trimmed) throw new RepoSlugValidationError("A repo needs a short name.");
+  if (trimmed.length > MAX_REPO_SLUG_LENGTH) {
+    throw new RepoSlugValidationError(`Repo short names are limited to ${MAX_REPO_SLUG_LENGTH} characters.`);
+  }
+  if (/[\s#]/.test(trimmed)) throw new RepoSlugValidationError("A repo's short name cannot contain spaces or #.");
+  return trimmed;
+}

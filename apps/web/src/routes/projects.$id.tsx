@@ -169,7 +169,7 @@ function ProjectDetailPage() {
             ) : (
               <ul className="divide-y border-y" data-testid="project-repo-list">
                 {project.repos.map((repo) => (
-                  <li key={repo.relativePath} className="flex items-center gap-3 py-2.5">
+                  <li key={repo.id} className="flex items-center gap-3 py-2.5">
                     <div className="min-w-0 flex-1">
                       {repo.known ? (
                         <Link
@@ -192,7 +192,7 @@ function ProjectDetailPage() {
                       disabled={busy}
                       onClick={() =>
                         void run(
-                          () => removeProjectRepo({ data: { id: project.id, repo: repo.relativePath } }),
+                          () => removeProjectRepo({ data: { id: project.id, repoId: repo.id } }),
                           "Could not remove the repository.",
                         )
                       }

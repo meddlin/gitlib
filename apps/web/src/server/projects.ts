@@ -1,11 +1,15 @@
 import { createServerFn } from "@tanstack/react-start";
-import { MAX_PROJECT_NAME_LENGTH, type RepoRecord } from "@gitlib/core";
+import { MAX_PROJECT_NAME_LENGTH, type ProjectRepo, type RepoRecord } from "@gitlib/core";
 import { getApp, loadRepositories } from "./gitlib.server";
 import type { MilestoneLimits, MilestoneView } from "./milestones";
 import { milestoneLimits, milestoneViews } from "./milestones.server";
 import { toView, type LocalIssueView, type PlanningRepoOption } from "./planning";
 
 export interface ProjectRepoView {
+  /** The planning repo's id, which stays the same when the repo moves. */
+  id: number;
+  /** Short name its issues are shown under (`slug#3`). */
+  slug: string;
   relativePath: string;
   name: string;
   /** False when the repo has moved or been removed since it was added. */
@@ -51,9 +55,9 @@ const nameLimit = (): number => MAX_PROJECT_NAME_LENGTH;
 
 const isId = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value > 0;
 
-function repoView(path: string, repos: readonly RepoRecord[]): ProjectRepoView {
+function repoView({ id, slug, path }: ProjectRepo, repos: readonly RepoRecord[]): ProjectRepoView {
   const repo = repos.find((candidate) => candidate.relativePath === path);
-  return { relativePath: path, name: repo?.name ?? path.split("/").pop() ?? path, known: repo !== undefined };
+  return { id, slug, relativePath: path, name: repo?.name ?? path.split("/").pop() ?? path, known: repo !== undefined };
 }
 
 export const getProjects = createServerFn({ method: "GET" }).handler(async (): Promise<ProjectsView> => {
@@ -92,7 +96,7 @@ export const getProjectDetail = createServerFn({ method: "GET" })
     return {
       id: project.id,
       name: project.name,
-      repos: project.repoPaths.map((path) => repoView(path, repos)),
+      repos: project.repos.map((repo) => repoView(repo, repos)),
       availableRepos: repos
         .filter((repo) => !repo.isWorktree && !project.repoPaths.includes(repo.relativePath))
         .map(({ relativePath, name }) => ({ relativePath, name })),
@@ -147,13 +151,14 @@ export const addProjectRepo = createServerFn({ method: "POST" })
     getApp().addRepoToProject(data.id, data.repo);
   });
 
+/** `repoId` is the planning repo's id (`ProjectRepoView.id`), so a repo that has moved can still be removed. */
 export const removeProjectRepo = createServerFn({ method: "POST" })
-  .validator((input: { id: number; repo: string }) => {
-    if (!isId(input?.id) || typeof input?.repo !== "string") throw new Error("Invalid project payload.");
+  .validator((input: { id: number; repoId: number }) => {
+    if (!isId(input?.id) || !isId(input?.repoId)) throw new Error("Invalid project payload.");
     return input;
   })
   .handler(async ({ data }): Promise<void> => {
-    getApp().removeRepoFromProject(data.id, data.repo);
+    getApp().removeRepoFromProject(data.id, data.repoId);
   });
 
 /** Pass `projectId: null` to take the issue out of its project. */

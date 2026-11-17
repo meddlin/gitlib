@@ -24,6 +24,7 @@ import {
   renderDependabotReport,
   renderDetail,
   renderJson,
+  renderPlanningRepos,
   renderSearchResults,
   renderTable,
   repoToDict,
@@ -69,6 +70,9 @@ type Invocation =
   | { name: "dependabot-dismiss"; pr: DependabotPrRef; until?: string }
   | { name: "dependabot-restore"; pr: DependabotPrRef }
   | { name: "planning-backup"; destination?: string }
+  | { name: "planning-repos"; json?: boolean }
+  | { name: "planning-rename"; repo: string; slug: string }
+  | { name: "planning-relink"; repo: string; path: string }
   | { name: "backup-create"; directory?: string; keep?: number }
   | { name: "backup-verify"; archive: string }
   | { name: "backup-restore"; archive: string; yes?: boolean };
@@ -221,6 +225,23 @@ function buildProgram(
     .description("Snapshot planning.db, which cannot be rebuilt by rescanning")
     .argument("[path]", "file to write (default: <gitlib home>/backups/planning-<timestamp>.db)")
     .action((destination: string | undefined) => onInvoke({ name: "planning-backup", destination }));
+  planning
+    .command("repos")
+    .description("List the repos planning data refers to, and any it can no longer find")
+    .option("--json", "machine-readable output")
+    .action((options: { json?: boolean }) => onInvoke({ name: "planning-repos", json: options.json }));
+  planning
+    .command("rename")
+    .description("Change the short name a repo's issues are shown under (name#3)")
+    .argument("<repo>", "the repo's current short name or path")
+    .argument("<name>", "the new short name")
+    .action((repo: string, slug: string) => onInvoke({ name: "planning-rename", repo, slug }));
+  planning
+    .command("relink")
+    .description("Point a repo's issues and projects at where the repo lives now, after a move gitlib did not follow")
+    .argument("<repo>", "the repo's short name or old path")
+    .argument("<path>", "the repo's new path or name, as `gitlib list` shows it")
+    .action((repo: string, path: string) => onInvoke({ name: "planning-relink", repo, path }));
 
   const backup = program.command("backup").description("Back up and restore all gitlib data (config, notes, planning)");
   backup
@@ -448,6 +469,33 @@ async function execute(
     }
     case "planning-backup": {
       print(`Backed up the planning database to ${app.backupPlanning(invocation.destination)}.`);
+      return 0;
+    }
+    case "planning-repos": {
+      // Scanning first follows any repo that moved and makes "not found" current.
+      app.refresh();
+      const repos = app.listPlanningRepos();
+      if (invocation.json) {
+        print(renderJson(repos.map(({ id, slug, path, found }) => ({ id, slug, path, found }))));
+        return 0;
+      }
+      print(renderPlanningRepos(repos));
+      const lost = repos.filter((repo) => !repo.found);
+      if (lost.length > 0) {
+        print("");
+        print(`If a repo moved, relink it with \`gitlib planning relink ${lost[0]!.slug} <new path>\`.`);
+      }
+      return 0;
+    }
+    case "planning-rename": {
+      const repo = app.renamePlanningRepo(invocation.repo, invocation.slug);
+      print(`Issues in ${repo.path} are now shown as ${repo.slug}#<number>.`);
+      return 0;
+    }
+    case "planning-relink": {
+      app.refresh();
+      const repo = app.relinkPlanningRepo(invocation.repo, invocation.path);
+      print(`Relinked ${repo.slug} to ${repo.path}; its issues and projects moved with it.`);
       return 0;
     }
   }

@@ -235,12 +235,29 @@ read from, copied from or sent to GitHub or GitLab (the repo page's **Issues** a
 tabs are separate and stay read-only GitHub views).
 
 - **New issue** files one against any repo (title, optional Markdown description). Issues are numbered
-  per repo, so they read as `repo#3`. Open an issue to edit it, close it, or reopen it. The list filters
-  by state and repo, and the filters live in the URL (`?state=closed&repo=…`).
+  per repo, so they read as `name#3`, where `name` is the repo's short name (below). Open an issue to edit
+  it, close it, or reopen it. The list filters by state and repo, and the filters live in the URL
+  (`?state=closed&repo=…`).
 - Descriptions are rendered as Markdown with raw HTML dropped and only `http(s)` links made live.
-- An issue is tied to its repo by the repo's relative path. If a repo is moved or deleted its issues
-  stay readable and are labelled "repository not found"; new issues can only be filed against repos
-  gitlib currently sees.
+
+#### Repos in planning
+
+The first time an issue or project uses a repo, planning gives it a permanent id and a **short name** (its folder
+name, or its whole path if another repo already has that name). Issues and projects point at the id, not at the
+folder, so they follow the repo when it moves:
+
+- After each scan, a repo that has gone from where planning expects it is looked for elsewhere by its **first
+  commit**. If exactly one other repo has that first commit, planning follows it there on its own. Forks and second
+  clones share a first commit, so when more than one repo could be the one that moved, nothing changes until you
+  say which.
+- A repo planning cannot find keeps all its issues and project memberships; they are labelled "repository not
+  found" until you relink it. New issues can only be filed against repos gitlib currently sees.
+
+```bash
+gitlib planning repos                     # every repo planning uses, and any it cannot find
+gitlib planning relink <name> <new path>  # follow a move by hand
+gitlib planning rename <name> <new name>  # change the short name issues are shown under
+```
 
 ### Projects
 
@@ -259,7 +276,7 @@ several repos. A project page has two parts that are kept apart on purpose:
   project deletes its milestones.
 - **On GitHub** is a read-only preview: for each repo in the project that has a GitHub remote it shows the open
   pull requests, open issues and the latest commits on the default branch. Every row links out to GitHub and is
-  named `owner/repo#12`, so it cannot be mistaken for a gitlib issue (`repo#3`). Gitlib never writes to GitHub
+  named `owner/repo#12`, so it cannot be mistaken for a gitlib issue (`name#3`). Gitlib never writes to GitHub
   here, never saves what it reads, and never reads it back into planning: the only copy is an in-memory cache that
   lasts about five minutes (the **Refresh** button skips it) and is gone when the server restarts. A repo with no
   GitHub remote, or one GitHub cannot show (not found, rate limited), is reported on its own line. Set

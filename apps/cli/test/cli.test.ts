@@ -200,6 +200,46 @@ describe("planning backup", () => {
   });
 });
 
+describe("planning repos", () => {
+  it("lists, renames and relinks the repos planning refers to", async () => {
+    fx.writeConfig();
+    fx.makeRepo("alpha");
+    const app = createApplication(fx.env());
+    app.refresh();
+    const issue = app.createLocalIssue("alpha", { title: "Follow me" });
+
+    const listed = await fx.runCli(["planning", "repos"]);
+    expect(listed.code, listed.stderr).toBe(0);
+    expect(listed.stdout).toMatch(/^alpha\s+alpha\s+found$/m);
+
+    const renamed = await fx.runCli(["planning", "rename", "alpha", "core"]);
+    expect(renamed.code, renamed.stderr).toBe(0);
+    expect(renamed.stdout.trim()).toBe("Issues in alpha are now shown as core#<number>.");
+
+    fs.renameSync(path.join(fx.gitRoot, "alpha"), path.join(fx.gitRoot, "moved"));
+    const lost = await fx.runCli(["planning", "repos"]);
+    expect(lost.stdout).toMatch(/^core\s+alpha\s+not found$/m);
+    expect(lost.stdout).toContain("gitlib planning relink core <new path>");
+
+    const relinked = await fx.runCli(["planning", "relink", "core", "moved"]);
+    expect(relinked.code, relinked.stderr).toBe(0);
+    expect(relinked.stdout.trim()).toBe("Relinked core to moved; its issues and projects moved with it.");
+    expect(createApplication(fx.env()).getLocalIssue(issue.id)).toMatchObject({ repoPath: "moved", repoSlug: "core" });
+
+    const json = await fx.runCli(["planning", "repos", "--json"]);
+    expect(JSON.parse(json.stdout)).toEqual([{ id: issue.repoId, slug: "core", path: "moved", found: true }]);
+  });
+
+  it("reports a name that is not a planning repo", async () => {
+    fx.writeConfig();
+
+    const result = await fx.runCli(["planning", "rename", "nope", "x"]);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("No planning repo is called or found at 'nope'");
+  });
+});
+
 describe("backup", () => {
   const backupsIn = (dir: string) => fs.readdirSync(dir).filter((name) => name.startsWith("gitlib-backup-"));
 

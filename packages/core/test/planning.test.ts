@@ -18,12 +18,17 @@ import {
   ProjectNameTakenError,
   ProjectNotFoundError,
   ProjectValidationError,
+  AmbiguousPlanningRepoError,
+  PlanningRepoNotFoundError,
   RepoNotFoundError,
+  RepoPathTakenError,
+  RepoSlugTakenError,
+  RepoSlugValidationError,
   createApplication,
   loadConfig,
   type Migration,
 } from "../src/index.js";
-import { Fixture } from "./fixture.js";
+import { Fixture, insertLegacyIssue } from "./fixture.js";
 
 const { DatabaseSync } = process.getBuiltinModule("node:sqlite");
 
@@ -90,16 +95,17 @@ describe("planning migrations", () => {
 
   it("migrates an older database forward without losing data", () => {
     const old = new PlanningStore(planningDbPath(), [v1]);
-    old.createIssue({ repoPath: "alpha", title: "before", body: "" }, "2026-01-01T00:00:00+00:00");
+    insertLegacyIssue(planningDbPath(), { repoPath: "alpha", title: "before" });
     expect(old.schemaVersion()).toBe(1);
 
     const upgraded = new PlanningStore(planningDbPath(), [v1, v2]);
 
     expect(upgraded.schemaVersion()).toBe(2);
-    expect(upgraded.listIssues().map((issue) => issue.title)).toEqual(["before"]);
     const db = new DatabaseSync(planningDbPath());
+    const titles = (db.prepare("SELECT title FROM local_issues").all() as { title: string }[]).map((row) => row.title);
     const columns = (db.prepare("PRAGMA table_info(local_issues)").all() as { name: string }[]).map((c) => c.name);
     db.close();
+    expect(titles).toEqual(["before"]);
     expect(columns).toContain("priority");
   });
 
@@ -213,17 +219,17 @@ describe("local issues", () => {
 
   it("backfills status from state when migrating an older database", () => {
     const v1 = MIGRATIONS[0]!;
-    const old = new PlanningStore(planningDbPath(), [v1]);
-    const open = old.createIssue({ repoPath: "alpha", title: "open", body: "" }, "2026-01-01T00:00:00+00:00");
-    const closed = old.createIssue({ repoPath: "alpha", title: "closed", body: "" }, "2026-01-01T00:00:00+00:00");
+    new PlanningStore(planningDbPath(), [v1]);
+    const open = insertLegacyIssue(planningDbPath(), { repoPath: "alpha", title: "open" });
+    const closed = insertLegacyIssue(planningDbPath(), { repoPath: "alpha", title: "closed" });
     const db = new DatabaseSync(planningDbPath());
-    db.prepare("UPDATE local_issues SET state = 'closed', closed_at = ? WHERE id = ?").run("2026-01-02T00:00:00+00:00", closed.id);
+    db.prepare("UPDATE local_issues SET state = 'closed', closed_at = ? WHERE id = ?").run("2026-01-02T00:00:00+00:00", closed);
     db.close();
 
     const upgraded = new PlanningStore(planningDbPath());
 
-    expect(upgraded.getIssue(open.id)?.status).toBe("todo");
-    expect(upgraded.getIssue(closed.id)?.status).toBe("done");
+    expect(upgraded.getIssue(open)?.status).toBe("todo");
+    expect(upgraded.getIssue(closed)?.status).toBe("done");
   });
 
   it("edits title and body and bumps updatedAt", () => {
@@ -547,18 +553,225 @@ describe("milestones", () => {
 
   it("migrates an older database forward, keeping issues and projects", () => {
     const before = MIGRATIONS.slice(0, 5);
-    const old = new PlanningStore(planningDbPath(), before);
-    const project = old.createProject("Launch", "2026-01-01T00:00:00+00:00");
-    const issue = old.createIssue({ repoPath: "alpha", title: "Ship it", body: "" }, "2026-01-01T00:00:00+00:00");
+    new PlanningStore(planningDbPath(), before);
     // The store only knows the newest schema, so file the issue the way a version-5 gitlib would have.
+    const issue = insertLegacyIssue(planningDbPath(), { repoPath: "alpha", title: "Ship it" });
     const db = new DatabaseSync(planningDbPath());
-    db.prepare("UPDATE local_issues SET project_id = ? WHERE id = ?").run(project.id, issue.id);
+    const project = { id: Number(db.prepare("INSERT INTO projects (name, created_at, updated_at) VALUES ('Launch', '', '')").run().lastInsertRowid) };
+    db.prepare("UPDATE local_issues SET project_id = ? WHERE id = ?").run(project.id, issue);
     db.close();
 
     const upgraded = new PlanningStore(planningDbPath());
 
     expect(upgraded.schemaVersion()).toBe(LATEST_SCHEMA_VERSION);
-    expect(upgraded.getIssue(issue.id)).toMatchObject({ projectId: project.id, milestoneId: null });
+    expect(upgraded.getIssue(issue)).toMatchObject({ projectId: project.id, milestoneId: null });
     expect(upgraded.listMilestones()).toEqual([]);
+  });
+});
+
+describe("planning repos", () => {
+  const appWithRepos = () => {
+    const app = createApplication(fx.env());
+    app.refresh();
+    return app;
+  };
+
+  /** A real repository with one commit, so it has a first commit to be recognized by. */
+  const committedRepo = (relativePath: string): string => {
+    const repoPath = fx.initRealGitRepo(relativePath);
+    fx.git(repoPath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "init");
+    return repoPath;
+  };
+
+  it("gives a repo an id and a short name the first time planning refers to it", () => {
+    fx.makeRepo("alpha");
+    fx.makeRepo("work/api");
+    fx.makeRepo("personal/api");
+    const app = appWithRepos();
+
+    const first = app.createLocalIssue("alpha", { title: "One" });
+    const work = app.createLocalIssue("work/api", { title: "Two" });
+    const personal = app.createLocalIssue("personal/api", { title: "Three" });
+
+    expect(first).toMatchObject({ repoSlug: "alpha", repoPath: "alpha", number: 1 });
+    // The folder name is taken, so the second "api" falls back to its whole path.
+    expect(work.repoSlug).toBe("api");
+    expect(personal.repoSlug).toBe("personal/api");
+    expect(app.listPlanningRepos().map((repo) => [repo.slug, repo.path, repo.found])).toEqual([
+      ["alpha", "alpha", true],
+      ["api", "work/api", true],
+      ["personal/api", "personal/api", true],
+    ]);
+    // Filing another issue reuses the repo rather than creating a second one.
+    expect(app.createLocalIssue("alpha", { title: "Again" })).toMatchObject({ repoId: first.repoId, number: 2 });
+    expect(app.listLocalIssues({ repoId: work.repoId }).map((issue) => issue.title)).toEqual(["Two"]);
+  });
+
+  it("renames a repo's short name without touching its issues", () => {
+    fx.makeRepo("alpha");
+    fx.makeRepo("beta");
+    const app = appWithRepos();
+    const issue = app.createLocalIssue("alpha", { title: "One" });
+    app.createLocalIssue("beta", { title: "Two" });
+
+    expect(app.renamePlanningRepo("alpha", "core").slug).toBe("core");
+    expect(app.getLocalIssue(issue.id)).toMatchObject({ repoSlug: "core", repoPath: "alpha", repoId: issue.repoId });
+    // Found by its new name or its path, ignoring case.
+    expect(app.resolvePlanningRepo("CORE").id).toBe(issue.repoId);
+    expect(app.resolvePlanningRepo("alpha").id).toBe(issue.repoId);
+
+    expect(() => app.renamePlanningRepo("core", "BETA")).toThrow(RepoSlugTakenError);
+    expect(() => app.renamePlanningRepo("core", "has space")).toThrow(RepoSlugValidationError);
+    expect(() => app.renamePlanningRepo("core", "a#b")).toThrow(RepoSlugValidationError);
+    expect(() => app.renamePlanningRepo("nope", "x")).toThrow(PlanningRepoNotFoundError);
+  });
+
+  it("keeps a moved repo's issues and projects, and relinks them by hand", () => {
+    fx.makeRepo("alpha");
+    fx.makeRepo("beta");
+    const app = appWithRepos();
+    const project = app.createProject("Launch");
+    app.addRepoToProject(project.id, "alpha");
+    const issue = app.createLocalIssue("alpha", { title: "Follow me" });
+    app.setLocalIssueProject(issue.id, project.id);
+
+    fs.renameSync(path.join(fx.gitRoot, "alpha"), path.join(fx.gitRoot, "moved"));
+    app.refresh();
+
+    // Nothing is lost: the issue still points at its repo, which is reported as not found.
+    expect(app.getLocalIssue(issue.id)).toMatchObject({ repoPath: "alpha", projectId: project.id });
+    expect(app.listPlanningRepos().find((repo) => repo.slug === "alpha")?.found).toBe(false);
+
+    const relinked = app.relinkPlanningRepo("alpha", "moved");
+
+    expect(relinked).toMatchObject({ id: issue.repoId, slug: "alpha", path: "moved" });
+    expect(app.getLocalIssue(issue.id)).toMatchObject({ repoPath: "moved", repoSlug: "alpha", projectId: project.id });
+    expect(app.getProject(project.id).repoPaths).toEqual(["moved"]);
+    expect(app.listLocalIssues({ repoPath: "moved" }).map((i) => i.id)).toEqual([issue.id]);
+    // Numbering carries on where it left off.
+    expect(app.createLocalIssue("moved", { title: "Next" }).number).toBe(2);
+
+    // A path another planning repo already has cannot be taken.
+    app.createLocalIssue("beta", { title: "Mine" });
+    expect(() => app.relinkPlanningRepo("alpha", "beta")).toThrow(RepoPathTakenError);
+  });
+
+  it("follows a moved repo on its own when its first commit identifies it", () => {
+    committedRepo("alpha");
+    const app = appWithRepos();
+    const issue = app.createLocalIssue("alpha", { title: "Follow me" });
+    expect(app.resolvePlanningRepo("alpha").rootCommit).toMatch(/^[0-9a-f]{40}$/);
+
+    fs.mkdirSync(path.join(fx.gitRoot, "archive"));
+    fs.renameSync(path.join(fx.gitRoot, "alpha"), path.join(fx.gitRoot, "archive", "alpha"));
+    app.refresh();
+
+    expect(app.getLocalIssue(issue.id)).toMatchObject({ repoPath: "archive/alpha", repoSlug: "alpha" });
+    expect(app.listPlanningRepos().map((repo) => repo.found)).toEqual([true]);
+  });
+
+  it("leaves a move alone when two repos could be the one that moved", () => {
+    const original = committedRepo("alpha");
+    const app = appWithRepos();
+    const issue = app.createLocalIssue("alpha", { title: "Which one?" });
+
+    // Two copies share the first commit, as a fork or a second clone would.
+    fs.cpSync(original, path.join(fx.gitRoot, "copy-one"), { recursive: true });
+    fs.renameSync(original, path.join(fx.gitRoot, "copy-two"));
+    app.refresh();
+
+    expect(app.getLocalIssue(issue.id).repoPath).toBe("alpha");
+    expect(app.listPlanningRepos().map((repo) => repo.found)).toEqual([false]);
+    expect(app.relinkPlanningRepo("alpha", "copy-two").path).toBe("copy-two");
+  });
+
+  it("takes a repo out of a project by short name, even one gitlib no longer finds", () => {
+    fx.makeRepo("alpha");
+    const app = appWithRepos();
+    const project = app.createProject("Launch");
+    app.addRepoToProject(project.id, "alpha");
+    app.renamePlanningRepo("alpha", "core");
+    fs.rmSync(path.join(fx.gitRoot, "alpha"), { recursive: true });
+    app.refresh();
+
+    expect(app.getProject(project.id).repos).toEqual([{ id: expect.any(Number), slug: "core", path: "alpha" }]);
+    expect(app.removeRepoFromProject(project.id, "core").repos).toEqual([]);
+    expect(() => app.removeRepoFromProject(project.id, "nope")).toThrow(PlanningRepoNotFoundError);
+  });
+
+  it("refuses to delete a repo that still has issues", () => {
+    fx.makeRepo("alpha");
+    const app = appWithRepos();
+    const issue = app.createLocalIssue("alpha", { title: "Anchor" });
+
+    const db = new DatabaseSync(planningDbPath());
+    db.exec("PRAGMA foreign_keys = ON");
+    expect(() => db.prepare("DELETE FROM planning_repos WHERE id = ?").run(issue.repoId)).toThrow(/FOREIGN KEY/);
+    db.close();
+  });
+
+  it("migrates repo paths to planning repos, keeping every issue and project membership", () => {
+    const before = MIGRATIONS.slice(0, 6);
+    new PlanningStore(planningDbPath(), before);
+    const alpha1 = insertLegacyIssue(planningDbPath(), { repoPath: "alpha", title: "a1", createdAt: "2026-01-01T00:00:00+00:00" });
+    const alpha2 = insertLegacyIssue(planningDbPath(), { repoPath: "alpha", title: "a2" });
+    const work = insertLegacyIssue(planningDbPath(), { repoPath: "work/api", title: "w1" });
+    const personal = insertLegacyIssue(planningDbPath(), { repoPath: "personal/api", title: "p1" });
+    const db = new DatabaseSync(planningDbPath());
+    const projectId = Number(db.prepare("INSERT INTO projects (name, created_at, updated_at) VALUES ('Launch', '', '')").run().lastInsertRowid);
+    const milestoneId = Number(
+      db.prepare("INSERT INTO milestones (project_id, title, created_at, updated_at) VALUES (?, 'v1', '', '')").run(projectId).lastInsertRowid,
+    );
+    db.prepare("UPDATE local_issues SET project_id = ?, milestone_id = ?, status = 'in_review' WHERE id = ?").run(projectId, milestoneId, alpha2);
+    const addRepo = db.prepare("INSERT INTO project_repos (project_id, repo_path, added_at) VALUES (?, ?, '2026-02-01T00:00:00+00:00')");
+    addRepo.run(projectId, "alpha");
+    // A member with no issues still gets a planning repo.
+    addRepo.run(projectId, "tools/gone");
+    db.close();
+
+    const upgraded = new PlanningStore(planningDbPath());
+
+    expect(upgraded.schemaVersion()).toBe(LATEST_SCHEMA_VERSION);
+    expect(upgraded.listRepos().map((repo) => [repo.slug, repo.path])).toEqual([
+      ["alpha", "alpha"],
+      ["gone", "tools/gone"],
+      ["personal/api", "personal/api"],
+      ["work/api", "work/api"],
+    ]);
+    expect(upgraded.getIssue(alpha1)).toMatchObject({ repoSlug: "alpha", repoPath: "alpha", number: 1 });
+    expect(upgraded.getIssue(alpha2)).toMatchObject({
+      repoSlug: "alpha",
+      number: 2,
+      status: "in_review",
+      projectId,
+      milestoneId,
+    });
+    expect(upgraded.getIssue(work)).toMatchObject({ repoSlug: "work/api", number: 1 });
+    expect(upgraded.getIssue(personal)).toMatchObject({ repoSlug: "personal/api", number: 1 });
+    expect(upgraded.getProject(projectId)?.repoPaths).toEqual(["alpha", "tools/gone"]);
+    expect(upgraded.listIssues()).toHaveLength(4);
+  });
+});
+
+describe("planning repo names", () => {
+  it("refuses a name that is one repo's short name and another's path", () => {
+    fx.makeRepo("work/api");
+    fx.makeRepo("api");
+    const app = createApplication(fx.env());
+    app.refresh();
+    const project = app.createProject("Launch");
+    app.addRepoToProject(project.id, "work/api");
+    app.addRepoToProject(project.id, "api");
+
+    // work/api took "api"; the top-level api repo could not, and fell back to "api-2".
+    expect(app.getProject(project.id).repos.map((repo) => [repo.slug, repo.path])).toEqual([
+      ["api-2", "api"],
+      ["api", "work/api"],
+    ]);
+    expect(() => app.resolvePlanningRepo("api")).toThrow(AmbiguousPlanningRepoError);
+
+    // An id is never ambiguous, which is how the web app removes a repo.
+    const topLevel = app.resolvePlanningRepo("api-2");
+    expect(app.removeRepoFromProject(project.id, topLevel.id).repoPaths).toEqual(["work/api"]);
   });
 });
