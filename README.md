@@ -257,7 +257,27 @@ folder, so they follow the repo when it moves:
 gitlib planning repos                     # every repo planning uses, and any it cannot find
 gitlib planning relink <name> <new path>  # follow a move by hand
 gitlib planning rename <name> <new name>  # change the short name issues are shown under
+gitlib planning archive <name>            # put a repo away; its issues are kept but hidden
+gitlib planning restore <name>            # bring it and its issues back
 ```
+
+#### Archiving
+
+Planning never deletes issues on your behalf. Instead of deleting repos, projects or milestones, you **archive**
+them. Archiving puts something away, and **Restore** brings it back exactly as it was:
+
+- **An archived repo** keeps its issues and project memberships. Its issues leave the Planning list and board (the
+  project page and the repo page still show them, marked "repo archived"). It takes no new issues or projects, and
+  gitlib stops following it when it moves. Archive and restore repos with the commands above.
+- **An archived project** moves to the "Archived" section of the Projects page. Its issues leave the Planning list
+  and board, and nothing new can be added to it: no repos, issues or milestones. Use **Archive** and **Restore** on
+  the project page.
+- **An archived milestone** moves under the cards. Its issues keep it, but no other issue can join it.
+- **Taking a repo out of a project** archives the membership rather than deleting it. The repo is listed under
+  "Removed" on the project page, its issues stay filed under the project, and **Add back** restores it.
+
+Deleting a project or milestone is still possible, and still only unlinks its issues, but archiving is the
+normal way to put finished work away.
 
 ### Projects
 

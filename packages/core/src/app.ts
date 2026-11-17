@@ -55,6 +55,7 @@ import {
   ProjectNotFoundError,
   type Milestone,
   type MilestoneChanges,
+  type ArchiveFilter,
   type NewMilestone,
   type PlanningRepo,
   type PlanningRepoStatus,
@@ -204,10 +205,10 @@ export class GitLibApp {
    * Keeps planning repos pointed at their repos after a scan. A planning repo whose path is gone is relinked
    * to the scanned repo with the same first commit, but only when that match is unambiguous: exactly one
    * lost planning repo and exactly one unclaimed, non-worktree repo share it (forks and second clones share a
-   * first commit too). Anything else is left for `relinkPlanningRepo`.
+   * first commit too). Anything else is left for `relinkPlanningRepo`. Archived repos are left where they are.
    */
   private reconcilePlanningRepos(repositories: readonly RepoRecord[]): void {
-    const planned = this.planning.listRepos();
+    const planned = this.planning.listRepos().filter((repo) => repo.archivedAt === null);
     if (planned.length === 0) return;
     const byPath = new Map(repositories.map((repo) => [repo.relativePath, repo]));
 
@@ -219,7 +220,8 @@ export class GitLibApp {
     const lost = planned.filter((repo) => !byPath.has(repo.path) && repo.rootCommit !== null);
     if (lost.length === 0) return;
 
-    const claimed = new Set(planned.map((repo) => repo.path));
+    // Archived repos still own their paths, so a repo that moved is never handed one of them.
+    const claimed = new Set(this.planning.listRepos().map((repo) => repo.path));
     const found = new Map<string, RepoRecord[]>();
     for (const record of repositories) {
       if (record.isWorktree || claimed.has(record.relativePath)) continue;
@@ -550,7 +552,10 @@ export class GitLibApp {
     return issue;
   }
 
-  /** Issues across every repo, including ones whose repo has since moved or been removed. */
+  /**
+   * Issues across every repo, including ones whose repo gitlib no longer finds. Issues whose repo or project is
+   * archived are left out unless `includeArchived` is set.
+   */
   listLocalIssues(query: LocalIssueQuery = {}): LocalIssue[] {
     return this.planning.listIssues(query);
   }
@@ -570,8 +575,20 @@ export class GitLibApp {
     return this.planning.setIssueStatus(id, status, utcNow());
   }
 
-  listProjects(): Project[] {
-    return this.planning.listProjects();
+  /** Projects by name; archived ones only with `includeArchived`. */
+  listProjects(filter: ArchiveFilter = {}): Project[] {
+    return this.planning.listProjects(filter);
+  }
+
+  /** Puts a finished project away: it and its issues leave the default lists, and nothing new can be added to it. */
+  archiveProject(id: number): Project {
+    this.planning.setArchived("project", id, true, utcNow());
+    return this.getProject(id);
+  }
+
+  restoreProject(id: number): Project {
+    this.planning.setArchived("project", id, false, utcNow());
+    return this.getProject(id);
   }
 
   getProject(id: number): Project {
@@ -634,6 +651,22 @@ export class GitLibApp {
     return repo;
   }
 
+  /**
+   * Puts a repo away (by slug or path). Its issues and project memberships stay but leave the default lists, it
+   * takes no new issues or projects, and gitlib stops following it when it moves. Nothing is deleted.
+   */
+  archivePlanningRepo(selector: string): PlanningRepo {
+    const repo = this.resolvePlanningRepo(selector);
+    this.planning.setArchived("repo", repo.id, true, utcNow());
+    return this.planning.getRepo(repo.id)!;
+  }
+
+  restorePlanningRepo(selector: string): PlanningRepo {
+    const repo = this.resolvePlanningRepo(selector);
+    this.planning.setArchived("repo", repo.id, false, utcNow());
+    return this.planning.getRepo(repo.id)!;
+  }
+
   /** Changes the short name a repo's issues are shown under (`slug#3`). */
   renamePlanningRepo(selector: string, slug: string): PlanningRepo {
     return this.planning.renameRepo(this.resolvePlanningRepo(selector).id, normalizeRepoSlug(slug), utcNow());
@@ -659,9 +692,20 @@ export class GitLibApp {
     return this.planning.setIssueMilestone(id, milestoneId, utcNow());
   }
 
-  /** Milestones of one project, or of every project when `projectId` is omitted. */
-  listMilestones(projectId?: number): Milestone[] {
-    return this.planning.listMilestones(projectId);
+  /** Milestones of one project, or of every project when `projectId` is omitted; archived ones only with `includeArchived`. */
+  listMilestones(projectId?: number, filter: ArchiveFilter = {}): Milestone[] {
+    return this.planning.listMilestones(projectId, filter);
+  }
+
+  /** Puts a milestone away. Its issues keep it; no other issue can be put in it until it is restored. */
+  archiveMilestone(id: number): Milestone {
+    this.planning.setArchived("milestone", id, true, utcNow());
+    return this.getMilestone(id);
+  }
+
+  restoreMilestone(id: number): Milestone {
+    this.planning.setArchived("milestone", id, false, utcNow());
+    return this.getMilestone(id);
   }
 
   getMilestone(id: number): Milestone {

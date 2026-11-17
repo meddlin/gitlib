@@ -4,6 +4,7 @@ import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { GitLibError } from "../errors.js";
 import { MIGRATIONS, migrate, schemaVersion, type Migration } from "./migrations.js";
 import type {
+  ArchiveFilter,
   DependabotDismissal,
   DependabotSchedule,
   StoredDependabotSchedule,
@@ -43,6 +44,8 @@ export class AmbiguousPlanningRepoError extends GitLibError {}
 export class RepoSlugTakenError extends GitLibError {}
 /** A planning repo was pointed at a path another planning repo already has. */
 export class RepoPathTakenError extends GitLibError {}
+/** Something new was linked to an archived repo, project or milestone; restore it first. */
+export class PlanningArchivedError extends GitLibError {}
 
 interface LocalIssueRow {
   id: number;
@@ -56,6 +59,7 @@ interface LocalIssueRow {
   status: IssueStatus;
   project_id: number | null;
   milestone_id: number | null;
+  archived: number;
   created_at: string;
   updated_at: string;
   closed_at: string | null;
@@ -73,21 +77,28 @@ const toLocalIssue = (row: LocalIssueRow): LocalIssue => ({
   status: row.status,
   projectId: row.project_id === null || row.project_id === undefined ? null : Number(row.project_id),
   milestoneId: row.milestone_id === null || row.milestone_id === undefined ? null : Number(row.milestone_id),
+  archived: Boolean(row.archived),
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   closedAt: row.closed_at || null,
 });
 
-/** Issues with their repo's current slug and path. */
+/** An issue is hidden by archiving when its repo or its project is archived. */
+const ISSUE_ARCHIVED = "(planning_repos.archived_at IS NOT NULL OR projects.archived_at IS NOT NULL)";
+
+/** Issues with their repo's current slug and path, and whether archiving hides them. */
 const ISSUE_SELECT = `
-  SELECT local_issues.*, planning_repos.slug AS repo_slug, planning_repos.path AS repo_path
-  FROM local_issues JOIN planning_repos ON planning_repos.id = local_issues.repo_id`;
+  SELECT local_issues.*, planning_repos.slug AS repo_slug, planning_repos.path AS repo_path, ${ISSUE_ARCHIVED} AS archived
+  FROM local_issues
+  JOIN planning_repos ON planning_repos.id = local_issues.repo_id
+  LEFT JOIN projects ON projects.id = local_issues.project_id`;
 
 interface PlanningRepoRow {
   id: number;
   slug: string;
   path: string;
   root_commit: string | null;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -97,6 +108,7 @@ const toPlanningRepo = (row: PlanningRepoRow): PlanningRepo => ({
   slug: row.slug,
   path: row.path,
   rootCommit: row.root_commit || null,
+  archivedAt: row.archived_at || null,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -117,6 +129,7 @@ interface MilestoneRow {
   title: string;
   description: string;
   due_date: string | null;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -127,6 +140,7 @@ const toMilestone = (row: MilestoneRow): Milestone => ({
   title: row.title,
   description: row.description,
   dueDate: row.due_date || null,
+  archivedAt: row.archived_at || null,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -134,18 +148,36 @@ const toMilestone = (row: MilestoneRow): Milestone => ({
 interface ProjectRow {
   id: number;
   name: string;
+  archived_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
-const toProject = (row: ProjectRow, repos: ProjectRepo[]): Project => ({
-  id: Number(row.id),
-  name: row.name,
-  repos,
-  repoPaths: repos.map((repo) => repo.path),
-  createdAt: row.created_at,
-  updatedAt: row.updated_at,
-});
+/** A membership row: the repo, and whether it was taken out of the project. */
+type Membership = ProjectRepo & { projectId: number; removed: boolean };
+
+const toProject = (row: ProjectRow, members: Membership[]): Project => {
+  const strip = ({ projectId: _, removed: __, ...repo }: Membership): ProjectRepo => repo;
+  const repos = members.filter((member) => !member.removed).map(strip);
+  return {
+    id: Number(row.id),
+    name: row.name,
+    repos,
+    repoPaths: repos.map((repo) => repo.path),
+    removedRepos: members.filter((member) => member.removed).map(strip),
+    archivedAt: row.archived_at || null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+};
+
+/** Where each archivable thing lives, and what to call it in messages. */
+const ARCHIVABLE = {
+  repo: { table: "planning_repos", noun: "repo", name: "slug" },
+  project: { table: "projects", noun: "project", name: "name" },
+  milestone: { table: "milestones", noun: "milestone", name: "title" },
+} as const;
+export type Archivable = keyof typeof ARCHIVABLE;
 
 const isUniqueViolation = (error: unknown): boolean =>
   error instanceof Error && /UNIQUE constraint failed/i.test(error.message);
@@ -197,6 +229,9 @@ export class PlanningStore {
   createIssue(input: NewLocalIssue, now: string): LocalIssue {
     return this.transaction((db) => {
       const repo = this.ensureRepo(db, input.repoPath, now);
+      if (repo.archivedAt) {
+        throw new PlanningArchivedError(`The repo "${repo.slug}" is archived. Restore it before filing new issues against it.`);
+      }
       const { lastInsertRowid } = db
         .prepare(
           `INSERT INTO local_issues (repo_id, number, title, body, state, created_at, updated_at)
@@ -235,6 +270,7 @@ export class PlanningStore {
       conditions.push("local_issues.milestone_id = ?");
       params.push(query.milestoneId);
     }
+    if (!query.includeArchived) conditions.push(`NOT ${ISSUE_ARCHIVED}`);
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
     return this.withConnection((db) => {
@@ -299,8 +335,8 @@ export class PlanningStore {
   setIssueProject(id: number, projectId: number | null, now: string): LocalIssue {
     return this.transaction((db) => {
       const current = this.requireIssue(db, id);
-      if (projectId !== null) this.requireProject(db, projectId);
       if (current.projectId === projectId) return current;
+      if (projectId !== null) this.requireLive(db, "project", projectId, "file issues under it");
       db.prepare("UPDATE local_issues SET project_id = ?, milestone_id = NULL, updated_at = ? WHERE id = ?").run(
         projectId,
         now,
@@ -319,6 +355,7 @@ export class PlanningStore {
       const current = this.requireIssue(db, id);
       if (milestoneId !== null) {
         const milestone = this.requireMilestone(db, milestoneId);
+        if (current.milestoneId !== milestoneId) this.requireLive(db, "milestone", milestoneId, "put issues in it");
         if (current.projectId !== milestone.projectId) {
           throw new MilestoneProjectMismatchError(
             `Milestone "${milestone.title}" belongs to a different project. Put the issue in that project first.`,
@@ -333,7 +370,7 @@ export class PlanningStore {
 
   createMilestone(projectId: number, input: { title: string; description: string; dueDate: string | null }, now: string): Milestone {
     return this.transaction((db) => {
-      this.requireProject(db, projectId);
+      this.requireLive(db, "project", projectId, "add milestones to it");
       try {
         const { lastInsertRowid } = db
           .prepare(
@@ -351,10 +388,14 @@ export class PlanningStore {
     return this.withConnection((db) => this.findMilestone(db, id));
   }
 
-  /** Soonest due date first, then milestones with no due date; ties by title. */
-  listMilestones(projectId?: number): Milestone[] {
+  /** Soonest due date first, then milestones with no due date; ties by title. Leaves archived ones out unless asked. */
+  listMilestones(projectId?: number, { includeArchived = false }: ArchiveFilter = {}): Milestone[] {
     return this.withConnection((db) => {
-      const where = projectId === undefined ? "" : "WHERE project_id = ?";
+      const conditions = [
+        ...(projectId === undefined ? [] : ["project_id = ?"]),
+        ...(includeArchived ? [] : ["archived_at IS NULL"]),
+      ];
+      const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
       const rows = db
         .prepare(`SELECT * FROM milestones ${where} ORDER BY due_date IS NULL, due_date, title, id`)
         .all(...(projectId === undefined ? [] : [projectId])) as unknown as MilestoneRow[];
@@ -405,15 +446,16 @@ export class PlanningStore {
     return this.withConnection((db) => this.findProject(db, id));
   }
 
-  /** By name, A to Z. */
-  listProjects(): Project[] {
+  /** By name, A to Z. Leaves archived projects out unless asked. */
+  listProjects({ includeArchived = false }: ArchiveFilter = {}): Project[] {
     return this.withConnection((db) => {
-      const rows = db.prepare("SELECT * FROM projects ORDER BY name").all() as unknown as ProjectRow[];
-      const members = new Map<number, ProjectRepo[]>();
-      for (const { project_id, ...repo } of this.projectRepos(db)) {
-        const list = members.get(project_id) ?? [];
-        list.push(repo);
-        members.set(project_id, list);
+      const where = includeArchived ? "" : "WHERE archived_at IS NULL";
+      const rows = db.prepare(`SELECT * FROM projects ${where} ORDER BY name`).all() as unknown as ProjectRow[];
+      const members = new Map<number, Membership[]>();
+      for (const member of this.memberships(db)) {
+        const list = members.get(member.projectId) ?? [];
+        list.push(member);
+        members.set(member.projectId, list);
       }
       return rows.map((row) => toProject(row, members.get(Number(row.id)) ?? []));
     });
@@ -439,25 +481,54 @@ export class PlanningStore {
     });
   }
 
-  /** Adds the repo at `repoPath`, creating its planning repo if this is the first time it is used. */
+  /**
+   * Adds the repo at `repoPath`, creating its planning repo if this is the first time it is used. A repo that
+   * was taken out of the project before comes back with its old membership.
+   */
   addRepoToProject(id: number, repoPath: string, now: string): Project {
     return this.transaction((db) => {
-      this.requireProject(db, id);
+      this.requireLive(db, "project", id, "add repos to it");
       const repo = this.ensureRepo(db, repoPath, now);
+      if (repo.archivedAt) {
+        throw new PlanningArchivedError(`The repo "${repo.slug}" is archived. Restore it before adding it to a project.`);
+      }
       const { changes } = db
-        .prepare("INSERT OR IGNORE INTO project_repos (project_id, repo_id, added_at) VALUES (?, ?, ?)")
+        .prepare(
+          `INSERT INTO project_repos (project_id, repo_id, added_at) VALUES (?, ?, ?)
+           ON CONFLICT (project_id, repo_id) DO UPDATE SET archived_at = NULL WHERE project_repos.archived_at IS NOT NULL`,
+        )
         .run(id, repo.id, now);
       if (Number(changes) > 0) db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(now, id);
       return this.requireProject(db, id);
     });
   }
 
+  /**
+   * Takes a repo out of the project by archiving the membership, never deleting it: the repo's issues stay filed
+   * under the project, and the repo is listed in `removedRepos` until it is added again.
+   */
   removeRepoFromProject(id: number, repoId: number, now: string): Project {
     return this.transaction((db) => {
       this.requireProject(db, id);
-      const { changes } = db.prepare("DELETE FROM project_repos WHERE project_id = ? AND repo_id = ?").run(id, repoId);
+      const { changes } = db
+        .prepare("UPDATE project_repos SET archived_at = ? WHERE project_id = ? AND repo_id = ? AND archived_at IS NULL")
+        .run(now, id, repoId);
       if (Number(changes) > 0) db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(now, id);
       return this.requireProject(db, id);
+    });
+  }
+
+  /**
+   * Archives (`archived` true) or restores a repo, project or milestone. Nothing linked to it changes; see the
+   * `archivedAt` fields for what archiving hides. Archiving twice keeps the first time.
+   */
+  setArchived(kind: Archivable, id: number, archived: boolean, now: string): void {
+    const { table } = ARCHIVABLE[kind];
+    this.transaction((db) => {
+      const row = db.prepare(`SELECT archived_at FROM ${table} WHERE id = ?`).get(id) as { archived_at: string | null } | undefined;
+      if (!row) throw this.notFound(kind, id);
+      if ((row.archived_at !== null) === archived) return;
+      db.prepare(`UPDATE ${table} SET archived_at = ?, updated_at = ? WHERE id = ?`).run(archived ? now : null, now, id);
     });
   }
 
@@ -628,20 +699,50 @@ export class PlanningStore {
   private findProject(db: DatabaseSync, id: number): Project | null {
     const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(id) as unknown as ProjectRow | undefined;
     if (!row) return null;
-    return toProject(row, this.projectRepos(db, id).map(({ project_id: _, ...repo }) => repo));
+    return toProject(row, this.memberships(db, id));
   }
 
-  /** Repo memberships of one project, or of all of them, sorted by path. */
-  private projectRepos(db: DatabaseSync, projectId?: number): (ProjectRepo & { project_id: number })[] {
+  /** Repo memberships of one project, or of all of them, sorted by path, including repos taken out. */
+  private memberships(db: DatabaseSync, projectId?: number): Membership[] {
     const where = projectId === undefined ? "" : "WHERE member.project_id = ?";
     const rows = db
       .prepare(
-        `SELECT member.project_id, repo.id, repo.slug, repo.path
+        `SELECT member.project_id, member.archived_at AS removed_at, repo.id, repo.slug, repo.path, repo.archived_at
          FROM project_repos member JOIN planning_repos repo ON repo.id = member.repo_id
          ${where} ORDER BY repo.path`,
       )
-      .all(...(projectId === undefined ? [] : [projectId])) as unknown as { project_id: number; id: number; slug: string; path: string }[];
-    return rows.map((row) => ({ project_id: Number(row.project_id), id: Number(row.id), slug: row.slug, path: row.path }));
+      .all(...(projectId === undefined ? [] : [projectId])) as unknown as {
+      project_id: number;
+      removed_at: string | null;
+      id: number;
+      slug: string;
+      path: string;
+      archived_at: string | null;
+    }[];
+    return rows.map((row) => ({
+      projectId: Number(row.project_id),
+      removed: row.removed_at !== null,
+      id: Number(row.id),
+      slug: row.slug,
+      path: row.path,
+      archived: row.archived_at !== null,
+    }));
+  }
+
+  /** Throws unless the repo, project or milestone exists and is not archived; `doing` finishes the sentence. */
+  private requireLive(db: DatabaseSync, kind: Archivable, id: number, doing: string): void {
+    const { table, noun, name } = ARCHIVABLE[kind];
+    const row = db.prepare(`SELECT ${name} AS name, archived_at FROM ${table} WHERE id = ?`).get(id) as
+      | { name: string; archived_at: string | null }
+      | undefined;
+    if (!row) throw this.notFound(kind, id);
+    if (row.archived_at !== null) throw new PlanningArchivedError(`The ${noun} "${row.name}" is archived. Restore it to ${doing}.`);
+  }
+
+  private notFound(kind: Archivable, id: number): GitLibError {
+    if (kind === "project") return new ProjectNotFoundError(`Project ${id} was not found.`);
+    if (kind === "milestone") return new MilestoneNotFoundError(`Milestone ${id} was not found.`);
+    return new PlanningRepoNotFoundError(`Repo ${id} is not in the planning data.`);
   }
 
   private findRepo(db: DatabaseSync, id: number): PlanningRepo | null {

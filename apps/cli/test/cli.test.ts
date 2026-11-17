@@ -227,7 +227,26 @@ describe("planning repos", () => {
     expect(createApplication(fx.env()).getLocalIssue(issue.id)).toMatchObject({ repoPath: "moved", repoSlug: "core" });
 
     const json = await fx.runCli(["planning", "repos", "--json"]);
-    expect(JSON.parse(json.stdout)).toEqual([{ id: issue.repoId, slug: "core", path: "moved", found: true }]);
+    expect(JSON.parse(json.stdout)).toEqual([{ id: issue.repoId, slug: "core", path: "moved", found: true, archivedAt: null }]);
+  });
+
+  it("archives and restores a repo", async () => {
+    fx.writeConfig();
+    fx.makeRepo("alpha");
+    const app = createApplication(fx.env());
+    app.refresh();
+    const issue = app.createLocalIssue("alpha", { title: "Parked" });
+
+    const archived = await fx.runCli(["planning", "archive", "alpha"]);
+    expect(archived.code, archived.stderr).toBe(0);
+    expect(archived.stdout).toContain("Archived alpha.");
+    expect((await fx.runCli(["planning", "repos"])).stdout).toMatch(/^alpha\s+alpha\s+archived, found$/m);
+    expect(createApplication(fx.env()).listLocalIssues()).toEqual([]);
+
+    const restored = await fx.runCli(["planning", "restore", "alpha"]);
+    expect(restored.code, restored.stderr).toBe(0);
+    expect(restored.stdout.trim()).toBe("Restored alpha and its issues.");
+    expect(createApplication(fx.env()).listLocalIssues().map((i) => i.id)).toEqual([issue.id]);
   });
 
   it("reports a name that is not a planning repo", async () => {

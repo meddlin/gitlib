@@ -36,6 +36,11 @@ export interface LocalIssue {
    * milestone sets this back to null.
    */
   milestoneId: number | null;
+  /**
+   * True when its repo or its project is archived. Such issues are left out of `listIssues` unless
+   * `includeArchived` is set; the issue itself is untouched and comes back when the repo or project is restored.
+   */
+  archived: boolean;
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;
@@ -51,6 +56,13 @@ export interface LocalIssueQuery {
   projectId?: number;
   /** Only issues in this milestone. */
   milestoneId?: number;
+  /** Also list issues whose repo or project is archived (see `LocalIssue.archived`). */
+  includeArchived?: boolean;
+}
+
+/** For lists that leave archived entries out unless asked. */
+export interface ArchiveFilter {
+  includeArchived?: boolean;
 }
 
 export interface NewLocalIssue {
@@ -78,6 +90,11 @@ export interface PlanningRepo {
   path: string;
   /** The repo's first commit, used to recognize it at a new path after a move; null until it is known. */
   rootCommit: string | null;
+  /**
+   * When the user archived it, or null. An archived repo keeps its issues and memberships but hides its issues
+   * from the default lists, takes no new issues or projects, and is not followed when it moves.
+   */
+  archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -93,6 +110,8 @@ export interface ProjectRepo {
   id: number;
   slug: string;
   path: string;
+  /** The planning repo itself is archived (not just taken out of this project). */
+  archived: boolean;
 }
 
 /**
@@ -106,6 +125,13 @@ export interface Project {
   repos: ProjectRepo[];
   /** `relativePath` of every repo in the project, sorted; the same repos as `repos`. */
   repoPaths: string[];
+  /**
+   * Repos taken out of the project. Taking a repo out archives the membership rather than deleting it, so
+   * its issues stay filed under the project; adding the repo again restores it.
+   */
+  removedRepos: ProjectRepo[];
+  /** When the user archived the project, or null. An archived project hides its issues from the default lists. */
+  archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -120,6 +146,8 @@ export interface Milestone {
   description: string;
   /** A calendar date, `YYYY-MM-DD`, with no time zone; null when the milestone has no deadline. */
   dueDate: string | null;
+  /** When the user archived it, or null. Its issues keep it, but no issue can be put in it until it is restored. */
+  archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }

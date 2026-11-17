@@ -21,6 +21,7 @@ export function milestoneViews(milestones: readonly Milestone[], issues: readonl
       title: milestone.title,
       description: milestone.description,
       dueDate: milestone.dueDate,
+      archived: milestone.archivedAt !== null,
       issueCount: inMilestone.length,
       closedCount: inMilestone.filter((issue) => issue.state === "closed").length,
     };

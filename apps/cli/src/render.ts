@@ -67,7 +67,9 @@ export function renderPlanningRepos(repos: readonly PlanningRepoStatus[]): strin
   if (repos.length === 0) return "No planning repos yet. One is added the first time an issue or project uses a repo.";
 
   const headers = ["name", "path", "status"];
-  const rows = repos.map((repo) => [repo.slug, repo.path, repo.found ? "found" : "not found"]);
+  const status = (repo: PlanningRepoStatus) =>
+    [repo.archivedAt ? "archived" : null, repo.found ? "found" : "not found"].filter(Boolean).join(", ");
+  const rows = repos.map((repo) => [repo.slug, repo.path, status(repo)]);
   const widths = headers.map((header, index) => Math.max(header.length, ...rows.map((row) => row[index]!.length)));
   const formatRow = (cells: string[]) => cells.map((cell, index) => cell.padEnd(widths[index]!)).join("  ").trimEnd();
 

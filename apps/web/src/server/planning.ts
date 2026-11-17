@@ -74,7 +74,12 @@ export const getPlanning = createServerFn({ method: "GET" }).handler(async (): P
   };
 });
 
-const projectOptions = () => getApp().listProjects().map(({ id, name }) => ({ id, name }));
+/** Projects to choose from; an archived one only when it is `keep`, the issue's own, labelled as archived. */
+const projectOptions = (keep: number | null = null) =>
+  getApp()
+    .listProjects({ includeArchived: keep !== null })
+    .filter((project) => project.archivedAt === null || project.id === keep)
+    .map(({ id, name, archivedAt }) => ({ id, name: archivedAt ? `${name} (archived)` : name }));
 
 const isId = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value > 0;
 
@@ -91,13 +96,19 @@ export const getLocalIssue = createServerFn({ method: "GET" })
     return {
       issue: toView(issue, loadRepositories()),
       limits: issueLimits(),
-      projects: projectOptions(),
+      // Archived ones cannot be chosen, but the issue's own project and milestone are kept so the page can name them.
+      projects: projectOptions(issue.projectId),
       milestones:
-        issue.projectId === null ? [] : app.listMilestones(issue.projectId).map(({ id, title }) => ({ id, title })),
+        issue.projectId === null
+          ? []
+          : app
+              .listMilestones(issue.projectId, { includeArchived: true })
+              .filter((milestone) => milestone.archivedAt === null || milestone.id === issue.milestoneId)
+              .map(({ id, title, archivedAt }) => ({ id, title: archivedAt ? `${title} (archived)` : title })),
     };
   });
 
-/** Every planning issue filed against one repo (open and closed), most recently updated first. */
+/** Every planning issue filed against one repo (open and closed, archived too), most recently updated first. */
 export const getRepoLocalIssues = createServerFn({ method: "GET" })
   .validator((input: { relativePath: string }) => {
     if (typeof input?.relativePath !== "string" || !input.relativePath) throw new Error("Invalid issues request.");
@@ -106,7 +117,7 @@ export const getRepoLocalIssues = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<LocalIssueView[]> => {
     const repos = loadRepositories();
     return getApp()
-      .listLocalIssues({ repoPath: data.relativePath })
+      .listLocalIssues({ repoPath: data.relativePath, includeArchived: true })
       .map((issue) => toView(issue, repos));
   });
 

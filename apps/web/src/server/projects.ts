@@ -14,11 +14,14 @@ export interface ProjectRepoView {
   name: string;
   /** False when the repo has moved or been removed since it was added. */
   known: boolean;
+  /** The repo itself is archived in planning, so its issues are hidden from the planning lists. */
+  archived: boolean;
 }
 
 export interface ProjectSummary {
   id: number;
   name: string;
+  archived: boolean;
   repoCount: number;
   openIssueCount: number;
   issueCount: number;
@@ -32,13 +35,17 @@ export interface ProjectsView {
 export interface ProjectDetail {
   id: number;
   name: string;
+  /** An archived project takes no new repos, issues or milestones until it is restored. */
+  archived: boolean;
   repos: ProjectRepoView[];
+  /** Repos taken out of the project. Their issues stay filed under it; adding a repo again brings it back. */
+  removedRepos: ProjectRepoView[];
   /** Known repos not yet in the project. */
   availableRepos: PlanningRepoOption[];
   issues: LocalIssueView[];
   /** Issues in no project, which can be added. */
   unassignedIssues: LocalIssueView[];
-  /** Soonest due date first, then milestones with no due date. */
+  /** Soonest due date first, then milestones with no due date; archived ones included (see `MilestoneView.archived`). */
   milestones: MilestoneView[];
   milestoneLimits: MilestoneLimits;
   nameLimit: number;
@@ -55,20 +62,21 @@ const nameLimit = (): number => MAX_PROJECT_NAME_LENGTH;
 
 const isId = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value > 0;
 
-function repoView({ id, slug, path }: ProjectRepo, repos: readonly RepoRecord[]): ProjectRepoView {
+function repoView({ id, slug, path, archived }: ProjectRepo, repos: readonly RepoRecord[]): ProjectRepoView {
   const repo = repos.find((candidate) => candidate.relativePath === path);
-  return { id, slug, relativePath: path, name: repo?.name ?? path.split("/").pop() ?? path, known: repo !== undefined };
+  return { id, slug, relativePath: path, name: repo?.name ?? path.split("/").pop() ?? path, known: repo !== undefined, archived };
 }
 
 export const getProjects = createServerFn({ method: "GET" }).handler(async (): Promise<ProjectsView> => {
   const app = getApp();
-  const issues = app.listLocalIssues();
+  const issues = app.listLocalIssues({ includeArchived: true });
   return {
-    projects: app.listProjects().map((project) => {
+    projects: app.listProjects({ includeArchived: true }).map((project) => {
       const inProject = issues.filter((issue) => issue.projectId === project.id);
       return {
         id: project.id,
         name: project.name,
+        archived: project.archivedAt !== null,
         repoCount: project.repoPaths.length,
         issueCount: inProject.length,
         openIssueCount: inProject.filter((issue) => issue.state === "open").length,
@@ -92,17 +100,22 @@ export const getProjectDetail = createServerFn({ method: "GET" })
     const project = app.planning.getProject(data.id);
     if (!project) return null;
     const repos = loadRepositories();
-    const issues = app.listLocalIssues();
+    // The project page shows everything filed under it, including issues of archived repos (labelled as such).
+    const issues = app.listLocalIssues({ includeArchived: true });
     return {
       id: project.id,
       name: project.name,
+      archived: project.archivedAt !== null,
       repos: project.repos.map((repo) => repoView(repo, repos)),
+      removedRepos: project.removedRepos.map((repo) => repoView(repo, repos)),
       availableRepos: repos
         .filter((repo) => !repo.isWorktree && !project.repoPaths.includes(repo.relativePath))
         .map(({ relativePath, name }) => ({ relativePath, name })),
       issues: issues.filter((issue) => issue.projectId === project.id).map((issue) => toView(issue, repos)),
-      unassignedIssues: issues.filter((issue) => issue.projectId === null).map((issue) => toView(issue, repos)),
-      milestones: milestoneViews(app.listMilestones(project.id), issues),
+      unassignedIssues: issues
+        .filter((issue) => issue.projectId === null && !issue.archived)
+        .map((issue) => toView(issue, repos)),
+      milestones: milestoneViews(app.listMilestones(project.id, { includeArchived: true }), issues),
       milestoneLimits: milestoneLimits(),
       nameLimit: nameLimit(),
     };
@@ -149,6 +162,17 @@ export const addProjectRepo = createServerFn({ method: "POST" })
   })
   .handler(async ({ data }): Promise<void> => {
     getApp().addRepoToProject(data.id, data.repo);
+  });
+
+/** Archives (`archived: true`) or restores a project. */
+export const setProjectArchived = createServerFn({ method: "POST" })
+  .validator((input: { id: number; archived: boolean }) => {
+    if (!isId(input?.id) || typeof input?.archived !== "boolean") throw new Error("Invalid project request.");
+    return input;
+  })
+  .handler(async ({ data }): Promise<void> => {
+    if (data.archived) getApp().archiveProject(data.id);
+    else getApp().restoreProject(data.id);
   });
 
 /** `repoId` is the planning repo's id (`ProjectRepoView.id`), so a repo that has moved can still be removed. */

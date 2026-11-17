@@ -1,17 +1,24 @@
 import { Link, createFileRoute, notFound, useRouter } from "@tanstack/react-router";
-import { ArrowLeft, CircleCheck, CircleDot, Pencil, Trash2, X } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeft, CircleCheck, CircleDot, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { DeleteProjectDialog } from "#/components/delete-project-dialog";
 import { MilestoneCards } from "#/components/milestone-cards";
 import { ProjectGitHubPreview } from "#/components/project-github-preview";
 import { ProjectNameDialog } from "#/components/project-name-dialog";
+import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import { NativeSelect } from "#/components/ui/native-select";
 import { SearchSelect } from "#/components/ui/search-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
 import { statusLabel } from "#/lib/issue-status";
 import { setIssueMilestone } from "#/server/milestones";
-import { addProjectRepo, getProjectDetail, removeProjectRepo, setIssueProject } from "#/server/projects";
+import {
+  addProjectRepo,
+  getProjectDetail,
+  removeProjectRepo,
+  setIssueProject,
+  setProjectArchived,
+} from "#/server/projects";
 
 const TABS = ["repositories", "issues", "github"] as const;
 type ProjectTab = (typeof TABS)[number];
@@ -75,16 +82,19 @@ function ProjectDetailPage() {
   }
 
   const self = { id: project.id, name: project.name };
+  const editable = !project.archived;
+  const activeMilestones = project.milestones.filter((milestone) => !milestone.archived);
 
   // Without milestones the issues are one plain list. With them, each milestone gets a heading so it is clear
-  // which issues count toward which, and issues in none come last.
+  // which issues count toward which, and issues in none come last. Archived milestones keep their issues, so
+  // they keep their groups too.
   const issueGroups =
     project.milestones.length === 0
       ? [{ key: "all", heading: null, issues: project.issues }]
       : [
           ...project.milestones.map((milestone) => ({
             key: String(milestone.id),
-            heading: milestone.title,
+            heading: milestone.archived ? `${milestone.title} (archived)` : milestone.title,
             issues: project.issues.filter((issue) => issue.milestoneId === milestone.id),
           })),
           {
@@ -99,13 +109,36 @@ function ProjectDetailPage() {
       <BackLink />
 
       <header className="flex flex-wrap items-start justify-between gap-3">
-        <h1 className="min-w-0 text-2xl font-semibold tracking-tight break-words">{project.name}</h1>
-        <div className="flex items-center gap-2">
+        <h1 className="flex min-w-0 flex-wrap items-center gap-2 text-2xl font-semibold tracking-tight break-words">
+          {project.name}
+          {project.archived ? <Badge variant="secondary">Archived</Badge> : null}
+        </h1>
+        <div className="flex flex-wrap items-center gap-2">
           <ProjectNameDialog mode="rename" project={self} nameLimit={project.nameLimit}>
             <Button variant="outline">
               <Pencil aria-hidden /> Rename
             </Button>
           </ProjectNameDialog>
+          <Button
+            variant="outline"
+            disabled={busy}
+            onClick={() =>
+              void run(
+                () => setProjectArchived({ data: { id: project.id, archived: !project.archived } }),
+                project.archived ? "Could not restore the project." : "Could not archive the project.",
+              )
+            }
+          >
+            {project.archived ? (
+              <>
+                <ArchiveRestore aria-hidden /> Restore
+              </>
+            ) : (
+              <>
+                <Archive aria-hidden /> Archive
+              </>
+            )}
+          </Button>
           <DeleteProjectDialog project={self} onDeleted={() => navigate({ to: "/projects" })}>
             <Button variant="outline">
               <Trash2 aria-hidden /> Delete
@@ -114,13 +147,25 @@ function ProjectDetailPage() {
         </div>
       </header>
 
+      {project.archived ? (
+        <p className="rounded-md border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
+          This project is archived. It and its issues are hidden from the planning lists, and nothing new can be added
+          to it. Restore it to work on it again.
+        </p>
+      ) : null}
+
       {error ? (
         <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
       ) : null}
 
-      <MilestoneCards projectId={project.id} milestones={project.milestones} limits={project.milestoneLimits} />
+      <MilestoneCards
+        projectId={project.id}
+        milestones={project.milestones}
+        limits={project.milestoneLimits}
+        readOnly={project.archived}
+      />
 
       <Tabs
         value={tab}
@@ -144,7 +189,7 @@ function ProjectDetailPage() {
               <h2 id="project-repos" className="text-lg font-semibold">
                 Repositories <span className="text-sm font-normal text-muted-foreground">{project.repos.length}</span>
               </h2>
-              {project.availableRepos.length > 0 ? (
+              {editable && project.availableRepos.length > 0 ? (
                 <SearchSelect
                   aria-label="Add a repository"
                   placeholder="Add a repository…"
@@ -184,6 +229,11 @@ function ProjectDetailPage() {
                           {repo.relativePath} (not found)
                         </span>
                       )}
+                      {repo.archived ? (
+                        <span className="ml-2 text-xs text-muted-foreground" title="Its issues are hidden from the planning lists.">
+                          archived
+                        </span>
+                      ) : null}
                     </div>
                     <Button
                       variant="ghost"
@@ -203,6 +253,43 @@ function ProjectDetailPage() {
                 ))}
               </ul>
             )}
+            {project.removedRepos.length > 0 ? (
+              <div className="grid gap-1">
+                <h3 className="text-sm font-medium text-muted-foreground">
+                  Removed <span className="font-normal">{project.removedRepos.length}</span>
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  Taken out of the project. Their issues stay filed under it; add a repo back to restore it.
+                </p>
+                <ul className="divide-y border-y" data-testid="project-removed-repo-list">
+                  {project.removedRepos.map((repo) => (
+                    <li key={repo.id} className="flex items-center gap-3 py-2">
+                      <span className="min-w-0 flex-1 font-mono text-sm text-muted-foreground">
+                        {repo.relativePath}
+                        {repo.known ? "" : " (not found)"}
+                        {repo.archived ? " · archived" : ""}
+                      </span>
+                      {editable && repo.known && !repo.archived ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Add ${repo.relativePath} back to this project`}
+                          disabled={busy}
+                          onClick={() =>
+                            void run(
+                              () => addProjectRepo({ data: { id: project.id, repo: repo.relativePath } }),
+                              "Could not add the repository back.",
+                            )
+                          }
+                        >
+                          <Plus aria-hidden /> Add back
+                        </Button>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </section>
         </TabsContent>
 
@@ -218,7 +305,7 @@ function ProjectDetailPage() {
                   Your own planning issues. They live in gitlib only and are never sent to GitHub.
                 </p>
               </div>
-              {project.unassignedIssues.length > 0 ? (
+              {editable && project.unassignedIssues.length > 0 ? (
                 <SearchSelect
                   aria-label="Add a gitlib issue"
                   placeholder="Add a gitlib issue…"
@@ -280,9 +367,10 @@ function ProjectDetailPage() {
                                   {issue.repoName}#{issue.number}
                                 </span>
                                 {open ? ` · ${statusLabel(issue.status)}` : " · Closed"}
+                                {issue.archived && !project.archived ? " · repo archived" : ""}
                               </p>
                             </div>
-                            {project.milestones.length > 0 ? (
+                            {activeMilestones.length > 0 || issue.milestoneId !== null ? (
                               <NativeSelect
                                 aria-label={`Milestone for ${issue.title}`}
                                 value={issue.milestoneId ?? ""}
@@ -302,11 +390,14 @@ function ProjectDetailPage() {
                                 className="w-auto max-w-40"
                               >
                                 <option value="">No milestone</option>
-                                {project.milestones.map((milestone) => (
-                                  <option key={milestone.id} value={milestone.id}>
-                                    {milestone.title}
-                                  </option>
-                                ))}
+                                {/* Archived milestones take no new issues, but the one an issue is already in stays listed. */}
+                                {project.milestones
+                                  .filter((milestone) => !milestone.archived || milestone.id === issue.milestoneId)
+                                  .map((milestone) => (
+                                    <option key={milestone.id} value={milestone.id}>
+                                      {milestone.archived ? `${milestone.title} (archived)` : milestone.title}
+                                    </option>
+                                  ))}
                               </NativeSelect>
                             ) : null}
                             <Button

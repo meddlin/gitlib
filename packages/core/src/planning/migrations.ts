@@ -199,6 +199,20 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE INDEX project_repos_by_repo ON project_repos (repo_id);
     `,
   },
+  {
+    version: 8,
+    name: "archiving",
+    sql: `
+      -- When the user put it away, or NULL while it is in use. Archiving hides without deleting: an archived
+      -- repo or project hides its issues from the default lists, an archived milestone hides only itself, and
+      -- an archived membership is a repo taken out of a project whose issues stay filed under the project.
+      -- Everything archived can be restored.
+      ALTER TABLE planning_repos ADD COLUMN archived_at TEXT;
+      ALTER TABLE project_repos ADD COLUMN archived_at TEXT;
+      ALTER TABLE projects ADD COLUMN archived_at TEXT;
+      ALTER TABLE milestones ADD COLUMN archived_at TEXT;
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

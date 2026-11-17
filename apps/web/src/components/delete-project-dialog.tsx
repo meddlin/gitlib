@@ -56,6 +56,7 @@ export function DeleteProjectDialog({
           <DialogTitle>Delete “{project.name}”?</DialogTitle>
           <DialogDescription>
             This removes the project only. Its repositories and issues are not deleted; they just stop belonging to it.
+            To keep the project and put it away instead, archive it.
           </DialogDescription>
         </DialogHeader>
         {error ? (

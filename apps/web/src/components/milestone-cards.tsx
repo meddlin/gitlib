@@ -1,21 +1,52 @@
-import { Flag, Pencil, Plus, Trash2 } from "lucide-react";
+import { useRouter } from "@tanstack/react-router";
+import { Archive, ArchiveRestore, Flag, Pencil, Plus, Trash2 } from "lucide-react";
+import { useState } from "react";
 import { DeleteMilestoneDialog } from "#/components/delete-milestone-dialog";
 import { MilestoneFormDialog } from "#/components/milestone-form-dialog";
 import { Button } from "#/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card";
 import { formatDueDate, isOverdue, milestoneProgress } from "#/lib/milestones";
-import type { MilestoneLimits, MilestoneView } from "#/server/milestones";
+import { setMilestoneArchived, type MilestoneLimits, type MilestoneView } from "#/server/milestones";
 
-/** A project's milestones as cards, with the controls to add, edit and delete them. */
+/** Archives or restores a milestone, then reloads the page data; returns the action and any error. */
+function useArchiveToggle() {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function toggle(milestone: MilestoneView) {
+    setBusy(true);
+    setError(null);
+    try {
+      await setMilestoneArchived({ data: { id: milestone.id, archived: !milestone.archived } });
+      await router.invalidate();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not change the milestone.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return { busy, error, toggle };
+}
+
+/**
+ * A project's milestones as cards, with the controls to add, edit, archive and delete them. Archived milestones
+ * are listed apart, under the cards, where they can be restored. `readOnly` (an archived project) hides the controls.
+ */
 export function MilestoneCards({
   projectId,
-  milestones,
+  milestones: all,
   limits,
+  readOnly = false,
 }: {
   projectId: number;
   milestones: MilestoneView[];
   limits: MilestoneLimits;
+  readOnly?: boolean;
 }) {
+  const milestones = all.filter((milestone) => !milestone.archived);
+  const archived = all.filter((milestone) => milestone.archived);
+  const { busy, error, toggle } = useArchiveToggle();
+
   return (
     <section aria-labelledby="project-milestones" className="grid gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -27,12 +58,20 @@ export function MilestoneCards({
             Goals to group this project's issues under, optionally with a due date.
           </p>
         </div>
-        <MilestoneFormDialog mode="create" projectId={projectId} limits={limits}>
-          <Button variant="outline">
-            <Plus aria-hidden /> New milestone
-          </Button>
-        </MilestoneFormDialog>
+        {readOnly ? null : (
+          <MilestoneFormDialog mode="create" projectId={projectId} limits={limits}>
+            <Button variant="outline">
+              <Plus aria-hidden /> New milestone
+            </Button>
+          </MilestoneFormDialog>
+        )}
       </div>
+
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
 
       {milestones.length === 0 ? (
         <p className="border-y py-6 text-center text-sm text-muted-foreground">No milestones in this project yet.</p>
@@ -40,16 +79,68 @@ export function MilestoneCards({
         <ul className="grid gap-3 sm:grid-cols-2" data-testid="project-milestone-list">
           {milestones.map((milestone) => (
             <li key={milestone.id} className="flex">
-              <MilestoneCard milestone={milestone} limits={limits} />
+              <MilestoneCard
+                milestone={milestone}
+                limits={limits}
+                readOnly={readOnly}
+                busy={busy}
+                onArchive={() => void toggle(milestone)}
+              />
             </li>
           ))}
         </ul>
       )}
+
+      {archived.length > 0 ? (
+        <div className="grid gap-1">
+          <h3 className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+            <Archive className="size-3.5" aria-hidden /> Archived <span className="font-normal">{archived.length}</span>
+          </h3>
+          <ul className="divide-y border-y" data-testid="archived-milestone-list">
+            {archived.map((milestone) => (
+              <li key={milestone.id} className="flex items-center gap-3 py-2">
+                <span className="min-w-0 flex-1 text-sm break-words text-muted-foreground">
+                  {milestone.title}
+                  <span className="text-xs">
+                    {" · "}
+                    {milestone.issueCount === 0
+                      ? "No issues"
+                      : `${milestone.closedCount} of ${milestone.issueCount} closed`}
+                  </span>
+                </span>
+                {readOnly ? null : (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Restore ${milestone.title}`}
+                    disabled={busy}
+                    onClick={() => void toggle(milestone)}
+                  >
+                    <ArchiveRestore aria-hidden /> Restore
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
     </section>
   );
 }
 
-function MilestoneCard({ milestone, limits }: { milestone: MilestoneView; limits: MilestoneLimits }) {
+function MilestoneCard({
+  milestone,
+  limits,
+  readOnly,
+  busy,
+  onArchive,
+}: {
+  milestone: MilestoneView;
+  limits: MilestoneLimits;
+  readOnly: boolean;
+  busy: boolean;
+  onArchive: () => void;
+}) {
   const progress = milestoneProgress(milestone.issueCount, milestone.closedCount);
   const overdue = isOverdue(milestone.dueDate, progress);
 
@@ -78,18 +169,30 @@ function MilestoneCard({ milestone, limits }: { milestone: MilestoneView; limits
             "No due date"
           )}
         </CardDescription>
-        <CardAction className="-mt-1 -mr-2 flex items-center">
-          <MilestoneFormDialog mode="edit" milestone={milestone} limits={limits}>
-            <Button variant="ghost" size="icon-sm" aria-label={`Edit ${milestone.title}`}>
-              <Pencil aria-hidden />
+        {readOnly ? null : (
+          <CardAction className="-mt-1 -mr-2 flex items-center">
+            <MilestoneFormDialog mode="edit" milestone={milestone} limits={limits}>
+              <Button variant="ghost" size="icon-sm" aria-label={`Edit ${milestone.title}`}>
+                <Pencil aria-hidden />
+              </Button>
+            </MilestoneFormDialog>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={`Archive ${milestone.title}`}
+              title="Archive: its issues keep it, but no new ones can join"
+              disabled={busy}
+              onClick={onArchive}
+            >
+              <Archive aria-hidden />
             </Button>
-          </MilestoneFormDialog>
-          <DeleteMilestoneDialog milestone={milestone} issueCount={milestone.issueCount}>
-            <Button variant="ghost" size="icon-sm" aria-label={`Delete ${milestone.title}`}>
-              <Trash2 aria-hidden />
-            </Button>
-          </DeleteMilestoneDialog>
-        </CardAction>
+            <DeleteMilestoneDialog milestone={milestone} issueCount={milestone.issueCount}>
+              <Button variant="ghost" size="icon-sm" aria-label={`Delete ${milestone.title}`}>
+                <Trash2 aria-hidden />
+              </Button>
+            </DeleteMilestoneDialog>
+          </CardAction>
+        )}
       </CardHeader>
 
       <CardContent className="grid gap-2 px-4">

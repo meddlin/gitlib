@@ -19,6 +19,7 @@ import {
   ProjectNotFoundError,
   ProjectValidationError,
   AmbiguousPlanningRepoError,
+  PlanningArchivedError,
   PlanningRepoNotFoundError,
   RepoNotFoundError,
   RepoPathTakenError,
@@ -694,7 +695,7 @@ describe("planning repos", () => {
     fs.rmSync(path.join(fx.gitRoot, "alpha"), { recursive: true });
     app.refresh();
 
-    expect(app.getProject(project.id).repos).toEqual([{ id: expect.any(Number), slug: "core", path: "alpha" }]);
+    expect(app.getProject(project.id).repos).toEqual([{ id: expect.any(Number), slug: "core", path: "alpha", archived: false }]);
     expect(app.removeRepoFromProject(project.id, "core").repos).toEqual([]);
     expect(() => app.removeRepoFromProject(project.id, "nope")).toThrow(PlanningRepoNotFoundError);
   });
@@ -773,5 +774,151 @@ describe("planning repo names", () => {
     // An id is never ambiguous, which is how the web app removes a repo.
     const topLevel = app.resolvePlanningRepo("api-2");
     expect(app.removeRepoFromProject(project.id, topLevel.id).repoPaths).toEqual(["work/api"]);
+  });
+});
+
+describe("archiving", () => {
+  beforeEach(() => {
+    fx.makeRepo("alpha");
+    fx.makeRepo("beta");
+  });
+
+  const appWithRepos = () => {
+    const app = createApplication(fx.env());
+    app.refresh();
+    return app;
+  };
+  const titles = (issues: { title: string }[]) => issues.map((issue) => issue.title).sort();
+
+  it("hides an archived repo's issues without losing them, and brings them back on restore", () => {
+    const app = appWithRepos();
+    const kept = app.createLocalIssue("alpha", { title: "kept" });
+    app.createLocalIssue("beta", { title: "other" });
+    const project = app.createProject("Launch");
+    app.addRepoToProject(project.id, "alpha");
+    app.setLocalIssueProject(kept.id, project.id);
+
+    const archived = app.archivePlanningRepo("alpha");
+
+    expect(archived.archivedAt).not.toBeNull();
+    expect(titles(app.listLocalIssues())).toEqual(["other"]);
+    expect(app.listLocalIssues({ includeArchived: true }).find((i) => i.id === kept.id)).toMatchObject({ archived: true });
+    expect(app.getLocalIssue(kept.id)).toMatchObject({ title: "kept", projectId: project.id, archived: true });
+    // The membership stays, flagged so the project page can say why.
+    expect(app.getProject(project.id).repos).toEqual([expect.objectContaining({ slug: "alpha", archived: true })]);
+    expect(() => app.createLocalIssue("alpha", { title: "late" })).toThrow(PlanningArchivedError);
+    expect(() => app.addRepoToProject(app.createProject("Other").id, "alpha")).toThrow(PlanningArchivedError);
+    expect(app.listPlanningRepos().find((repo) => repo.slug === "alpha")?.archivedAt).not.toBeNull();
+
+    expect(app.restorePlanningRepo("alpha").archivedAt).toBeNull();
+    expect(titles(app.listLocalIssues())).toEqual(["kept", "other"]);
+    expect(app.createLocalIssue("alpha", { title: "late" }).number).toBe(2);
+  });
+
+  it("takes a repo out of a project by archiving the membership, and restores it when added again", () => {
+    const app = appWithRepos();
+    const project = app.createProject("Launch");
+    app.addRepoToProject(project.id, "alpha");
+    app.addRepoToProject(project.id, "beta");
+    const issue = app.createLocalIssue("alpha", { title: "stays filed" });
+    app.setLocalIssueProject(issue.id, project.id);
+
+    const removed = app.removeRepoFromProject(project.id, "alpha");
+
+    expect(removed.repoPaths).toEqual(["beta"]);
+    expect(removed.removedRepos.map((repo) => repo.path)).toEqual(["alpha"]);
+    expect(app.getLocalIssue(issue.id)).toMatchObject({ projectId: project.id, archived: false });
+    expect(app.listLocalIssues({ projectId: project.id }).map((i) => i.id)).toEqual([issue.id]);
+
+    const readded = app.addRepoToProject(project.id, "alpha");
+    expect(readded.repoPaths).toEqual(["alpha", "beta"]);
+    expect(readded.removedRepos).toEqual([]);
+  });
+
+  it("archives a finished project: it and its issues leave the lists, and nothing new goes in", () => {
+    const app = appWithRepos();
+    const project = app.createProject("Done");
+    const milestone = app.createMilestone(project.id, { title: "v1" });
+    const inProject = app.createLocalIssue("alpha", { title: "in project" });
+    const loose = app.createLocalIssue("alpha", { title: "loose" });
+    app.setLocalIssueProject(inProject.id, project.id);
+
+    expect(app.archiveProject(project.id).archivedAt).not.toBeNull();
+
+    expect(app.listProjects()).toEqual([]);
+    expect(app.listProjects({ includeArchived: true }).map((p) => p.name)).toEqual(["Done"]);
+    expect(titles(app.listLocalIssues())).toEqual(["loose"]);
+    expect(app.listLocalIssues({ projectId: project.id, includeArchived: true }).map((i) => i.id)).toEqual([inProject.id]);
+    expect(() => app.setLocalIssueProject(loose.id, project.id)).toThrow('The project "Done" is archived');
+    expect(() => app.createMilestone(project.id, { title: "v2" })).toThrow(PlanningArchivedError);
+    expect(() => app.addRepoToProject(project.id, "beta")).toThrow(PlanningArchivedError);
+    // Its own issues can still be moved out, and it can still be renamed.
+    expect(app.renameProject(project.id, "Shipped").name).toBe("Shipped");
+    expect(app.getMilestone(milestone.id).archivedAt).toBeNull();
+
+    expect(app.restoreProject(project.id).archivedAt).toBeNull();
+    expect(titles(app.listLocalIssues())).toEqual(["in project", "loose"]);
+    expect(app.setLocalIssueProject(loose.id, project.id).projectId).toBe(project.id);
+  });
+
+  it("archives a milestone: its issues keep it, but no other issue can join it", () => {
+    const app = appWithRepos();
+    const project = app.createProject("Launch");
+    const milestone = app.createMilestone(project.id, { title: "v1" });
+    const done = app.createLocalIssue("alpha", { title: "done" });
+    const other = app.createLocalIssue("alpha", { title: "other" });
+    for (const issue of [done, other]) app.setLocalIssueProject(issue.id, project.id);
+    app.setLocalIssueMilestone(done.id, milestone.id);
+
+    app.archiveMilestone(milestone.id);
+
+    expect(app.listMilestones(project.id)).toEqual([]);
+    expect(app.listMilestones(project.id, { includeArchived: true }).map((m) => m.title)).toEqual(["v1"]);
+    expect(app.getLocalIssue(done.id)).toMatchObject({ milestoneId: milestone.id, archived: false });
+    expect(titles(app.listLocalIssues())).toEqual(["done", "other"]);
+    // Setting what it already is changes nothing; joining is refused.
+    expect(app.setLocalIssueMilestone(done.id, milestone.id).milestoneId).toBe(milestone.id);
+    expect(() => app.setLocalIssueMilestone(other.id, milestone.id)).toThrow(PlanningArchivedError);
+    expect(app.setLocalIssueMilestone(done.id, null).milestoneId).toBeNull();
+
+    app.restoreMilestone(milestone.id);
+    expect(app.setLocalIssueMilestone(other.id, milestone.id).milestoneId).toBe(milestone.id);
+  });
+
+  it("reports archiving something that does not exist", () => {
+    const app = appWithRepos();
+    expect(() => app.archiveProject(999)).toThrow(ProjectNotFoundError);
+    expect(() => app.archiveMilestone(999)).toThrow(MilestoneNotFoundError);
+    expect(() => app.archivePlanningRepo("nope")).toThrow(PlanningRepoNotFoundError);
+  });
+
+  it("does not follow an archived repo when it moves", () => {
+    fs.rmSync(path.join(fx.gitRoot, "alpha"), { recursive: true });
+    const repoPath = fx.initRealGitRepo("alpha");
+    fx.git(repoPath, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "init");
+    const app = appWithRepos();
+    app.createLocalIssue("alpha", { title: "parked" });
+    app.archivePlanningRepo("alpha");
+
+    fs.renameSync(repoPath, path.join(fx.gitRoot, "elsewhere"));
+    app.refresh();
+
+    expect(app.resolvePlanningRepo("alpha").path).toBe("alpha");
+  });
+
+  it("arrives through migration 8 with nothing archived", () => {
+    const before = MIGRATIONS.slice(0, 7);
+    expect(before.at(-1)?.name).toBe("planning repos");
+    new PlanningStore(planningDbPath(), before);
+    const db = new DatabaseSync(planningDbPath());
+    db.exec("INSERT INTO planning_repos (slug, path, created_at, updated_at) VALUES ('alpha', 'alpha', '', '')");
+    db.exec("INSERT INTO projects (name, created_at, updated_at) VALUES ('Launch', '', '')");
+    db.exec("INSERT INTO project_repos (project_id, repo_id, added_at) VALUES (1, 1, '')");
+    db.close();
+
+    const upgraded = new PlanningStore(planningDbPath());
+
+    expect(upgraded.listRepos()[0]?.archivedAt).toBeNull();
+    expect(upgraded.listProjects()[0]).toMatchObject({ archivedAt: null, repoPaths: ["alpha"], removedRepos: [] });
   });
 });

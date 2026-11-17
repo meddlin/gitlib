@@ -9,6 +9,8 @@ export interface MilestoneView {
   description: string;
   /** `YYYY-MM-DD`, or null. */
   dueDate: string | null;
+  /** Archived milestones keep their issues but take no new ones; the project page lists them apart. */
+  archived: boolean;
   issueCount: number;
   closedCount: number;
 }
@@ -78,6 +80,17 @@ export const deleteMilestone = createServerFn({ method: "POST" })
   })
   .handler(async ({ data }): Promise<void> => {
     getApp().deleteMilestone(data.id);
+  });
+
+/** Archives (`archived: true`) or restores a milestone. */
+export const setMilestoneArchived = createServerFn({ method: "POST" })
+  .validator((input: { id: number; archived: boolean }) => {
+    if (!isId(input?.id) || typeof input?.archived !== "boolean") throw new Error("Invalid milestone request.");
+    return input;
+  })
+  .handler(async ({ data }): Promise<void> => {
+    if (data.archived) getApp().archiveMilestone(data.id);
+    else getApp().restoreMilestone(data.id);
   });
 
 /** Pass `milestoneId: null` to take the issue out of its milestone. */
