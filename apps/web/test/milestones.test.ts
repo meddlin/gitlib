@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
+import type { IssueStatus, LocalIssue } from "@gitlib/core";
 import { formatDueDate, isOverdue, milestoneProgress, todayDate } from "../src/lib/milestones";
+import { ROLL_UP_LABELS } from "../src/lib/roll-up";
+import { epicViews } from "../src/server/epics.server";
+import { milestoneViews } from "../src/server/milestones.server";
 
 describe("milestone progress", () => {
   it("counts closed issues and rounds the percentage", () => {
@@ -42,5 +46,43 @@ describe("due dates", () => {
   it("writes today's local date as YYYY-MM-DD", () => {
     expect(todayDate(new Date(2026, 0, 5, 23, 59))).toBe("2026-01-05");
     expect(todayDate(new Date(2026, 11, 31, 0, 0))).toBe("2026-12-31");
+  });
+});
+
+describe("rolled-up status", () => {
+  const issue = (id: number, status: IssueStatus, groups: { milestoneId?: number; epicId?: number }): LocalIssue => ({
+    id,
+    repoId: 1,
+    repoSlug: "api",
+    repoPath: "api",
+    number: id,
+    title: `Issue ${id}`,
+    body: "",
+    state: status === "done" ? "closed" : "open",
+    status,
+    projectId: 1,
+    milestoneId: groups.milestoneId ?? null,
+    epicId: groups.epicId ?? null,
+    archived: false,
+    createdAt: "",
+    updatedAt: "",
+    closedAt: null,
+  });
+  const group = (id: number) => ({ id, projectId: 1, title: `Group ${id}`, description: "", archivedAt: null, createdAt: "", updatedAt: "" });
+
+  it("gives milestones and epics the same status from their issues", () => {
+    const issues = [
+      issue(1, "done", { milestoneId: 1, epicId: 1 }),
+      issue(2, "in_review", { milestoneId: 1, epicId: 2 }),
+      issue(3, "todo", { milestoneId: 2, epicId: 2 }),
+      issue(4, "done", { milestoneId: 3 }),
+    ];
+    const milestones = milestoneViews(
+      [1, 2, 3, 4].map((id) => ({ ...group(id), dueDate: null })),
+      issues,
+    );
+    expect(milestones.map((milestone) => milestone.status)).toEqual(["in_progress", "todo", "done", "empty"]);
+    expect(epicViews([group(1), group(2)], issues).map((epic) => epic.status)).toEqual(["done", "in_progress"]);
+    expect(ROLL_UP_LABELS[milestones[0]!.status]).toBe("In progress");
   });
 });

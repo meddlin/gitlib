@@ -59,6 +59,7 @@ export function DeleteMilestoneDialog({
               : issueCount === 1
                 ? "Its 1 issue stays in the project; it just stops belonging to this milestone."
                 : `Its ${issueCount} issues stay in the project; they just stop belonging to this milestone.`}
+            {" "}To keep it with its issues, archive it instead.
           </DialogDescription>
         </DialogHeader>
         {error ? (

@@ -9,11 +9,12 @@ import {
   type RepoRecord,
 } from "@gitlib/core";
 import { getApp, loadRepositories } from "./gitlib.server";
+import type { EpicOption } from "./epics";
 import type { MilestoneOption } from "./milestones";
 
 /** An issue that lives in gitlib's own planning database; nothing here is read from or sent to a forge. */
 export interface LocalIssueView extends LocalIssue {
-  /** The repo's display name, or the last segment of its path when gitlib no longer knows the repo. */
+  /** The repo's short name in planning (`LocalIssue.repoSlug`), so the issue reads as `repoName#3`. */
   repoName: string;
   /** False when the repo has moved or been removed since the issue was filed. */
   repoKnown: boolean;
@@ -46,6 +47,8 @@ export interface LocalIssueDetail {
   projects: { id: number; name: string }[];
   /** Milestones of the issue's project, which are the only ones it can be put in; empty when it has no project. */
   milestones: MilestoneOption[];
+  /** Epics of the issue's project, likewise. */
+  epics: EpicOption[];
 }
 
 // A function, not a constant: client bundles must not keep a runtime import of @gitlib/core.
@@ -55,7 +58,7 @@ export function toView(issue: LocalIssue, repos: readonly RepoRecord[]): LocalIs
   const repo = repos.find((candidate) => candidate.relativePath === issue.repoPath);
   return {
     ...issue,
-    repoName: repo?.name ?? issue.repoPath.split("/").pop() ?? issue.repoPath,
+    repoName: issue.repoSlug,
     repoKnown: repo !== undefined,
   };
 }
@@ -74,7 +77,12 @@ export const getPlanning = createServerFn({ method: "GET" }).handler(async (): P
   };
 });
 
-const projectOptions = () => getApp().listProjects().map(({ id, name }) => ({ id, name }));
+/** Projects to choose from; an archived one only when it is `keep`, the issue's own, labelled as archived. */
+const projectOptions = (keep: number | null = null) =>
+  getApp()
+    .listProjects({ includeArchived: keep !== null })
+    .filter((project) => project.archivedAt === null || project.id === keep)
+    .map(({ id, name, archivedAt }) => ({ id, name: archivedAt ? `${name} (archived)` : name }));
 
 const isId = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value > 0;
 
@@ -91,13 +99,26 @@ export const getLocalIssue = createServerFn({ method: "GET" })
     return {
       issue: toView(issue, loadRepositories()),
       limits: issueLimits(),
-      projects: projectOptions(),
+      // Archived ones cannot be chosen, but the issue's own project and milestone are kept so the page can name them.
+      projects: projectOptions(issue.projectId),
       milestones:
-        issue.projectId === null ? [] : app.listMilestones(issue.projectId).map(({ id, title }) => ({ id, title })),
+        issue.projectId === null
+          ? []
+          : app
+              .listMilestones(issue.projectId, { includeArchived: true })
+              .filter((milestone) => milestone.archivedAt === null || milestone.id === issue.milestoneId)
+              .map(({ id, title, archivedAt }) => ({ id, title: archivedAt ? `${title} (archived)` : title })),
+      epics:
+        issue.projectId === null
+          ? []
+          : app
+              .listEpics(issue.projectId, { includeArchived: true })
+              .filter((epic) => epic.archivedAt === null || epic.id === issue.epicId)
+              .map(({ id, title, archivedAt }) => ({ id, title: archivedAt ? `${title} (archived)` : title })),
     };
   });
 
-/** Every planning issue filed against one repo (open and closed), most recently updated first. */
+/** Every planning issue filed against one repo (open and closed, archived too), most recently updated first. */
 export const getRepoLocalIssues = createServerFn({ method: "GET" })
   .validator((input: { relativePath: string }) => {
     if (typeof input?.relativePath !== "string" || !input.relativePath) throw new Error("Invalid issues request.");
@@ -106,7 +127,7 @@ export const getRepoLocalIssues = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<LocalIssueView[]> => {
     const repos = loadRepositories();
     return getApp()
-      .listLocalIssues({ repoPath: data.relativePath })
+      .listLocalIssues({ repoPath: data.relativePath, includeArchived: true })
       .map((issue) => toView(issue, repos));
   });
 

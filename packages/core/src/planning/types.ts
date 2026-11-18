@@ -13,13 +13,13 @@ export const isIssueStatus = (value: unknown): value is IssueStatus =>
  */
 export interface LocalIssue {
   id: number;
-  /**
-   * The repo's `relativePath`, the same identifier the CLI and web app use. It is stored as text
-   * rather than a `gitlib.db` row id because that database can be rebuilt by rescanning and
-   * planning data cannot.
-   */
+  /** The planning repo it is filed against (see `PlanningRepo`); stays the same when the repo moves. */
+  repoId: number;
+  /** The repo's short name, so the issue reads as `slug#3`. */
+  repoSlug: string;
+  /** The repo's `relativePath` where gitlib last found it. Follows the repo when it moves. */
   repoPath: string;
-  /** Sequence within the repo, so issues read as `repo#3`. */
+  /** Sequence within the repo, so issues read as `slug#3`. */
   number: number;
   title: string;
   /** Markdown. */
@@ -36,19 +36,40 @@ export interface LocalIssue {
    * milestone sets this back to null.
    */
   milestoneId: number | null;
+  /**
+   * The epic this issue is part of, or null. Like the milestone, it is always one of `projectId`'s epics, so
+   * moving the issue to another project clears it, and deleting the epic sets it back to null.
+   */
+  epicId: number | null;
+  /**
+   * True when its repo or its project is archived. Such issues are left out of `listIssues` unless
+   * `includeArchived` is set; the issue itself is untouched and comes back when the repo or project is restored.
+   */
+  archived: boolean;
   createdAt: string;
   updatedAt: string;
   closedAt: string | null;
 }
 
 export interface LocalIssueQuery {
-  /** Only issues filed against this repo (its `relativePath`). */
+  /** Only issues filed against the repo now at this `relativePath`. */
   repoPath?: string;
+  /** Only issues filed against this planning repo. */
+  repoId?: number;
   state?: LocalIssueState;
   /** Only issues in this project. */
   projectId?: number;
   /** Only issues in this milestone. */
   milestoneId?: number;
+  /** Only issues in this epic. */
+  epicId?: number;
+  /** Also list issues whose repo or project is archived (see `LocalIssue.archived`). */
+  includeArchived?: boolean;
+}
+
+/** For lists that leave archived entries out unless asked. */
+export interface ArchiveFilter {
+  includeArchived?: boolean;
 }
 
 export interface NewLocalIssue {
@@ -70,16 +91,63 @@ export interface ProjectRemote {
 }
 
 /**
- * A named group of repositories and issues. Repos are referenced by `relativePath` (see
- * `LocalIssue.repoPath`), so a project can mention a repo gitlib has since lost track of.
+ * A repository as gitlib's planning data knows it. Issues and projects point at its `id`, which never
+ * changes, so they follow the repo when it moves or is renamed on disk. It lives in `planning.db`
+ * rather than `gitlib.db` because that database can be rebuilt by rescanning and planning data cannot.
+ * A planning repo is created the first time an issue or project refers to a repo.
+ */
+export interface PlanningRepo {
+  id: number;
+  /** Short name issues are shown under (`slug#3`). Unique, ignoring case; the user can change it. */
+  slug: string;
+  /** `relativePath` where gitlib last found the repo. */
+  path: string;
+  /** The repo's first commit, used to recognize it at a new path after a move; null until it is known. */
+  rootCommit: string | null;
+  /**
+   * When the user archived it, or null. An archived repo keeps its issues and memberships but hides its issues
+   * from the default lists, takes no new issues or projects, and is not followed when it moves.
+   */
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A planning repo plus whether the last scan found it at `path`. */
+export interface PlanningRepoStatus extends PlanningRepo {
+  /** False when nothing is at `path` any more; its issues stay, and it can be relinked to the repo's new path. */
+  found: boolean;
+}
+
+/** A repo in a project, as listed on the project. */
+export interface ProjectRepo {
+  id: number;
+  slug: string;
+  path: string;
+  /** The planning repo itself is archived (not just taken out of this project). */
+  archived: boolean;
+}
+
+/**
+ * A named group of repositories and issues. Repos are planning repos (see `PlanningRepo`), so a project
+ * keeps a repo gitlib has since lost track of.
  */
 export interface Project {
   id: number;
   name: string;
-  /** `relativePath` of every repo in the project, sorted. */
+  /** Every repo in the project, sorted by path. */
+  repos: ProjectRepo[];
+  /** `relativePath` of every repo in the project, sorted; the same repos as `repos`. */
   repoPaths: string[];
+  /**
+   * Repos taken out of the project. Taking a repo out archives the membership rather than deleting it, so
+   * its issues stay filed under the project; adding the repo again restores it.
+   */
+  removedRepos: ProjectRepo[];
   /** Hosted repos added without a clone, sorted by provider then name. */
   remotes: ProjectRemote[];
+  /** When the user archived the project, or null. An archived project hides its issues from the default lists. */
+  archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -94,8 +162,51 @@ export interface Milestone {
   description: string;
   /** A calendar date, `YYYY-MM-DD`, with no time zone; null when the milestone has no deadline. */
   dueDate: string | null;
+  /** When the user archived it, or null. Its issues keep it, but no issue can be put in it until it is restored. */
+  archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * A body of work within a project, such as a feature: what is being built, where a milestone is when it is due.
+ * An issue can be in one epic and one milestone of its project, and an epic's issues can come from any of the
+ * project's repos. An epic has no status of its own; see `rollUpStatus`.
+ */
+export interface Epic {
+  id: number;
+  projectId: number;
+  /** Unique within the project, ignoring case. */
+  title: string;
+  /** Markdown. */
+  description: string;
+  /** When the user archived it, or null. Its issues keep it, but no issue can join it until it is restored. */
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewEpic {
+  title: string;
+  description?: string;
+}
+
+export interface EpicChanges {
+  title?: string;
+  description?: string;
+}
+
+/**
+ * Where a group of issues (an epic or a milestone) stands, worked out from its issues: `empty` with none,
+ * `done` when every one is done, `todo` while none has started, and `in_progress` otherwise.
+ */
+export type RollUpStatus = "empty" | "todo" | "in_progress" | "done";
+
+export function rollUpStatus(statuses: readonly IssueStatus[]): RollUpStatus {
+  if (statuses.length === 0) return "empty";
+  if (statuses.every((status) => status === "done")) return "done";
+  if (statuses.every((status) => status === "todo")) return "todo";
+  return "in_progress";
 }
 
 export interface NewMilestone {

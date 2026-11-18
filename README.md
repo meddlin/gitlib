@@ -235,13 +235,50 @@ read from, copied from or sent to GitHub or GitLab (the repo page's **Issues** a
 tabs are separate and stay read-only GitHub views).
 
 - **New issue** files one against any repo (title, optional Markdown description). Issues are numbered
-  per repo, so they read as `repo#3`. Open an issue to edit it, close it, or reopen it. The list filters
-  by state and repo, and the filters live in the URL (`?state=closed&repo=…`).
+  per repo, so they read as `name#3`, where `name` is the repo's short name (below). Open an issue to edit
+  it, close it, or reopen it. The list filters by state and repo, and the filters live in the URL
+  (`?state=closed&repo=…`).
 - Descriptions are rendered as Markdown. Raw HTML is cut down to a safe subset (see the README rendering
   note in [Web App](#web-app)) and only `http(s)` links are made live.
-- An issue is tied to its repo by the repo's relative path. If a repo is moved or deleted its issues
-  stay readable and are labelled "repository not found"; new issues can only be filed against repos
-  gitlib currently sees.
+
+#### Repos in planning
+
+The first time an issue or project uses a repo, planning gives it a permanent id and a **short name** (its folder
+name, or its whole path if another repo already has that name). Issues and projects point at the id, not at the
+folder, so they follow the repo when it moves:
+
+- After each scan, a repo that has gone from where planning expects it is looked for elsewhere by its **first
+  commit**. If exactly one other repo has that first commit, planning follows it there on its own. Forks and second
+  clones share a first commit, so when more than one repo could be the one that moved, nothing changes until you
+  say which.
+- A repo planning cannot find keeps all its issues and project memberships; they are labelled "repository not
+  found" until you relink it. New issues can only be filed against repos gitlib currently sees.
+
+```bash
+gitlib planning repos                     # every repo planning uses, and any it cannot find
+gitlib planning relink <name> <new path>  # follow a move by hand
+gitlib planning rename <name> <new name>  # change the short name issues are shown under
+gitlib planning archive <name>            # put a repo away; its issues are kept but hidden
+gitlib planning restore <name>            # bring it and its issues back
+```
+
+#### Archiving
+
+Planning never deletes issues on your behalf. Instead of deleting repos, projects or milestones, you **archive**
+them. Archiving puts something away, and **Restore** brings it back exactly as it was:
+
+- **An archived repo** keeps its issues and project memberships. Its issues leave the Planning list and board (the
+  project page and the repo page still show them, marked "repo archived"). It takes no new issues or projects, and
+  gitlib stops following it when it moves. Archive and restore repos with the commands above.
+- **An archived project** moves to the "Archived" section of the Projects page. Its issues leave the Planning list
+  and board, and nothing new can be added to it: no repos, issues or milestones. Use **Archive** and **Restore** on
+  the project page.
+- **An archived milestone or epic** moves under the cards. Its issues keep it, but no other issue can join it.
+- **Taking a repo out of a project** archives the membership rather than deleting it. The repo is listed under
+  "Removed" on the project page, its issues stay filed under the project, and **Add back** restores it.
+
+Deleting a project, milestone or epic is still possible, and still only unlinks its issues, but archiving is the
+normal way to put finished work away.
 
 ### Projects
 
@@ -255,16 +292,24 @@ several repos. A project page has two parts that are kept apart on purpose:
   Repositories page). A repo added without a clone is kept by its host name (`owner/repo`); once you clone it, its
   row links to the clone. Hosted GitHub repos also appear in the **GitHub** tab.
 - **Milestones** are goals within a project, each with a title, an optional due date and an optional Markdown
-  description. They show as cards at the top of the project page, each with its due date and how many of its
-  issues are closed. Pick an issue's milestone from its row on the project page or from the issue's own page; the
+  description. They show as cards at the top of the project page, each with its status, its due date and how many
+  of its issues are closed. Like an epic's, a milestone's status comes from its issues: not started while none has
+  begun, done once every one is, in progress in between, and "No issues" when it has none. Pick an issue's milestone from its row on the project page or from the issue's own page; the
   project page groups its issues by milestone and shows how many of each are closed. An issue can only be in a
   milestone of its own project, so moving it to another project (or out of its project) takes it out of its
   milestone, and deleting a milestone leaves its issues in the project. A due date is a calendar day with no time
   zone, and a milestone is flagged overdue only while it still has open (or no) issues after that day. Deleting a
   project deletes its milestones.
+- **Epics** (the project page's **Epics** tab) are bodies of work, such as a feature: what is being built, where a
+  milestone is when it is due. An epic has a title and an optional Markdown description, and its issues can come
+  from any of the project's repos. Epics and milestones are independent, so an issue can be in one of each; pick an
+  issue's epic from its row on the project page or from the issue's own page. An epic's status (not started, in
+  progress, done) and its closed count come from its issues. As with milestones, an issue can only be in an epic of
+  its own project, moving it to another project takes it out of its epic, deleting an epic leaves its issues in the
+  project, and deleting a project deletes its epics.
 - **On GitHub** is a read-only preview: for each repo in the project that has a GitHub remote it shows the open
   pull requests, open issues and the latest commits on the default branch. Every row links out to GitHub and is
-  named `owner/repo#12`, so it cannot be mistaken for a gitlib issue (`repo#3`). Gitlib never writes to GitHub
+  named `owner/repo#12`, so it cannot be mistaken for a gitlib issue (`name#3`). Gitlib never writes to GitHub
   here, never saves what it reads, and never reads it back into planning: the only copy is an in-memory cache that
   lasts about five minutes (the **Refresh** button skips it) and is gone when the server restarts. A repo with no
   GitHub remote, or one GitHub cannot show (not found, rate limited), is reported on its own line. Set

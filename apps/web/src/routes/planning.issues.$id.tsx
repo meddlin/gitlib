@@ -1,5 +1,5 @@
 import { Link, createFileRoute, notFound, useRouter } from "@tanstack/react-router";
-import { ArrowLeft, CircleCheck, CircleDot, Flag, Pencil } from "lucide-react";
+import { ArrowLeft, CircleCheck, CircleDot, Flag, Layers, Pencil } from "lucide-react";
 import { useState } from "react";
 import { IssueFormDialog } from "#/components/issue-form-dialog";
 import { MarkdownBody } from "#/components/markdown-body";
@@ -8,6 +8,7 @@ import { Button } from "#/components/ui/button";
 import { NativeSelect } from "#/components/ui/native-select";
 import { formatDate } from "#/lib/format";
 import { STATUS_COLUMNS, isStatus } from "#/lib/issue-status";
+import { setIssueEpic } from "#/server/epics";
 import { setIssueMilestone } from "#/server/milestones";
 import { setIssueProject } from "#/server/projects";
 import { getLocalIssue, setLocalIssueState, setLocalIssueStatus } from "#/server/planning";
@@ -47,9 +48,10 @@ function IssueNotFound() {
 }
 
 function IssueDetail() {
-  const { issue, limits, projects, milestones } = Route.useLoaderData();
+  const { issue, limits, projects, milestones, epics } = Route.useLoaderData();
   const project = projects.find((candidate) => candidate.id === issue.projectId);
   const milestone = milestones.find((candidate) => candidate.id === issue.milestoneId);
+  const epic = epics.find((candidate) => candidate.id === issue.epicId);
   const router = useRouter();
   const [changing, setChanging] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -108,6 +110,19 @@ function IssueDetail() {
     }
   }
 
+  async function changeEpic(value: string) {
+    setChanging(true);
+    setError(null);
+    try {
+      await setIssueEpic({ data: { issueId: issue.id, epicId: value ? Number(value) : null } });
+      await router.invalidate();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not change the issue's epic.");
+    } finally {
+      setChanging(false);
+    }
+  }
+
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-5 px-4 py-8 sm:px-6">
       <BackLink />
@@ -131,6 +146,12 @@ function IssueDetail() {
                 {project.name}
               </Link>
             ) : null}
+            {epic ? (
+              <span className="inline-flex items-center gap-1 text-xs">
+                <Layers className="size-3" aria-hidden />
+                {epic.title}
+              </span>
+            ) : null}
             {milestone ? (
               <span className="inline-flex items-center gap-1 text-xs">
                 <Flag className="size-3" aria-hidden />
@@ -152,7 +173,7 @@ function IssueDetail() {
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <IssueFormDialog mode="edit" issue={issue} limits={limits}>
             <Button variant="outline">
               <Pencil aria-hidden /> Edit
@@ -169,6 +190,21 @@ function IssueDetail() {
             {projects.map((option) => (
               <option key={option.id} value={option.id}>
                 {option.name}
+              </option>
+            ))}
+          </NativeSelect>
+          <NativeSelect
+            aria-label="Epic"
+            value={issue.epicId ?? ""}
+            onChange={(event) => void changeEpic(event.target.value)}
+            disabled={changing || !project}
+            title={!project ? "Put the issue in a project to choose one of its epics." : undefined}
+            className="w-auto max-w-40"
+          >
+            <option value="">No epic</option>
+            {epics.map((option) => (
+              <option key={option.id} value={option.id}>
+                {option.title}
               </option>
             ))}
           </NativeSelect>

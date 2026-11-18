@@ -157,6 +157,10 @@ export class Store {
     if (!columns.some((column) => column.name === "is_worktree")) {
       db.exec("ALTER TABLE repos ADD COLUMN is_worktree INTEGER NOT NULL DEFAULT 0");
     }
+    if (!columns.some((column) => column.name === "root_commit")) {
+      // A cache of the repo's first commit, which is slow to find in a long history; see `rootCommit`.
+      db.exec("ALTER TABLE repos ADD COLUMN root_commit TEXT");
+    }
   }
 
   /** Opens a short-lived connection, mirroring the one-connection-per-operation Python store. */
@@ -203,6 +207,8 @@ export class Store {
           absolute_path = excluded.absolute_path,
           name = excluded.name,
           last_seen_at = excluded.last_seen_at,
+          -- A repo that went away and came back may be a different repo at the same path.
+          root_commit = CASE WHEN repos.is_missing = 1 THEN NULL ELSE repos.root_commit END,
           is_missing = 0,
           is_worktree = excluded.is_worktree
       `);
@@ -332,6 +338,18 @@ export class Store {
          ON CONFLICT(repo_id) DO UPDATE SET description = excluded.description`,
       ).run(repoId, description);
     });
+  }
+
+  /** The cached first commit of a scanned repo, or null when it has not been looked up (or has no commits). */
+  rootCommit(repoId: number): string | null {
+    return this.withConnection((db) => {
+      const row = db.prepare("SELECT root_commit FROM repos WHERE id = ?").get(repoId) as { root_commit: string | null } | undefined;
+      return row?.root_commit || null;
+    });
+  }
+
+  saveRootCommit(repoId: number, rootCommit: string): void {
+    this.transaction((db) => void db.prepare("UPDATE repos SET root_commit = ? WHERE id = ?").run(rootCommit, repoId));
   }
 
   updateFavorite(repoId: number, favorite: boolean): void {

@@ -1,6 +1,7 @@
 import {
   MAX_MILESTONE_DESCRIPTION_LENGTH,
   MAX_MILESTONE_TITLE_LENGTH,
+  rollUpStatus,
   type LocalIssue,
   type Milestone,
 } from "@gitlib/core";
@@ -21,8 +22,10 @@ export function milestoneViews(milestones: readonly Milestone[], issues: readonl
       title: milestone.title,
       description: milestone.description,
       dueDate: milestone.dueDate,
+      archived: milestone.archivedAt !== null,
       issueCount: inMilestone.length,
       closedCount: inMilestone.filter((issue) => issue.state === "closed").length,
+      status: rollUpStatus(inMilestone.map((issue) => issue.status)),
     };
   });
 }

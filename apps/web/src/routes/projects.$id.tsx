@@ -1,20 +1,30 @@
 import { Link, createFileRoute, notFound, useRouter } from "@tanstack/react-router";
-import { ArrowLeft, CircleCheck, CircleDot, ExternalLink, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeft, CircleCheck, CircleDot, ExternalLink, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { AddReposDialog } from "#/components/add-repos-dialog";
 import { DeleteProjectDialog } from "#/components/delete-project-dialog";
+import { EpicList } from "#/components/epic-list";
 import { MilestoneCards } from "#/components/milestone-cards";
 import { ProjectGitHubPreview } from "#/components/project-github-preview";
 import { ProjectNameDialog } from "#/components/project-name-dialog";
+import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import { NativeSelect } from "#/components/ui/native-select";
 import { SearchSelect } from "#/components/ui/search-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "#/components/ui/tabs";
 import { statusLabel } from "#/lib/issue-status";
+import { setIssueEpic } from "#/server/epics";
 import { setIssueMilestone } from "#/server/milestones";
-import { getProjectDetail, removeProjectRemote, removeProjectRepo, setIssueProject } from "#/server/projects";
+import {
+  addProjectRepos,
+  getProjectDetail,
+  removeProjectRemote,
+  removeProjectRepo,
+  setIssueProject,
+  setProjectArchived,
+} from "#/server/projects";
 
-const TABS = ["repositories", "issues", "github"] as const;
+const TABS = ["repositories", "issues", "epics", "github"] as const;
 type ProjectTab = (typeof TABS)[number];
 
 export const Route = createFileRoute("/projects/$id")({
@@ -76,18 +86,22 @@ function ProjectDetailPage() {
   }
 
   const self = { id: project.id, name: project.name };
+  const editable = !project.archived;
+  const activeMilestones = project.milestones.filter((milestone) => !milestone.archived);
+  const activeEpics = project.epics.filter((epic) => !epic.archived);
   const repoTotal = project.repos.length + project.remotes.length;
   const canAddRepos = project.availableRepos.length + project.availableRemotes.length > 0;
 
   // Without milestones the issues are one plain list. With them, each milestone gets a heading so it is clear
-  // which issues count toward which, and issues in none come last.
+  // which issues count toward which, and issues in none come last. Archived milestones keep their issues, so
+  // they keep their groups too.
   const issueGroups =
     project.milestones.length === 0
       ? [{ key: "all", heading: null, issues: project.issues }]
       : [
           ...project.milestones.map((milestone) => ({
             key: String(milestone.id),
-            heading: milestone.title,
+            heading: milestone.archived ? `${milestone.title} (archived)` : milestone.title,
             issues: project.issues.filter((issue) => issue.milestoneId === milestone.id),
           })),
           {
@@ -102,13 +116,36 @@ function ProjectDetailPage() {
       <BackLink />
 
       <header className="flex flex-wrap items-start justify-between gap-3">
-        <h1 className="min-w-0 text-2xl font-semibold tracking-tight break-words">{project.name}</h1>
-        <div className="flex items-center gap-2">
+        <h1 className="flex min-w-0 flex-wrap items-center gap-2 text-2xl font-semibold tracking-tight break-words">
+          {project.name}
+          {project.archived ? <Badge variant="secondary">Archived</Badge> : null}
+        </h1>
+        <div className="flex flex-wrap items-center gap-2">
           <ProjectNameDialog mode="rename" project={self} nameLimit={project.nameLimit}>
             <Button variant="outline">
               <Pencil aria-hidden /> Rename
             </Button>
           </ProjectNameDialog>
+          <Button
+            variant="outline"
+            disabled={busy}
+            onClick={() =>
+              void run(
+                () => setProjectArchived({ data: { id: project.id, archived: !project.archived } }),
+                project.archived ? "Could not restore the project." : "Could not archive the project.",
+              )
+            }
+          >
+            {project.archived ? (
+              <>
+                <ArchiveRestore aria-hidden /> Restore
+              </>
+            ) : (
+              <>
+                <Archive aria-hidden /> Archive
+              </>
+            )}
+          </Button>
           <DeleteProjectDialog project={self} onDeleted={() => navigate({ to: "/projects" })}>
             <Button variant="outline">
               <Trash2 aria-hidden /> Delete
@@ -117,13 +154,25 @@ function ProjectDetailPage() {
         </div>
       </header>
 
+      {project.archived ? (
+        <p className="rounded-md border bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
+          This project is archived. It and its issues are hidden from the planning lists, and nothing new can be added
+          to it. Restore it to work on it again.
+        </p>
+      ) : null}
+
       {error ? (
         <p role="alert" className="text-sm text-destructive">
           {error}
         </p>
       ) : null}
 
-      <MilestoneCards projectId={project.id} milestones={project.milestones} limits={project.milestoneLimits} />
+      <MilestoneCards
+        projectId={project.id}
+        milestones={project.milestones}
+        limits={project.milestoneLimits}
+        readOnly={project.archived}
+      />
 
       <Tabs
         value={tab}
@@ -138,6 +187,9 @@ function ProjectDetailPage() {
           <TabsTrigger value="issues">
             Gitlib issues <span className="font-normal text-muted-foreground">{project.issues.length}</span>
           </TabsTrigger>
+          <TabsTrigger value="epics">
+            Epics <span className="font-normal text-muted-foreground">{activeEpics.length}</span>
+          </TabsTrigger>
           <TabsTrigger value="github">GitHub</TabsTrigger>
         </TabsList>
 
@@ -147,7 +199,7 @@ function ProjectDetailPage() {
               <h2 id="project-repos" className="text-lg font-semibold">
                 Repositories <span className="text-sm font-normal text-muted-foreground">{repoTotal}</span>
               </h2>
-              {canAddRepos ? (
+              {editable && canAddRepos ? (
                 <AddReposDialog
                   projectId={project.id}
                   localRepos={project.availableRepos}
@@ -166,7 +218,7 @@ function ProjectDetailPage() {
             ) : (
               <ul className="divide-y border-y" data-testid="project-repo-list">
                 {project.repos.map((repo) => (
-                  <li key={repo.relativePath} className="flex items-center gap-3 py-2.5">
+                  <li key={repo.id} className="flex items-center gap-3 py-2.5">
                     <div className="min-w-0 flex-1">
                       {repo.known ? (
                         <Link
@@ -181,6 +233,11 @@ function ProjectDetailPage() {
                           {repo.relativePath} (not found)
                         </span>
                       )}
+                      {repo.archived ? (
+                        <span className="ml-2 text-xs text-muted-foreground" title="Its issues are hidden from the planning lists.">
+                          archived
+                        </span>
+                      ) : null}
                     </div>
                     <Button
                       variant="ghost"
@@ -189,7 +246,7 @@ function ProjectDetailPage() {
                       disabled={busy}
                       onClick={() =>
                         void run(
-                          () => removeProjectRepo({ data: { id: project.id, repo: repo.relativePath } }),
+                          () => removeProjectRepo({ data: { id: project.id, repoId: repo.id } }),
                           "Could not remove the repository.",
                         )
                       }
@@ -249,6 +306,43 @@ function ProjectDetailPage() {
                 })}
               </ul>
             )}
+            {project.removedRepos.length > 0 ? (
+              <div className="grid gap-1">
+                <h3 className="text-sm font-medium text-muted-foreground">
+                  Removed <span className="font-normal">{project.removedRepos.length}</span>
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  Taken out of the project. Their issues stay filed under it; add a repo back to restore it.
+                </p>
+                <ul className="divide-y border-y" data-testid="project-removed-repo-list">
+                  {project.removedRepos.map((repo) => (
+                    <li key={repo.id} className="flex items-center gap-3 py-2">
+                      <span className="min-w-0 flex-1 font-mono text-sm text-muted-foreground">
+                        {repo.relativePath}
+                        {repo.known ? "" : " (not found)"}
+                        {repo.archived ? " · archived" : ""}
+                      </span>
+                      {editable && repo.known && !repo.archived ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-label={`Add ${repo.relativePath} back to this project`}
+                          disabled={busy}
+                          onClick={() =>
+                            void run(
+                              () => addProjectRepos({ data: { id: project.id, repos: [repo.relativePath], remotes: [] } }),
+                              "Could not add the repository back.",
+                            )
+                          }
+                        >
+                          <Plus aria-hidden /> Add back
+                        </Button>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </section>
         </TabsContent>
 
@@ -264,7 +358,7 @@ function ProjectDetailPage() {
                   Your own planning issues. They live in gitlib only and are never sent to GitHub.
                 </p>
               </div>
-              {project.unassignedIssues.length > 0 ? (
+              {editable && project.unassignedIssues.length > 0 ? (
                 <SearchSelect
                   aria-label="Add a gitlib issue"
                   placeholder="Add a gitlib issue…"
@@ -326,9 +420,37 @@ function ProjectDetailPage() {
                                   {issue.repoName}#{issue.number}
                                 </span>
                                 {open ? ` · ${statusLabel(issue.status)}` : " · Closed"}
+                                {issue.archived && !project.archived ? " · repo archived" : ""}
                               </p>
                             </div>
-                            {project.milestones.length > 0 ? (
+                            {activeEpics.length > 0 || issue.epicId !== null ? (
+                              <NativeSelect
+                                aria-label={`Epic for ${issue.title}`}
+                                value={issue.epicId ?? ""}
+                                disabled={busy}
+                                onChange={(event) =>
+                                  void run(
+                                    () =>
+                                      setIssueEpic({
+                                        data: { issueId: issue.id, epicId: event.target.value ? Number(event.target.value) : null },
+                                      }),
+                                    "Could not change the issue's epic.",
+                                  )
+                                }
+                                className="w-auto max-w-40"
+                              >
+                                <option value="">No epic</option>
+                                {/* Archived epics take no new issues, but the one an issue is already in stays listed. */}
+                                {project.epics
+                                  .filter((epic) => !epic.archived || epic.id === issue.epicId)
+                                  .map((epic) => (
+                                    <option key={epic.id} value={epic.id}>
+                                      {epic.archived ? `${epic.title} (archived)` : epic.title}
+                                    </option>
+                                  ))}
+                              </NativeSelect>
+                            ) : null}
+                            {activeMilestones.length > 0 || issue.milestoneId !== null ? (
                               <NativeSelect
                                 aria-label={`Milestone for ${issue.title}`}
                                 value={issue.milestoneId ?? ""}
@@ -348,11 +470,14 @@ function ProjectDetailPage() {
                                 className="w-auto max-w-40"
                               >
                                 <option value="">No milestone</option>
-                                {project.milestones.map((milestone) => (
-                                  <option key={milestone.id} value={milestone.id}>
-                                    {milestone.title}
-                                  </option>
-                                ))}
+                                {/* Archived milestones take no new issues, but the one an issue is already in stays listed. */}
+                                {project.milestones
+                                  .filter((milestone) => !milestone.archived || milestone.id === issue.milestoneId)
+                                  .map((milestone) => (
+                                    <option key={milestone.id} value={milestone.id}>
+                                      {milestone.archived ? `${milestone.title} (archived)` : milestone.title}
+                                    </option>
+                                  ))}
                               </NativeSelect>
                             ) : null}
                             <Button
@@ -378,6 +503,10 @@ function ProjectDetailPage() {
               </div>
             )}
           </section>
+        </TabsContent>
+
+        <TabsContent value="epics">
+          <EpicList projectId={project.id} epics={project.epics} limits={project.epicLimits} readOnly={project.archived} />
         </TabsContent>
 
         <TabsContent value="github">

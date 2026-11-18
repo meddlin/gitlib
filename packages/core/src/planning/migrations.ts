@@ -133,6 +133,123 @@ export const MIGRATIONS: readonly Migration[] = [
       );
     `,
   },
+  {
+    version: 8,
+    name: "planning repos",
+    sql: `
+      -- A repository as planning data knows it. id never changes, so issues and projects keep pointing at the
+      -- repo when it moves; path is its relativePath where gitlib last found it; slug is the short name issues
+      -- are shown under (slug#3). root_commit is the repo's first commit, used to recognize it after a move.
+      CREATE TABLE planning_repos (
+        id INTEGER PRIMARY KEY,
+        slug TEXT NOT NULL COLLATE NOCASE UNIQUE,
+        path TEXT NOT NULL UNIQUE,
+        root_commit TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      -- One row per path already in use. The slug is the path's last segment, or the whole path when two
+      -- paths end the same way; a path that still collides (paths differing only in case) gets a suffix.
+      CREATE TEMP TABLE used_paths AS
+        WITH used (path, first_at) AS (
+          SELECT repo_path, created_at FROM local_issues
+          UNION ALL
+          SELECT repo_path, added_at FROM project_repos
+        ),
+        paths AS (SELECT path, MIN(first_at) AS first_at FROM used GROUP BY path)
+        SELECT path, first_at, substr(path, length(rtrim(path, replace(path, '/', ''))) + 1) AS base FROM paths;
+      INSERT OR IGNORE INTO planning_repos (slug, path, created_at, updated_at)
+        SELECT
+          CASE
+            WHEN base = '' OR (SELECT COUNT(*) FROM used_paths other WHERE other.base = used_paths.base COLLATE NOCASE) > 1
+            THEN path ELSE base
+          END,
+          path, first_at, first_at
+        FROM used_paths ORDER BY first_at, path;
+      INSERT INTO planning_repos (slug, path, created_at, updated_at)
+        SELECT path || '-' || ((SELECT COUNT(*) FROM planning_repos) + ROW_NUMBER() OVER (ORDER BY path)), path, first_at, first_at
+        FROM used_paths WHERE path NOT IN (SELECT path FROM planning_repos);
+      DROP TABLE used_paths;
+
+      -- Issues point at the planning repo instead of a path. RESTRICT: a repo with issues cannot be deleted.
+      CREATE TABLE local_issues_v8 (
+        id INTEGER PRIMARY KEY,
+        repo_id INTEGER NOT NULL REFERENCES planning_repos (id) ON DELETE RESTRICT,
+        number INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL DEFAULT '',
+        state TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open', 'closed')),
+        status TEXT NOT NULL DEFAULT 'todo' CHECK (status IN ('todo', 'in_progress', 'in_review', 'done')),
+        project_id INTEGER REFERENCES projects (id) ON DELETE SET NULL,
+        milestone_id INTEGER REFERENCES milestones (id) ON DELETE SET NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        closed_at TEXT,
+        UNIQUE (repo_id, number)
+      );
+      INSERT INTO local_issues_v8
+        (id, repo_id, number, title, body, state, status, project_id, milestone_id, created_at, updated_at, closed_at)
+        SELECT issue.id, repo.id, issue.number, issue.title, issue.body, issue.state, issue.status, issue.project_id,
+               issue.milestone_id, issue.created_at, issue.updated_at, issue.closed_at
+        FROM local_issues issue JOIN planning_repos repo ON repo.path = issue.repo_path;
+      DROP TABLE local_issues;
+      ALTER TABLE local_issues_v8 RENAME TO local_issues;
+      CREATE INDEX local_issues_by_state ON local_issues (state, updated_at DESC);
+      CREATE INDEX local_issues_by_status ON local_issues (status, updated_at DESC);
+      CREATE INDEX local_issues_by_project ON local_issues (project_id);
+      CREATE INDEX local_issues_by_milestone ON local_issues (milestone_id);
+
+      CREATE TABLE project_repos_v8 (
+        project_id INTEGER NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+        repo_id INTEGER NOT NULL REFERENCES planning_repos (id) ON DELETE RESTRICT,
+        added_at TEXT NOT NULL,
+        PRIMARY KEY (project_id, repo_id)
+      );
+      INSERT INTO project_repos_v8 (project_id, repo_id, added_at)
+        SELECT member.project_id, repo.id, member.added_at
+        FROM project_repos member JOIN planning_repos repo ON repo.path = member.repo_path;
+      DROP TABLE project_repos;
+      ALTER TABLE project_repos_v8 RENAME TO project_repos;
+      CREATE INDEX project_repos_by_repo ON project_repos (repo_id);
+    `,
+  },
+  {
+    version: 9,
+    name: "archiving",
+    sql: `
+      -- When the user put it away, or NULL while it is in use. Archiving hides without deleting: an archived
+      -- repo or project hides its issues from the default lists, an archived milestone hides only itself, and
+      -- an archived membership is a repo taken out of a project whose issues stay filed under the project.
+      -- Everything archived can be restored.
+      ALTER TABLE planning_repos ADD COLUMN archived_at TEXT;
+      ALTER TABLE project_repos ADD COLUMN archived_at TEXT;
+      ALTER TABLE projects ADD COLUMN archived_at TEXT;
+      ALTER TABLE milestones ADD COLUMN archived_at TEXT;
+    `,
+  },
+  {
+    version: 10,
+    name: "epics",
+    sql: `
+      -- A body of work within one project: what is being built, where a milestone is when. Epics and
+      -- milestones are siblings, so an issue can be in one of each, and an epic's issues may come from any of
+      -- the project's repos. Deleting the project deletes its epics.
+      CREATE TABLE epics (
+        id INTEGER PRIMARY KEY,
+        project_id INTEGER NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+        title TEXT NOT NULL COLLATE NOCASE,
+        description TEXT NOT NULL DEFAULT '',
+        archived_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (project_id, title)
+      );
+      -- Deleting an epic takes its issues out of it; the issues stay.
+      ALTER TABLE local_issues ADD COLUMN epic_id INTEGER REFERENCES epics (id) ON DELETE SET NULL;
+      CREATE INDEX local_issues_by_epic ON local_issues (epic_id);
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]!.version;

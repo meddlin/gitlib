@@ -84,3 +84,40 @@ export function normalizeProjectName(name: string): string {
   }
   return trimmed;
 }
+
+export const MAX_REPO_SLUG_LENGTH = 100;
+
+export class RepoSlugValidationError extends GitLibError {}
+
+/** A repo's short name: no spaces and no `#`, because issues are written `slug#3`. */
+export function normalizeRepoSlug(slug: string): string {
+  const trimmed = slug.trim();
+  if (!trimmed) throw new RepoSlugValidationError("A repo needs a short name.");
+  if (trimmed.length > MAX_REPO_SLUG_LENGTH) {
+    throw new RepoSlugValidationError(`Repo short names are limited to ${MAX_REPO_SLUG_LENGTH} characters.`);
+  }
+  if (/[\s#]/.test(trimmed)) throw new RepoSlugValidationError("A repo's short name cannot contain spaces or #.");
+  return trimmed;
+}
+
+export const MAX_EPIC_TITLE_LENGTH = 100;
+export const MAX_EPIC_DESCRIPTION_LENGTH = 10_000;
+
+export class EpicValidationError extends GitLibError {}
+
+export function normalizeEpicTitle(title: string): string {
+  const trimmed = title.trim();
+  if (!trimmed) throw new EpicValidationError("An epic needs a title.");
+  if (trimmed.length > MAX_EPIC_TITLE_LENGTH) {
+    throw new EpicValidationError(`Epic titles are limited to ${MAX_EPIC_TITLE_LENGTH} characters.`);
+  }
+  return trimmed;
+}
+
+export function normalizeEpicDescription(description: string): string {
+  const trimmed = description.trim();
+  if (trimmed.length > MAX_EPIC_DESCRIPTION_LENGTH) {
+    throw new EpicValidationError(`Epic descriptions are limited to ${MAX_EPIC_DESCRIPTION_LENGTH} characters.`);
+  }
+  return trimmed;
+}
