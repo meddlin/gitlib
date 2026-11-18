@@ -1,5 +1,5 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
-import { CircleCheck, CircleDot, HardDrive, KanbanSquare, Plus } from "lucide-react";
+import { CircleCheck, CircleDot, FolderGit2, HardDrive, KanbanSquare, Plus } from "lucide-react";
 import { useMemo } from "react";
 import { IssueFormDialog } from "#/components/issue-form-dialog";
 import { Button } from "#/components/ui/button";
@@ -60,6 +60,11 @@ function Planning() {
           <p className="text-sm text-muted-foreground">File and track work against any of your repositories.</p>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" asChild>
+            <Link to="/planning/repos">
+              <FolderGit2 aria-hidden /> Repos
+            </Link>
+          </Button>
           <Button variant="outline" asChild>
             <Link to="/planning/board" search={repo ? { repo } : {}}>
               <KanbanSquare aria-hidden /> Board

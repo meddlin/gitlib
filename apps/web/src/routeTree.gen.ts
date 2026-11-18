@@ -16,6 +16,7 @@ import { Route as ApiChatRouteImport } from './routes/api.chat'
 import { Route as ApiRepoAssetRouteImport } from './routes/api.repo-asset'
 import { Route as PlanningIndexRouteImport } from './routes/planning.index'
 import { Route as PlanningBoardRouteImport } from './routes/planning.board'
+import { Route as PlanningReposRouteImport } from './routes/planning.repos'
 import { Route as ProjectsIndexRouteImport } from './routes/projects.index'
 import { Route as ProjectsIdRouteImport } from './routes/projects.$id'
 import { Route as ReposSplatRouteImport } from './routes/repos.$'
@@ -58,6 +59,11 @@ const PlanningBoardRoute = PlanningBoardRouteImport.update({
   path: '/planning/board',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PlanningReposRoute = PlanningReposRouteImport.update({
+  id: '/planning/repos',
+  path: '/planning/repos',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProjectsIndexRoute = ProjectsIndexRouteImport.update({
   id: '/projects/',
   path: '/projects/',
@@ -96,6 +102,7 @@ export interface FileRoutesByFullPath {
   '/api/chat': typeof ApiChatRoute
   '/api/repo-asset': typeof ApiRepoAssetRoute
   '/planning/board': typeof PlanningBoardRoute
+  '/planning/repos': typeof PlanningReposRoute
   '/projects/$id': typeof ProjectsIdRoute
   '/repos/$': typeof ReposSplatRoute
   '/planning/': typeof PlanningIndexRoute
@@ -111,6 +118,7 @@ export interface FileRoutesByTo {
   '/api/chat': typeof ApiChatRoute
   '/api/repo-asset': typeof ApiRepoAssetRoute
   '/planning/board': typeof PlanningBoardRoute
+  '/planning/repos': typeof PlanningReposRoute
   '/projects/$id': typeof ProjectsIdRoute
   '/repos/$': typeof ReposSplatRoute
   '/planning': typeof PlanningIndexRoute
@@ -127,6 +135,7 @@ export interface FileRoutesById {
   '/api/chat': typeof ApiChatRoute
   '/api/repo-asset': typeof ApiRepoAssetRoute
   '/planning/board': typeof PlanningBoardRoute
+  '/planning/repos': typeof PlanningReposRoute
   '/projects/$id': typeof ProjectsIdRoute
   '/repos/$': typeof ReposSplatRoute
   '/planning/': typeof PlanningIndexRoute
@@ -144,6 +153,7 @@ export interface FileRouteTypes {
     | '/api/chat'
     | '/api/repo-asset'
     | '/planning/board'
+    | '/planning/repos'
     | '/projects/$id'
     | '/repos/$'
     | '/planning/'
@@ -159,6 +169,7 @@ export interface FileRouteTypes {
     | '/api/chat'
     | '/api/repo-asset'
     | '/planning/board'
+    | '/planning/repos'
     | '/projects/$id'
     | '/repos/$'
     | '/planning'
@@ -174,6 +185,7 @@ export interface FileRouteTypes {
     | '/api/chat'
     | '/api/repo-asset'
     | '/planning/board'
+    | '/planning/repos'
     | '/projects/$id'
     | '/repos/$'
     | '/planning/'
@@ -190,6 +202,7 @@ export interface RootRouteChildren {
   ApiChatRoute: typeof ApiChatRoute
   ApiRepoAssetRoute: typeof ApiRepoAssetRoute
   PlanningBoardRoute: typeof PlanningBoardRoute
+  PlanningReposRoute: typeof PlanningReposRoute
   ProjectsIdRoute: typeof ProjectsIdRoute
   ReposSplatRoute: typeof ReposSplatRoute
   PlanningIndexRoute: typeof PlanningIndexRoute
@@ -250,6 +263,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PlanningBoardRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/planning/repos': {
+      id: '/planning/repos'
+      path: '/planning/repos'
+      fullPath: '/planning/repos'
+      preLoaderRoute: typeof PlanningReposRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/projects/': {
       id: '/projects/'
       path: '/projects'
@@ -302,6 +322,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiChatRoute: ApiChatRoute,
   ApiRepoAssetRoute: ApiRepoAssetRoute,
   PlanningBoardRoute: PlanningBoardRoute,
+  PlanningReposRoute: PlanningReposRoute,
   ProjectsIdRoute: ProjectsIdRoute,
   ReposSplatRoute: ReposSplatRoute,
   PlanningIndexRoute: PlanningIndexRoute,

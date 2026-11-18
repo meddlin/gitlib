@@ -669,10 +669,15 @@ export class GitLibApp {
   }
 
   /**
-   * A planning repo by slug (ignoring case) or by the path it was last found at. Throws
-   * `AmbiguousPlanningRepoError` when the slug of one repo is the path of another.
+   * A planning repo by id, by slug (ignoring case) or by the path it was last found at. Throws
+   * `AmbiguousPlanningRepoError` when the slug of one repo is the path of another; an id is never ambiguous.
    */
-  resolvePlanningRepo(selector: string): PlanningRepo {
+  resolvePlanningRepo(selector: string | number): PlanningRepo {
+    if (typeof selector === "number") {
+      const repo = this.planning.getRepo(selector);
+      if (!repo) throw new PlanningRepoNotFoundError(`Repo ${selector} is not in the planning data.`);
+      return repo;
+    }
     const normalized = selector.trim().replace(/^\.\/|\/+$/g, "");
     const bySlug = this.planning.findRepoBySlug(normalized);
     const byPath = this.planning.findRepoByPath(normalized);
@@ -687,31 +692,31 @@ export class GitLibApp {
   }
 
   /**
-   * Puts a repo away (by slug or path). Its issues and project memberships stay but leave the default lists, it
+   * Puts a repo away (by id, slug or path). Its issues and project memberships stay but leave the default lists, it
    * takes no new issues or projects, and gitlib stops following it when it moves. Nothing is deleted.
    */
-  archivePlanningRepo(selector: string): PlanningRepo {
+  archivePlanningRepo(selector: string | number): PlanningRepo {
     const repo = this.resolvePlanningRepo(selector);
     this.planning.setArchived("repo", repo.id, true, utcNow());
     return this.planning.getRepo(repo.id)!;
   }
 
-  restorePlanningRepo(selector: string): PlanningRepo {
+  restorePlanningRepo(selector: string | number): PlanningRepo {
     const repo = this.resolvePlanningRepo(selector);
     this.planning.setArchived("repo", repo.id, false, utcNow());
     return this.planning.getRepo(repo.id)!;
   }
 
   /** Changes the short name a repo's issues are shown under (`slug#3`). */
-  renamePlanningRepo(selector: string, slug: string): PlanningRepo {
+  renamePlanningRepo(selector: string | number, slug: string): PlanningRepo {
     return this.planning.renameRepo(this.resolvePlanningRepo(selector).id, normalizeRepoSlug(slug), utcNow());
   }
 
   /**
-   * Points a planning repo (by slug or old path) at a repo gitlib has scanned, for a move gitlib could not
+   * Points a planning repo (by id, slug or old path) at a repo gitlib has scanned, for a move gitlib could not
    * follow on its own. Its issues and project memberships go with it.
    */
-  relinkPlanningRepo(selector: string, repoSelector: string): PlanningRepo {
+  relinkPlanningRepo(selector: string | number, repoSelector: string): PlanningRepo {
     const planned = this.resolvePlanningRepo(selector);
     const record = this.store.resolveRepository(repoSelector);
     return this.planning.moveRepo(planned.id, record.relativePath, this.rootCommitOf(record), utcNow());

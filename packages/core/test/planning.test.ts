@@ -840,6 +840,25 @@ describe("planning repos", () => {
     expect(() => app.removeRepoFromProject(project.id, "nope")).toThrow(PlanningRepoNotFoundError);
   });
 
+  it("selects a planning repo by id, even when its name is another repo's path", () => {
+    fx.makeRepo("alpha");
+    fx.makeRepo("beta");
+    fx.makeRepo("moved");
+    const app = appWithRepos();
+    const alpha = app.createLocalIssue("alpha", { title: "One" }).repoId;
+    const beta = app.createLocalIssue("beta", { title: "Two" }).repoId;
+    // "alpha" is now beta's short name and alpha's path, so the name alone is ambiguous.
+    app.renamePlanningRepo("alpha", "core");
+    app.renamePlanningRepo("beta", "alpha");
+    expect(() => app.archivePlanningRepo("alpha")).toThrow(AmbiguousPlanningRepoError);
+
+    expect(app.renamePlanningRepo(alpha, "first").slug).toBe("first");
+    expect(app.archivePlanningRepo(beta).archivedAt).not.toBeNull();
+    expect(app.restorePlanningRepo(beta).archivedAt).toBeNull();
+    expect(app.relinkPlanningRepo(alpha, "moved")).toMatchObject({ id: alpha, slug: "first", path: "moved" });
+    expect(() => app.archivePlanningRepo(9999)).toThrow(PlanningRepoNotFoundError);
+  });
+
   it("refuses to delete a repo that still has issues", () => {
     fx.makeRepo("alpha");
     const app = appWithRepos();

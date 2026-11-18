@@ -254,6 +254,12 @@ folder, so they follow the repo when it moves:
 - A repo planning cannot find keeps all its issues and project memberships; they are labelled "repository not
   found" until you relink it. New issues can only be filed against repos gitlib currently sees.
 
+The **Repos** button on the Planning page opens **Repos in planning** (`/planning/repos`), which lists every repo
+planning uses with its short name, the path it was last found at, its issue counts, and whether the last scan found
+it ("Not found") or it is archived. From there you can **Rename** a repo, **Relink** one that was not found to a
+scanned repo (the picker offers scanned repos that are not linked worktrees and that no other planning repo holds),
+and **Archive** or **Restore** it. The same actions are available from the command line:
+
 ```bash
 gitlib planning repos                     # every repo planning uses, and any it cannot find
 gitlib planning relink <name> <new path>  # follow a move by hand
@@ -269,7 +275,8 @@ them. Archiving puts something away, and **Restore** brings it back exactly as i
 
 - **An archived repo** keeps its issues and project memberships. Its issues leave the Planning list and board (the
   project page and the repo page still show them, marked "repo archived"). It takes no new issues or projects, and
-  gitlib stops following it when it moves. Archive and restore repos with the commands above.
+  gitlib stops following it when it moves. Archive and restore repos on the Repos in planning page or with the
+  commands above.
 - **An archived project** moves to the "Archived" section of the Projects page. Its issues leave the Planning list
   and board, and nothing new can be added to it: no repos, issues or milestones. Use **Archive** and **Restore** on
   the project page.
@@ -418,7 +425,8 @@ npm run build -w @gitlib/web && npm run preview -w @gitlib/web   # production bu
   **Rescan** asks again at once, so run it after pulling. The server needs its own access to each remote
   (see Troubleshooting in [the runbook](docs/runbook.md)); repos it could not reach are counted in a note
   above the table.
-- The **Planning** page (`/planning`) holds gitlib's own issues; see [Planning](#planning).
+- The **Planning** page (`/planning`) holds gitlib's own issues, and its **Repos** page (`/planning/repos`) renames,
+  relinks, archives and restores the repos they belong to; see [Planning](#planning).
 - The **Dependabot** page (`/dependabot`) shows the newest saved check of your starred repositories' Dependabot PRs,
   with a **Check now** button and a count badge in the top bar; see [Dependabot watch](#dependabot-watch).
 - The **Ask** button opens a chat panel for questions about your repositories; see [Chat](#chat).
