@@ -377,12 +377,21 @@ export class PlanningStore {
   /**
    * Files an issue under a project, or takes it out of its project with `null`. Milestones and epics belong to
    * one project, so changing the project takes the issue out of its milestone and its epic.
+   *
+   * A project holds the repos of the issues filed under it, so when the issue's repo is not in the project it
+   * is added (or brought back, if it was taken out), as with `addRepoToProject`. An archived repo cannot be added.
    */
   setIssueProject(id: number, projectId: number | null, now: string): LocalIssue {
     return this.transaction((db) => {
       const current = this.requireIssue(db, id);
       if (current.projectId === projectId) return current;
-      if (projectId !== null) this.requireLive(db, "project", projectId, "file issues under it");
+      if (projectId !== null) {
+        this.requireLive(db, "project", projectId, "file issues under it");
+        if (!this.isActiveMember(db, projectId, current.repoId)) {
+          this.addMemberRepo(db, projectId, this.requireRepo(db, current.repoId), now);
+          db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(now, projectId);
+        }
+      }
       db.prepare("UPDATE local_issues SET project_id = ?, milestone_id = NULL, epic_id = NULL, updated_at = ? WHERE id = ?").run(
         projectId,
         now,
@@ -630,7 +639,11 @@ export class PlanningStore {
 
   /** Puts the repo at `repoPath` in the project, or brings it back if it was taken out; 1 when anything changed. */
   private addMember(db: DatabaseSync, id: number, repoPath: string, now: string): number {
-    const repo = this.ensureRepo(db, repoPath, now);
+    return this.addMemberRepo(db, id, this.ensureRepo(db, repoPath, now), now);
+  }
+
+  /** `addMember` for a planning repo that already exists. */
+  private addMemberRepo(db: DatabaseSync, id: number, repo: PlanningRepo, now: string): number {
     if (repo.archivedAt) {
       throw new PlanningArchivedError(`The repo "${repo.slug}" is archived. Restore it before adding it to a project.`);
     }
@@ -641,6 +654,13 @@ export class PlanningStore {
       )
       .run(id, repo.id, now);
     return Number(changes);
+  }
+
+  private isActiveMember(db: DatabaseSync, projectId: number, repoId: number): boolean {
+    return (
+      db.prepare("SELECT 1 FROM project_repos WHERE project_id = ? AND repo_id = ? AND archived_at IS NULL").get(projectId, repoId) !==
+      undefined
+    );
   }
 
   /**

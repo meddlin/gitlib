@@ -434,11 +434,101 @@ describe("projects", () => {
 
     expect(app.setLocalIssueProject(issue.id, project.id).projectId).toBe(project.id);
     expect(app.listLocalIssues({ projectId: project.id }).map((i) => i.id)).toEqual([issue.id]);
+    expect(app.getProject(project.id).repoPaths).toEqual(["alpha"]);
     expect(() => app.setLocalIssueProject(issue.id, 999)).toThrow(ProjectNotFoundError);
 
     app.deleteProject(project.id);
     expect(app.getLocalIssue(issue.id).projectId).toBeNull();
     expect(app.setLocalIssueProject(issue.id, null).projectId).toBeNull();
+  });
+
+  it("adds an issue's repo to the project it is filed under, and leaves the repo there when the issue leaves", () => {
+    const app = appWithRepos();
+    const project = app.createProject("Launch");
+    const other = app.createProject("Other");
+    app.addRepoToProject(project.id, "group/beta");
+    const first = app.createLocalIssue("alpha", { title: "first" });
+    const second = app.createLocalIssue("alpha", { title: "second" });
+
+    app.setLocalIssueProject(first.id, project.id);
+    expect(app.getProject(project.id).repoPaths).toEqual(["alpha", "group/beta"]);
+    // A repo already in the project is not added twice.
+    app.setLocalIssueProject(second.id, project.id);
+    expect(app.getProject(project.id).repos.map((repo) => repo.path)).toEqual(["alpha", "group/beta"]);
+    expect(app.getProject(other.id).repoPaths).toEqual([]);
+
+    // Taking the issues out (or moving them on) never takes the repo out.
+    app.setLocalIssueProject(first.id, null);
+    app.setLocalIssueProject(second.id, other.id);
+    expect(app.getProject(project.id).repoPaths).toEqual(["alpha", "group/beta"]);
+    expect(app.getProject(other.id).repoPaths).toEqual(["alpha"]);
+  });
+
+  it("brings back a repo that was taken out when one of its issues is filed under the project again", () => {
+    const app = appWithRepos();
+    const project = app.createProject("Launch");
+    const issue = app.createLocalIssue("alpha", { title: "comes back" });
+    app.addRepoToProject(project.id, "alpha");
+    app.removeRepoFromProject(project.id, "alpha");
+    expect(app.getProject(project.id).removedRepos.map((repo) => repo.path)).toEqual(["alpha"]);
+
+    app.setLocalIssueProject(issue.id, project.id);
+
+    const restored = app.getProject(project.id);
+    expect(restored.repoPaths).toEqual(["alpha"]);
+    expect(restored.removedRepos).toEqual([]);
+  });
+
+  it("files nothing, and adds no repo, when the repo is archived or the project is", () => {
+    const app = appWithRepos();
+    const project = app.createProject("Launch");
+    const issue = app.createLocalIssue("alpha", { title: "stuck" });
+    app.archivePlanningRepo("alpha");
+
+    expect(() => app.setLocalIssueProject(issue.id, project.id)).toThrow(PlanningArchivedError);
+    expect(app.getLocalIssue(issue.id).projectId).toBeNull();
+    expect(app.getProject(project.id).repoPaths).toEqual([]);
+
+    app.restorePlanningRepo("alpha");
+    app.archiveProject(project.id);
+    expect(() => app.setLocalIssueProject(issue.id, project.id)).toThrow(PlanningArchivedError);
+    expect(app.getLocalIssue(issue.id).projectId).toBeNull();
+    expect(app.getProject(project.id).repoPaths).toEqual([]);
+  });
+
+  it("moves an issue of an archived repo between projects that both hold the repo", () => {
+    const app = appWithRepos();
+    const from = app.createProject("From");
+    const to = app.createProject("To");
+    app.addRepoToProject(from.id, "alpha");
+    app.addRepoToProject(to.id, "alpha");
+    const issue = app.createLocalIssue("alpha", { title: "moving" });
+    app.setLocalIssueProject(issue.id, from.id);
+    app.archivePlanningRepo("alpha");
+
+    expect(app.setLocalIssueProject(issue.id, to.id).projectId).toBe(to.id);
+  });
+
+  it("still shows and moves issues filed before a project had to hold their repo", () => {
+    const app = appWithRepos();
+    const project = app.createProject("Launch");
+    const other = app.createProject("Other");
+    const issue = app.createLocalIssue("alpha", { title: "older" });
+    // Filed directly, as could happen before issues brought their repo into the project.
+    const db = new DatabaseSync(planningDbPath());
+    try {
+      db.prepare("UPDATE local_issues SET project_id = ? WHERE id = ?").run(project.id, issue.id);
+    } finally {
+      db.close();
+    }
+
+    expect(app.getProject(project.id).repoPaths).toEqual([]);
+    expect(app.listLocalIssues({ projectId: project.id }).map((i) => i.id)).toEqual([issue.id]);
+    expect(app.listProjects().find((p) => p.id === project.id)?.repoPaths).toEqual([]);
+
+    expect(app.setLocalIssueProject(issue.id, other.id).projectId).toBe(other.id);
+    expect(app.getProject(other.id).repoPaths).toEqual(["alpha"]);
+    expect(app.getProject(project.id).repoPaths).toEqual([]);
   });
 
   it("drops repo memberships with the project", () => {

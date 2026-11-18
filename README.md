@@ -290,7 +290,10 @@ several repos. A project page has two parts that are kept apart on purpose:
   checkbox per repo, so several can be added at once: local clones, and repos that GitHub or GitLab list for your
   account but that you have not cloned (these need `GITLIB_GITHUB_TOKEN` / `GITLIB_GITLAB_TOKEN`, as on the
   Repositories page). A repo added without a clone is kept by its host name (`owner/repo`); once you clone it, its
-  row links to the clone. Hosted GitHub repos also appear in the **GitHub** tab.
+  row links to the clone. Hosted GitHub repos also appear in the **GitHub** tab. Putting an issue in a project
+  also adds the issue's repo to the project if it is not there yet (or adds it back, if it was taken out), so a
+  project always holds the repos of the issues filed under it; taking the issue out again leaves the repo in. An
+  issue of an archived repo cannot join a project that does not already hold that repo.
 - **Milestones** are goals within a project, each with a title, an optional due date and an optional Markdown
   description. They show as cards at the top of the project page, each with its status, its due date and how many
   of its issues are closed. Like an epic's, a milestone's status comes from its issues: not started while none has
