@@ -292,8 +292,9 @@ several repos. A project page has two parts that are kept apart on purpose:
   Repositories page). A repo added without a clone is kept by its host name (`owner/repo`); once you clone it, its
   row links to the clone. Hosted GitHub repos also appear in the **GitHub** tab.
 - **Milestones** are goals within a project, each with a title, an optional due date and an optional Markdown
-  description. They show as cards at the top of the project page, each with its due date and how many of its
-  issues are closed. Pick an issue's milestone from its row on the project page or from the issue's own page; the
+  description. They show as cards at the top of the project page, each with its status, its due date and how many
+  of its issues are closed. Like an epic's, a milestone's status comes from its issues: not started while none has
+  begun, done once every one is, in progress in between, and "No issues" when it has none. Pick an issue's milestone from its row on the project page or from the issue's own page; the
   project page groups its issues by milestone and shows how many of each are closed. An issue can only be in a
   milestone of its own project, so moving it to another project (or out of its project) takes it out of its
   milestone, and deleting a milestone leaves its issues in the project. A due date is a calendar day with no time

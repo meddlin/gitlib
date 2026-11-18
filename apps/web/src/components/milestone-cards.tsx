@@ -3,9 +3,11 @@ import { Archive, ArchiveRestore, Flag, Pencil, Plus, Trash2 } from "lucide-reac
 import { useState } from "react";
 import { DeleteMilestoneDialog } from "#/components/delete-milestone-dialog";
 import { MilestoneFormDialog } from "#/components/milestone-form-dialog";
+import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card";
 import { formatDueDate, isOverdue, milestoneProgress } from "#/lib/milestones";
+import { ROLL_UP_LABELS } from "#/lib/roll-up";
 import { setMilestoneArchived, type MilestoneLimits, type MilestoneView } from "#/server/milestones";
 
 /** Archives or restores a milestone, then reloads the page data; returns the action and any error. */
@@ -104,8 +106,8 @@ export function MilestoneCards({
                   <span className="text-xs">
                     {" · "}
                     {milestone.issueCount === 0
-                      ? "No issues"
-                      : `${milestone.closedCount} of ${milestone.issueCount} closed`}
+                      ? ROLL_UP_LABELS.empty
+                      : `${ROLL_UP_LABELS[milestone.status]}, ${milestone.closedCount} of ${milestone.issueCount} closed`}
                   </span>
                 </span>
                 {readOnly ? null : (
@@ -159,14 +161,15 @@ function MilestoneCard({
           />
           <span className="min-w-0">{milestone.title}</span>
         </CardTitle>
-        <CardDescription className="text-xs">
+        <CardDescription className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+          <Badge variant={milestone.status === "done" ? "default" : "secondary"}>{ROLL_UP_LABELS[milestone.status]}</Badge>
           {milestone.dueDate ? (
             <span className={overdue ? "font-medium text-destructive" : undefined}>
               {overdue ? "Overdue · " : "Due "}
               {formatDueDate(milestone.dueDate)}
             </span>
           ) : (
-            "No due date"
+            <span>No due date</span>
           )}
         </CardDescription>
         {readOnly ? null : (
@@ -211,11 +214,11 @@ function MilestoneCard({
             <div className="h-full rounded-full bg-primary" style={{ width: `${progress.percent}%` }} />
           </div>
         ) : null}
-        <p className="text-xs text-muted-foreground">
-          {progress.total === 0
-            ? "No issues"
-            : `${progress.closed} of ${progress.total} ${progress.total === 1 ? "issue" : "issues"} closed`}
-        </p>
+        {progress.total > 0 ? (
+          <p className="text-xs text-muted-foreground">
+            {`${progress.closed} of ${progress.total} ${progress.total === 1 ? "issue" : "issues"} closed`}
+          </p>
+        ) : null}
       </CardContent>
     </Card>
   );

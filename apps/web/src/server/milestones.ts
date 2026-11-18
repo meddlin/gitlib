@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import type { RollUpStatus } from "@gitlib/core";
 import { getApp } from "./gitlib.server";
 
 /** A milestone with how many of the issues in it are closed. */
@@ -13,6 +14,8 @@ export interface MilestoneView {
   archived: boolean;
   issueCount: number;
   closedCount: number;
+  /** Worked out from its issues' statuses (see `rollUpStatus`), as for epics. */
+  status: RollUpStatus;
 }
 
 /** For pickers: a milestone to choose, by title. */

@@ -7,15 +7,8 @@ import { Badge } from "#/components/ui/badge";
 import { Button } from "#/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "#/components/ui/card";
 import { milestoneProgress } from "#/lib/milestones";
+import { ROLL_UP_LABELS } from "#/lib/roll-up";
 import { setEpicArchived, type EpicLimits, type EpicView } from "#/server/epics";
-
-/** How an epic's rolled-up status reads. */
-const STATUS_LABELS: Record<EpicView["status"], string> = {
-  empty: "No issues",
-  todo: "Not started",
-  in_progress: "In progress",
-  done: "Done",
-};
 
 /**
  * A project's epics as cards, with the controls to add, edit, archive and delete them. Archived epics are listed
@@ -99,7 +92,7 @@ export function EpicList({
               <li key={epic.id} className="flex items-center gap-3 py-2">
                 <span className="min-w-0 flex-1 text-sm break-words text-muted-foreground">
                   {epic.title}
-                  <span className="text-xs"> · {STATUS_LABELS[epic.status]}</span>
+                  <span className="text-xs"> · {ROLL_UP_LABELS[epic.status]}</span>
                 </span>
                 {readOnly ? null : (
                   <Button
@@ -147,7 +140,7 @@ function EpicCard({
           <span className="min-w-0">{epic.title}</span>
         </CardTitle>
         <CardDescription className="text-xs">
-          <Badge variant={epic.status === "done" ? "default" : "secondary"}>{STATUS_LABELS[epic.status]}</Badge>
+          <Badge variant={epic.status === "done" ? "default" : "secondary"}>{ROLL_UP_LABELS[epic.status]}</Badge>
         </CardDescription>
         {readOnly ? null : (
           <CardAction className="-mt-1 -mr-2 flex items-center">
@@ -191,11 +184,11 @@ function EpicCard({
             <div className="h-full rounded-full bg-primary" style={{ width: `${progress.percent}%` }} />
           </div>
         ) : null}
-        <p className="text-xs text-muted-foreground">
-          {progress.total === 0
-            ? "No issues"
-            : `${progress.closed} of ${progress.total} ${progress.total === 1 ? "issue" : "issues"} closed`}
-        </p>
+        {progress.total > 0 ? (
+          <p className="text-xs text-muted-foreground">
+            {`${progress.closed} of ${progress.total} ${progress.total === 1 ? "issue" : "issues"} closed`}
+          </p>
+        ) : null}
       </CardContent>
     </Card>
   );
